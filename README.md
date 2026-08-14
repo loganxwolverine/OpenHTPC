@@ -1,3 +1,4 @@
+<img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/40d27e5c-3464-4983-90a7-eb34fc30cbc0" />
 
 • # Guide d’installation — OPENHTPC Basic V1.0.0
 
@@ -150,3 +151,5 @@
   ./uninstall.sh --purge-config
 
   Cette option ne supprime toujours pas vos films ou autres médias.
+<img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/95b094fc-c993-462a-bf2e-d65713499935" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/208f490b-58f1-4983-baaa-6ca32f7b1ae8" />
