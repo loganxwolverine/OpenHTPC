@@ -1,13 +1,16 @@
-# OPENHTPC 1.1 Public Candidate
+# OPENHTPC 1.1 RC3 Development Candidate
 
-This package is Public Candidate R2, version `1.1.0-dev31`, build
-`public-release-optical-badge-polish-dev1`. It is an optical-badge-only visual
-polish iteration derived from the stable dev30 functional baseline.
-It is not the final `1.1.0` release.
+This development package is version `1.1.0-dev32`, build
+`rc3-playback-policy-language-provenance-dev1`. It is derived from the
+physically qualified and frozen public RC2 baseline. It is not RC3 final and
+requires physical playback-policy validation.
 
-The public RC2 tag `v1.1.0-rc2` identifies this qualified candidate and is
-derived from the technical runtime baseline `1.1.0-dev31`; the runtime version
-is intentionally not renamed. RC2 is physically qualified and frozen.
+The public RC2 tag `v1.1.0-rc2` remains immutable. No RC3 tag is created by
+this development iteration.
+
+OPENHTPC was created as an original project by Steve Dehanne and is licensed
+under Apache-2.0. Third-party components retain their own copyrights and
+licenses; see `NOTICE`, `AUTHORS.md` and `THIRD_PARTY_NOTICES.md`.
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC. Its
 Core manages playback, capabilities and appliance lifecycle; the Hardware

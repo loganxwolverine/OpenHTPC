@@ -522,6 +522,47 @@ def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon
     return os.linesep.join(lines)
 
 
+def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icon: pathlib.Path) -> tuple[str, str, str, str]:
+    """Couch-native selectors backed by persistent user configuration."""
+    policy_path = install / "openhtpc-playback-policy.py"
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_menu", policy_path)
+        policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
+        prefs = policy.read_preferences(home)
+    except (OSError, AttributeError, ImportError):
+        prefs = {"presentation_mode":"PURE","audio_language_policy":"AUTO","subtitle_policy":"AUTO"}
+    presentation = "CINÉMA AUTO" if prefs["presentation_mode"] == "CINEMA_AUTO" else "PURE"
+    audio = {"AUTO":"AUTO","FR":"FRANÇAIS","DEFAULT":"PISTE PAR DÉFAUT"}[prefs["audio_language_policy"]]
+    subtitle = {"AUTO":"AUTO","OFF":"DÉSACTIVÉS","FR_FORCED":"FRANÇAIS FORCÉS","FR_FULL":"FRANÇAIS COMPLETS"}[prefs["subtitle_policy"]]
+    root = os.linesep.join((
+        f"Entry1=MODE VIDÉO · {presentation};{icon};:submenu PLAYBACK_VIDEO",
+        f"Entry2=LANGUE AUDIO · {audio};{icon};:submenu PLAYBACK_AUDIO",
+        f"Entry3=SOUS-TITRES · {subtitle};{icon};:submenu PLAYBACK_SUBTITLES",
+        f"Entry4=ÉTAT AUDIO;{icon};:submenu SYSTEM_AUDIO",
+        f"Entry5=CALIBRATION CINÉMA AUTO;{icon};:submenu SYSTEM_PROCESSING",
+        f"Entry6=RETOUR;{icon};:back",
+    ))
+    video = os.linesep.join((
+        f"Entry1=PURE;{icon};:fork {policy_path} set presentation_mode PURE",
+        f"Entry2=CINÉMA AUTO;{icon};:fork {policy_path} set presentation_mode CINEMA_AUTO",
+        f"Entry3=RETOUR;{icon};:back",
+    ))
+    audio_menu = os.linesep.join((
+        f"Entry1=AUTO;{icon};:fork {policy_path} set audio_language_policy AUTO",
+        f"Entry2=FRANÇAIS;{icon};:fork {policy_path} set audio_language_policy FR",
+        f"Entry3=PISTE PAR DÉFAUT;{icon};:fork {policy_path} set audio_language_policy DEFAULT",
+        f"Entry4=RETOUR;{icon};:back",
+    ))
+    subtitles = os.linesep.join((
+        f"Entry1=AUTO;{icon};:fork {policy_path} set subtitle_policy AUTO",
+        f"Entry2=DÉSACTIVÉS;{icon};:fork {policy_path} set subtitle_policy OFF",
+        f"Entry3=FRANÇAIS FORCÉS;{icon};:fork {policy_path} set subtitle_policy FR_FORCED",
+        f"Entry4=FRANÇAIS COMPLETS;{icon};:fork {policy_path} set subtitle_policy FR_FULL",
+        f"Entry5=RETOUR;{icon};:back",
+    ))
+    return root, video, audio_menu, subtitles
+
+
 def canonical_flex_config_path(home: pathlib.Path | None = None) -> pathlib.Path:
     """Canonical authoritative path for the active Flex appliance configuration."""
     if home is None:
@@ -591,7 +632,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     ui = importlib.util.module_from_spec(ui_spec); ui_spec.loader.exec_module(ui)
     state_hash = hashlib.sha256(json.dumps(optical, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
     ui_generation_id = ui.generation_id(optical)
-    system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "processing", "diagnostics", "technical")
+    system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "processing", "playback", "diagnostics", "technical", "about")
     system_pages = {name: home / f".cache/openhtpc/system-{name}.png" for name in system_page_keys}
     dashboard = home / ".cache/openhtpc/system-dashboard.png"
     system_page = install / "openhtpc-system-page"
@@ -622,6 +663,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     icon_processing = resolve_sys_icon("system-processing.png", resolve_sys_icon("traitement_video.png", logo))
     icon_diagnostic = resolve_sys_icon("system-diagnostics.png", resolve_sys_icon("diagnostic.png", logo))
     icon_back = resolve_sys_icon("system-back.png", resolve_sys_icon("retour.png", logo))
+    playback_root, playback_video, playback_audio, playback_subtitles = _playback_policy_sections(home, install, icon_processing)
     disc_sheet = home / ".cache/openhtpc/disc-sheet.png"
     if disc_view.is_file():
         subprocess.run([str(disc_view), "--home", str(home)], timeout=12, check=False,
@@ -710,10 +752,10 @@ BackgroundImage={dashboard}
 Entry1=VUE D'ENSEMBLE;{icon_overview};:submenu SYSTEM_OVERVIEW
 Entry2=COMPATIBILITÉ VIDÉO;{icon_codecs};:submenu SYSTEM_CODECS
 Entry3=AFFICHAGE;{icon_display};:submenu SYSTEM_DISPLAY
-Entry4=AUDIO;{icon_audio};:submenu SYSTEM_AUDIO
+Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK
 Entry5=MÉDIAS & OPTIQUE;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
-Entry6=TRAITEMENT VIDÉO;{icon_processing};:submenu SYSTEM_PROCESSING
-Entry7=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
+Entry6=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
+Entry7=À PROPOS;{logo};:submenu SYSTEM_ABOUT
 Entry8=RETOUR;{icon_back};:back
 
 [SYSTEM_OVERVIEW]
@@ -740,6 +782,22 @@ Entry1=RETOUR;{local_icon};:back
 BackgroundImage={system_pages['processing']}
 {_c4_processing_entries(home, install, local_icon)}
 
+[SYSTEM_PLAYBACK]
+BackgroundImage={system_pages['playback']}
+{playback_root}
+
+[PLAYBACK_VIDEO]
+BackgroundImage={system_pages['playback']}
+{playback_video}
+
+[PLAYBACK_AUDIO]
+BackgroundImage={system_pages['playback']}
+{playback_audio}
+
+[PLAYBACK_SUBTITLES]
+BackgroundImage={system_pages['playback']}
+{playback_subtitles}
+
 [SYSTEM_DIAGNOSTICS]
 BackgroundImage={system_pages['diagnostics']}
 Entry1=ACTUALISER LES CAPACITÉS;{local_icon};:fork {install/'openhtpc-system-action'} refresh
@@ -749,6 +807,10 @@ Entry4=RETOUR;{local_icon};:back
 
 [SYSTEM_TECHNICAL]
 BackgroundImage={system_pages['technical']}
+Entry1=RETOUR;{local_icon};:back
+
+[SYSTEM_ABOUT]
+BackgroundImage={system_pages['about']}
 Entry1=RETOUR;{local_icon};:back
 
 [DISQUE]

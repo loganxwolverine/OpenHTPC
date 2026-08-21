@@ -27,7 +27,7 @@ EXPECTED_BENCHMARKS = {
 
 REQUIRED_DOCS = (
     "LICENSE", "NOTICE", "README.md", "KNOWN_LIMITATIONS.md", "CHANGELOG.md",
-    "THIRD_PARTY_NOTICES.md", "FLEX_FORK.md", "assets/ASSET_PROVENANCE.md",
+    "THIRD_PARTY_NOTICES.md", "FLEX_FORK.md", "AUTHORS.md", "SIGNING.md", "assets/ASSET_PROVENANCE.md",
     "third_party/licenses/OFL-1.1.txt", "third_party/licenses/NanoSVG-zlib.txt",
     "third_party/licenses/Flex-Launcher-UNLICENSE.txt",
     "third_party/licenses/LGPL-3.0.txt", "third_party/licenses/MIT.txt",
@@ -47,8 +47,8 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     results.append((name, bool(condition), detail))
 
 metadata = json.loads((PAYLOAD / "version.json").read_text())
-check("candidate_version", metadata.get("version") == "1.1.0-dev31", str(metadata.get("version")))
-check("candidate_build", metadata.get("build_id") == "public-release-optical-badge-polish-dev1", str(metadata.get("build_id")))
+check("candidate_version", metadata.get("version") == "1.1.0-dev32", str(metadata.get("version")))
+check("candidate_build", metadata.get("build_id") == "rc3-playback-policy-language-provenance-dev1", str(metadata.get("build_id")))
 check("required_docs", all((ROOT / p).is_file() for p in REQUIRED_DOCS))
 check("filmgrain_removed", not any(ROOT.rglob("filmgrain.glsl")))
 check("benchmark_manifest", (PAYLOAD / "assets/benchmark/manifest.json").is_file())
@@ -64,7 +64,8 @@ for path in ui:
 
 text_files = []
 for path in ROOT.rglob("*"):
-    if path.is_file() and path.suffix.lower() not in {".png", ".ttf", ".mpg", ".mp4"} and path.name != "MANIFEST.sha256":
+    relative = path.relative_to(ROOT)
+    if path.is_file() and not {".git", "artifacts", "__pycache__"}.intersection(relative.parts) and path.suffix.lower() not in {".png", ".ttf", ".mpg", ".mp4"} and path.name != "MANIFEST.sha256":
         try:
             text_files.append((path, path.read_text(encoding="utf-8")))
         except (UnicodeDecodeError, OSError):
@@ -73,7 +74,7 @@ combined = "\n".join(text for _, text in text_files)
 private_home = "/" + "home" + "/" + "steve"
 check("no_private_home", private_home not in combined)
 check("no_private_ips", not re.search(r"192\.168\.1\.(?:10|132|229)\b", combined))
-check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[2-9]|[4-9][0-9])\b", combined, re.I))
+check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[3-9]|[4-9][0-9])\b", combined, re.I))
 check("no_secret_values", not re.search(r"BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|https?://[^\s/:]+:[^\s/@]+@", combined))
 
 reference_text = "\n".join(text for path, text in text_files if path.name != "legacy-managed-files-dev27.txt")
@@ -89,6 +90,8 @@ check("power_asset_reference", "assets/ui/power.png" in session_text)
 check("folder_asset_reference", "assets/ui/folder.png" in session_text)
 check("managed_update_contract", (PAYLOAD / "managed-files.txt").is_file() and
       (PAYLOAD / "openhtpc-update-managed-files").is_file())
+check("playback_policy_runtime", (PAYLOAD / "openhtpc-playback-policy.py").is_file())
+check("release_signing_tools", all((ROOT / path).is_file() for path in ("tools/sign-release.sh", "tools/verify-release.sh")))
 catalogue_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in (
     PAYLOAD / "assets/shaders/catalog.json", PAYLOAD / "assets/c3_calibration_catalog.json"))
 check("filmgrain_unreferenced", "filmgrain.glsl" not in catalogue_text)
@@ -97,6 +100,16 @@ flex_meta = json.loads((PAYLOAD / "flex/BUILD-METADATA.json").read_text())
 flex_binary = PAYLOAD / "flex/bin/flex-launcher"
 check("flex_binary", flex_binary.is_file() and digest(flex_binary) == flex_meta.get("binary_sha256"))
 check("flex_revision", "94a7a273fe8124df51e63058816526b66bbc9538" in flex_meta.get("source_revision", ""))
+third_party_paths = [PAYLOAD / "flex", PAYLOAD / "assets/shaders", PAYLOAD / "flex/assets/fonts"]
+check("no_first_party_claim_on_third_party", not any(
+    b"Copyright 2026 Steve Dehanne" in path.read_bytes()
+    for root in third_party_paths for path in root.rglob("*") if path.is_file()
+))
+private_markers = (b"BEGIN OPENSSH "+b"PRIVATE KEY", b"BEGIN "+b"PRIVATE KEY")
+check("no_private_signing_key", not any(
+    (path.name.startswith("openhtpc-release-signing") and path.suffix != ".pub") or any(marker in path.read_bytes() for marker in private_markers)
+    for path in ROOT.rglob("*") if path.is_file() and ".git" not in path.parts and "__pycache__" not in path.parts and "artifacts" not in path.parts
+))
 
 passed = sum(ok for _, ok, _ in results)
 for name, ok, detail in results:

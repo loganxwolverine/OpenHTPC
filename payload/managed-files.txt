@@ -132,6 +132,7 @@ openhtpc-optical-monitor
 openhtpc-optical.py
 openhtpc-play
 openhtpc-play-dvd
+openhtpc-playback-policy.py
 openhtpc-playback-analyze.py
 openhtpc-player-test.sh
 openhtpc-power-menu

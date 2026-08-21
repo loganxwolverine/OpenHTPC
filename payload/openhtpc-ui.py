@@ -22,8 +22,10 @@ SYSTEM_PAGES = (
     "audio",
     "media_optical",
     "processing",
+    "playback",
     "diagnostics",
     "technical",
+    "about",
     "hardware",
     "display_video",
     "audio_media",
@@ -243,8 +245,10 @@ PAGE_TITLES = {
     "audio": "AUDIO",
     "media_optical": "MÉDIAS & OPTIQUE",
     "processing": "TRAITEMENT VIDÉO",
+    "playback": "LECTURE",
     "diagnostics": "DIAGNOSTIC",
     "technical": "INFORMATIONS TECHNIQUES",
+    "about": "À PROPOS",
     "hardware": "MATÉRIEL & GRAPHIQUES",
     "display_video": "AFFICHAGE & VIDÉO",
     "audio_media": "AUDIO & MÉDIAS",
@@ -600,6 +604,28 @@ def system_page_png(
         draw.line((xy(988), xy(710), xy(1820), xy(710)), fill="#12304d", width=1)
         txt((988, 730), "Navigation", 18, "#93a9c2", False)
         txt((1220, 728), "Entrée : Valider  |  Échap : Retour", 19, "#93a9c2", False)
+    elif page == "playback":
+        p = model.get("playback_policy", {})
+        presentation = "CINÉMA AUTO" if p.get("presentation_mode") == "CINEMA_AUTO" else "PURE"
+        audio = {"AUTO":"Auto","FR":"Français","DEFAULT":"Piste par défaut"}.get(p.get("audio_language_policy"), "Auto")
+        subtitle = {"AUTO":"Auto","OFF":"Désactivés","FR_FORCED":"Français forcés","FR_FULL":"Français complets"}.get(p.get("subtitle_policy"), "Auto")
+        card((70, 170, 1780, 680), "LECTURE — PRÉFÉRENCES ACTIVES", [
+            ("Mode vidéo", presentation, "#78d9ae" if presentation == "PURE" else "#22c7ff"),
+            ("Langue audio", audio, None),
+            ("Sous-titres", subtitle, None),
+            ("Application", "À la prochaine lecture", None),
+            ("Persistance", "Configuration utilisateur préservée", None),
+        ])
+    elif page == "about":
+        version = model.get("technical", {}).get("version", "1.1.0-dev32")
+        card((70, 170, 1780, 680), "À PROPOS", [
+            ("Projet", "OPENHTPC", "#22c7ff"),
+            ("Version", version, None),
+            ("Origine", "Projet créé par Steve Dehanne", None),
+            ("Copyright", "Copyright 2026 Steve Dehanne", None),
+            ("Licence", "Apache 2.0", None),
+            ("Dépôt officiel", "github.com/loganxwolverine/OpenHTPC", None),
+        ])
     elif page == "diagnostics":
         d = model["diagnostics"]
         allowed_checks = {

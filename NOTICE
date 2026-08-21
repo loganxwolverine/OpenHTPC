@@ -1,7 +1,10 @@
 OPENHTPC
-Copyright 2026 OPENHTPC contributors
+Copyright 2026 Steve Dehanne
+
+OPENHTPC was created as an original project by Steve Dehanne.
+OPENHTPC is licensed under the Apache License 2.0, which permits compliant
+use, modification, forks and redistribution.
 
 This product includes third-party software and assets. See
 THIRD_PARTY_NOTICES.md and third_party/licenses/ for attribution and license
 terms that apply to those components.
-

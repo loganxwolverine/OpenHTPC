@@ -28,6 +28,15 @@ FALLBACK = "PURE"
 
 def read_profile(home: pathlib.Path | None = None) -> str:
     """Return active profile; always PURE or CINEMA_AUTO. Never raises."""
+    selected_home = home or pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    policy_path = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", pathlib.Path(__file__).resolve().parent)) / "openhtpc-playback-policy.py"
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_profile", policy_path)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        return module.read_preferences(selected_home)["presentation_mode"]
+    except (OSError, AttributeError, ImportError):
+        pass
     path = (home / ".config/openhtpc/video-profile.json") if home else PROFILE_PATH
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -41,6 +50,16 @@ def write_profile(profile: str, home: pathlib.Path | None = None) -> None:
     """Atomically write active profile. Raises ValueError for invalid profiles."""
     if profile not in VALID_PROFILES:
         raise ValueError(f"INVALID_PROFILE:{profile}")
+    selected_home = home or pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    policy_path = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", pathlib.Path(__file__).resolve().parent)) / "openhtpc-playback-policy.py"
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_profile_write", policy_path)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        module.write_preference(selected_home, "presentation_mode", profile)
+        return
+    except (OSError, AttributeError, ImportError):
+        pass
     path = (home / ".config/openhtpc/video-profile.json") if home else PROFILE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"schema": SCHEMA, "active_profile": profile}

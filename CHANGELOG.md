@@ -1,5 +1,15 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 development candidate — 1.1.0-dev32
+
+- Added persistent couch-native presentation, audio-language and subtitle
+  preferences under SYSTÈME → LECTURE.
+- Wired qualified PURE/CINÉMA AUTO intent and deterministic language policy
+  through local/DVD playback, MPV arguments, temporary OSD and structured logs.
+- Added the À PROPOS screen and explicit first-party project provenance.
+- Added opt-in OpenSSH Ed25519 release-signing and public verification tools.
+- Preserved RC2 runtime, MEDIA dispatcher, DVD, C3/C4 and updater semantics.
+
 ## OPENHTPC 1.1 Public Candidate R2 — 1.1.0-dev31
 
 - Refined only the generic DVD, BLU-RAY and UHD badge family and the DVD media

@@ -275,13 +275,25 @@ def main(argv: list[str] | None = None) -> int:
         notify("Le fichier média est indisponible ou n'appartient plus à une source configurée.")
         return return_to_ui(home, install)
 
+    policy_path = install / "openhtpc-playback-policy.py"
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_runtime", policy_path)
+        policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
+        decision = policy.resolve(home, media, "local")
+        policy_args = decision["mpv_args"]
+        osd = policy.osd_text(decision)
+    except (OSError, AttributeError, ImportError, ValueError):
+        decision = {"presentation":{"requested":"PURE","resolved":"PURE","reason":"policy_fallback"},"audio":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback"},"subtitle":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback"}}
+        policy_args = []; osd = "OPENHTPC • PURE"
+
     attempt = tempfile.NamedTemporaryFile(prefix="openhtpc-mpv-", delete=False)
     attempt_path = pathlib.Path(attempt.name); attempt.close()
-    command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--force-window=immediate", "--border=no", "--terminal=no", f"--log-file={attempt_path}", "--", str(media)]
+    command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--force-window=immediate", "--border=no", "--terminal=no", *policy_args, "--osd-playing-msg-duration=4000", f"--osd-playing-msg={osd}", f"--log-file={attempt_path}", "--", str(media)]
     cwd = os.getcwd()
-    common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime="pure", mpv=mpv, argv_count=len(command), cwd_type="independent")
+    common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime=decision["presentation"]["resolved"].casefold(), mpv=mpv, argv_count=len(command), cwd_type="independent")
     update_action_state(home,path_resolved=True,path_absolute=True,file_exists=True,extension=media.suffix.casefold(),runtime="pure",process_started=True,error_class="NONE")
     runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
+    runtime_event(home,install,"PLAYBACK_POLICY",presentation_requested=decision["presentation"]["requested"],presentation_resolved=decision["presentation"]["resolved"],presentation_reason=decision["presentation"]["reason"],audio_requested=decision["audio"]["requested"],audio_resolved=decision["audio"]["resolved"],audio_reason=decision["audio"]["reason"],subtitle_requested=decision["subtitle"]["requested"],subtitle_resolved=decision["subtitle"]["resolved"],subtitle_reason=decision["subtitle"]["reason"])
     runtime_event(home,install, "PLAYBACK_BEGIN")
     runtime_event(home,install,"PLAYBACK_DISPATCHED")
     append_event(log, **common, event="PROCESS_STARTED", process_started=True)

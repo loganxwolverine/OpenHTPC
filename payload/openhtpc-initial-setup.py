@@ -42,7 +42,13 @@ def save(home: pathlib.Path, sources: list[str], tmdb_value: str | None) -> path
     configured = bool(tmdb_value and tmdb_value.strip())
     if configured:
         write_private(credential, tmdb_value or "")
+    try:
+        previous = json.loads((root / "user-config.json").read_text(encoding="utf-8"))
+        if not isinstance(previous, dict): previous = {}
+    except (OSError, json.JSONDecodeError):
+        previous = {}
     config = {
+        **previous,
         "schema": 1,
         "configuration_completed": True,
         "local_media_sources": normalized,

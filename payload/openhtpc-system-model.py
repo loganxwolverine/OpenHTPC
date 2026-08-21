@@ -419,6 +419,14 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     result["processing"]["map_stale"] = map_stale
     result["processing"]["decision"] = decision_human
     result["processing"]["cal_ui_status"] = cal_ui_status
+    try:
+        import importlib.util
+        policy_path = install / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_model", policy_path)
+        policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
+        result["playback_policy"] = policy.read_preferences(home)
+    except (OSError, AttributeError, ImportError):
+        result["playback_policy"] = {"presentation_mode":"PURE","audio_language_policy":"AUTO","subtitle_policy":"AUTO"}
     if available:
         result["vulkan"] = clean(graphics.get("vulkan", {}).get("loader", {}).get("status"), "N/A")
         result["vaapi"] = clean(graphics.get("vaapi", {}).get("status", {}).get("status"), "N/A")

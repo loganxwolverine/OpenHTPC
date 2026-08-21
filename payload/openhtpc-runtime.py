@@ -181,7 +181,7 @@ def record_exit(home:pathlib.Path,reason:str,desktop_restore:str="NOT_TESTED")->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(); parser.add_argument("command", choices=("status", "cleanup-legacy", "stop-session", "record-exit", "log")); parser.add_argument("--event"); parser.add_argument("--component", default="runtime");parser.add_argument("--reason",choices=sorted(EXIT_REASONS));parser.add_argument("--desktop-restore",default="NOT_TESTED")
+    parser = argparse.ArgumentParser(); parser.add_argument("command", choices=("status", "cleanup-legacy", "stop-session", "record-exit", "log")); parser.add_argument("--event"); parser.add_argument("--component", default="runtime");parser.add_argument("--reason",choices=sorted(EXIT_REASONS));parser.add_argument("--desktop-restore",default="NOT_TESTED");parser.add_argument("--field",action="append",default=[])
     args = parser.parse_args(); home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home())); install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     if args.command == "status": print(json.dumps(status(home, install), sort_keys=True)); return 0
     if args.command == "cleanup-legacy":
@@ -189,7 +189,12 @@ def main() -> int:
         return 1 if any(result["remaining"][key] for key in ("ui","monitor","controllers")) else 0
     if args.command == "stop-session": print(json.dumps(stop_session(home, install), sort_keys=True)); return 0
     if args.command == "record-exit": record_exit(home,args.reason or "UNKNOWN",args.desktop_restore);return 0
-    log(home, args.component, args.event or "EVENT"); return 0
+    fields={}
+    for item in args.field:
+        key,separator,value=item.partition("=")
+        if not separator or not key.replace("_","").isalnum() or len(key)>64 or len(value)>256: raise SystemExit(2)
+        fields[key]=value
+    log(home, args.component, args.event or "EVENT",**fields); return 0
 
 
 if __name__ == "__main__": raise SystemExit(main())
