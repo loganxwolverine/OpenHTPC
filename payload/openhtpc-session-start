@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly OPENHTPC_HOME="${OPENHTPC_HOME:-$HOME}"
+readonly INSTALL_DIR="${OPENHTPC_INSTALL_DIR:-$OPENHTPC_HOME/.local/lib/openhtpc}"
+readonly ENGINE="${OPENHTPC_SESSION_ENGINE:-$INSTALL_DIR/openhtpc-session-engine.py}"
+readonly ASSISTANT="${OPENHTPC_INITIAL_SETUP:-$INSTALL_DIR/openhtpc-initial-setup.py}"
+readonly FLEX="${OPENHTPC_FLEX_BIN:-$INSTALL_DIR/flex/bin/flex-launcher}"
+readonly FLEX_CONFIG="${OPENHTPC_FLEX_CONFIG:-$OPENHTPC_HOME/.config/openhtpc/flex-v1.ini}"
+readonly OPTICAL_MONITOR="$INSTALL_DIR/openhtpc-optical-monitor"
+readonly HOME_CONTROLLER="$INSTALL_DIR/openhtpc-home.py"
+readonly RUNTIME="$INSTALL_DIR/openhtpc-runtime.py"
+readonly SYSTEM_VIEW="$INSTALL_DIR/openhtpc-system-view"
+readonly STATE_DIR="$OPENHTPC_HOME/.local/state/openhtpc"
+readonly SESSION_LOCK="$STATE_DIR/ui-session.lock"
+readonly SESSION_STATE="$STATE_DIR/runtime-session.json"
+
+die() { printf '[OPENHTPC] %s\n' "$*" >&2; exit 3; }
+
+[[ -r $ENGINE ]] || die "Moteur de session absent : $ENGINE"
+
+result="$({ python3 - "$ENGINE" "$OPENHTPC_HOME" "$FLEX_CONFIG" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("openhtpc_session_engine", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+home = pathlib.Path(sys.argv[2])
+try:
+    state = module.evaluate(home)
+except module.GateError as exc:
+    print(f"BLOCKED|{exc.gate}|{exc.reason}|{exc}")
+    raise SystemExit(3)
+module.write_flex_config(pathlib.Path(sys.argv[3]), home, state["sources"])
+print("PASS|all|READY|Hardware, viabilité, runtime et configuration : PASS")
+PY
+} 2>&1)" || rc=$?
+rc=${rc:-0}
+
+if [[ $rc -ne 0 ]]; then
+    if [[ $result == BLOCKED\|initial_configuration\|CONFIGURATION_MISSING\|* ]]; then
+        [[ -x $ASSISTANT ]] || die "Assistant initial absent : $ASSISTANT"
+        printf '[OPENHTPC] Configuration initiale requise.\n'
+        "$ASSISTANT" --home "$OPENHTPC_HOME" || exit $?
+        exec "$0" "$@"
+    fi
+    IFS='|' read -r _ gate reason message <<<"$result"
+    die "Gate ${gate:-inconnu} refusé (${reason:-ERREUR}) : ${message:-$result}"
+fi
+
+printf '[OPENHTPC] %s\n' "${result##*|}"
+if [[ ${1:-} == --check-only ]]; then
+    exit 0
+fi
+[[ $# -eq 0 ]] || die "Usage : openhtpc-session-start [--check-only]"
+if command -v systemd-inhibit >/dev/null 2>&1 && [[ -z ${OPENHTPC_INHIBITED:-} ]]; then
+    export OPENHTPC_INHIBITED=1
+    exec systemd-inhibit --what=idle --who="OPENHTPC" --why="OPENHTPC appliance mode active" --mode=block "$0" "$@"
+fi
+[[ -x $FLEX ]] || die "Flex intégré absent : $FLEX"
+mkdir -p "$STATE_DIR"
+if [[ ${OPENHTPC_SESSION_ACTIVE:-0} != 1 ]]; then
+    exec 8>"$SESSION_LOCK"
+    if ! flock -n 8; then
+        [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event START_ALREADY_ACTIVE
+        printf '[OPENHTPC] Une session OPENHTPC est déjà active.\n'
+        exit 0
+    fi
+    export OPENHTPC_SESSION_ACTIVE=1 OPENHTPC_SESSION_LOCK_FD=8
+    export OPENHTPC_SESSION_ID="session-$(date -u +%Y%m%dT%H%M%S)-$$"
+    python3 - "$SESSION_STATE" "$OPENHTPC_SESSION_ID" <<'PY'
+import json,os,pathlib,sys,tempfile
+target=pathlib.Path(sys.argv[1]); target.parent.mkdir(parents=True,exist_ok=True)
+fd,tmp=tempfile.mkstemp(prefix=target.name+'.',dir=target.parent)
+with os.fdopen(fd,'w') as stream: json.dump({'schema':1,'state':'RUNNING','session_id':sys.argv[2],'owner_pid':os.getppid()},stream); stream.write('\n'); stream.flush(); os.fsync(stream.fileno())
+os.chmod(tmp,0o600); os.replace(tmp,target)
+PY
+    [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event SESSION_START
+fi
+[[ ! -x $INSTALL_DIR/openhtpc-appliance-mode ]] || "$INSTALL_DIR/openhtpc-appliance-mode" enter
+if [[ -x $OPTICAL_MONITOR && -z ${OPENHTPC_MONITOR_STARTED:-} ]]; then
+    "$OPTICAL_MONITOR" >/dev/null 2>&1 &
+    monitor_pid=$!
+    printf '%s\n' "$monitor_pid" >"$STATE_DIR/optical-monitor.pid"
+    chmod 0600 "$STATE_DIR/optical-monitor.pid"
+    export OPENHTPC_MONITOR_STARTED=1
+    [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event MONITOR_STARTED
+fi
+[[ ! -x $SYSTEM_VIEW ]] || "$SYSTEM_VIEW" >/dev/null
+[[ -x $HOME_CONTROLLER ]] || die "Contrôleur HOME absent : $HOME_CONTROLLER"
+exec "$HOME_CONTROLLER" "$FLEX_CONFIG"

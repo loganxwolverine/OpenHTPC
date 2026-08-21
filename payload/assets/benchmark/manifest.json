@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "asset_set_version": "v1.0.0",
+  "warmup_seconds": 3.0,
+  "measurement_seconds": 15.0,
+  "total_duration_seconds": 18.0,
+  "scenarios": {
+    "C1_DVD_PAL": {
+      "id": "C1_DVD_PAL",
+      "filename": "c1_dvd_pal.mpg",
+      "description": "PAL DVD 576p25 MPEG-2 (16:9)",
+      "resolution": "720x576",
+      "width": 720,
+      "height": 576,
+      "fps": 25.0,
+      "codec": "mpeg2video",
+      "bit_depth": 8,
+      "sha256": "c21adee7eb3ffc147038cf1e3336c265b8faaf1fd67c3ea6de5d92b659f87e93",
+      "size_bytes": 9103360
+    },
+    "C1_HD60": {
+      "id": "C1_HD60",
+      "filename": "c1_hd60.mp4",
+      "description": "HD 720p60 H.264",
+      "resolution": "1280x720",
+      "width": 1280,
+      "height": 720,
+      "fps": 60.0,
+      "codec": "h264",
+      "bit_depth": 8,
+      "sha256": "a9c123c4c39108ec3dfa7c2ef5a819780f7ec99863736eb2d06191bce365ecc1",
+      "size_bytes": 10635983
+    },
+    "C1_FHD24": {
+      "id": "C1_FHD24",
+      "filename": "c1_fhd24.mp4",
+      "description": "Full HD 1080p23.976 H.264",
+      "resolution": "1920x1080",
+      "width": 1920,
+      "height": 1080,
+      "fps": 23.976023976,
+      "codec": "h264",
+      "bit_depth": 8,
+      "sha256": "23d72798749662fabfd9b4b96817a2934bfe08e14091a2457f491f535e2224b5",
+      "size_bytes": 13496957
+    },
+    "C1_FHD60": {
+      "id": "C1_FHD60",
+      "filename": "c1_fhd60.mp4",
+      "description": "Full HD 1080p60 H.264",
+      "resolution": "1920x1080",
+      "width": 1920,
+      "height": 1080,
+      "fps": 60.0,
+      "codec": "h264",
+      "bit_depth": 8,
+      "sha256": "67ebaafea177001c5e743b67a5ba8e97d95f1c5a3e32856125ec33b1aa104a57",
+      "size_bytes": 22335527
+    },
+    "C1_UHD24_MAIN10": {
+      "id": "C1_UHD24_MAIN10",
+      "filename": "c1_uhd24_main10.mp4",
+      "description": "Ultra HD 2160p23.976 HEVC Main10",
+      "resolution": "3840x2160",
+      "width": 3840,
+      "height": 2160,
+      "fps": 23.976023976,
+      "codec": "hevc",
+      "bit_depth": 10,
+      "sha256": "d69da63473850b14f9dfbd28c1b55ab1acd649455678347042f1689594e4914e",
+      "size_bytes": 46776068
+    }
+  }
+}

@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Graphical couch confirmation dialog for removing an OPENHTPC media source safely."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import pathlib
+import sys
+import tempfile
+
+
+def load_theme(install: pathlib.Path):
+    path = install / "openhtpc-theme.py"
+    if not path.is_file():
+        path = pathlib.Path(__file__).with_name("openhtpc-theme.py")
+    spec = importlib.util.spec_from_file_location("media_theme", path)
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    raise RuntimeError("Theme module unavailable")
+
+
+def main() -> int:
+    home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+    theme = load_theme(install)
+    font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
+    if not font.is_file():
+        font = pathlib.Path(__file__).resolve().parent / "flex/assets/fonts/OpenSans-Regular.ttf"
+
+    folder_icon = install / "flex/assets/icons/drive-empty.png"
+    if not folder_icon.is_file():
+        folder_icon = pathlib.Path(__file__).resolve().parent / "flex/assets/icons/drive-empty.png"
+
+    back_icon = install / "assets/ui/system-back.png"
+    if not back_icon.is_file():
+        back_icon = install / "assets/ui/retour.png"
+    if not back_icon.is_file():
+        back_icon = folder_icon
+
+    sources_action = install / "openhtpc-media-sources-action"
+    session_start = install / "openhtpc-session-start"
+    flex_bin = install / "flex/bin/flex-launcher"
+
+    target_source = sys.argv[1] if len(sys.argv) >= 2 else ""
+    if not target_source:
+        return 0
+
+    source_path = pathlib.Path(target_source)
+    display_name = source_path.name or str(source_path)
+
+    entries = [
+        (
+            f"CONFIRMER : RETIRER LA SOURCE « {display_name} »",
+            folder_icon,
+            f":replace {sources_action} remove \"{target_source}\""
+        ),
+        (
+            "ANNULER (CONSERVER LA SOURCE)",
+            back_icon,
+            ":quit"
+        ),
+    ]
+
+    body = "\n".join(f"Entry{i}={label};{entry_icon};{command}" for i, (label, entry_icon, command) in enumerate(entries, 1))
+
+    content = f"""[General]
+DefaultMenu=MEDIA_REMOVE_CONFIRM
+VSync=true
+OnLaunch=Blank
+WrapEntries=true
+MouseSelect=true
+{theme.background_block(install, 58)}
+[Layout]
+MaxButtons=3
+IconSize=180
+IconSpacing=4%
+VCenter=50%
+{theme.title_block(font, 48, 24)}
+{theme.highlight_block(accent=True)}
+[Hotkeys]
+Hotkey1=#1B;:quit
+Hotkey2=#08;:quit
+[MEDIA_REMOVE_CONFIRM]
+{body}
+"""
+
+    menu_target = home / ".config/openhtpc/media-remove.ini"
+    menu_target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=menu_target.name + ".", dir=menu_target.parent)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, menu_target)
+
+    os.execv(flex_bin, [str(flex_bin), "-c", str(menu_target)])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""Root-bound local media dispatcher with bounded private diagnostics."""
+from __future__ import annotations
+
+import datetime
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+import pathlib
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
+OPEN_MARKERS = ("VO:", "AO:", "Video:", "Audio:", "Starting playback", "Using hardware decoding")
+MAX_DIAGNOSTIC_LINES = 80
+
+
+def source_id(path: pathlib.Path) -> str:
+    return hashlib.blake2s(os.fsencode(path), digest_size=8).hexdigest()
+
+
+def timestamp() -> str:
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def configured_roots(home: pathlib.Path) -> list[pathlib.Path]:
+    data = json.loads((home / ".config/openhtpc/user-config.json").read_text(encoding="utf-8"))
+    values = data.get("local_media_sources")
+    if not isinstance(values, list):
+        raise ValueError("PLAYBACK_CONFIG_INVALID")
+    roots = []
+    for value in values:
+        if not isinstance(value, str) or not pathlib.Path(value).is_absolute():
+            raise ValueError("PLAYBACK_CONFIG_INVALID")
+        try: root = pathlib.Path(value).resolve(strict=True)
+        except OSError: continue
+        if root.is_dir():
+            roots.append(root)
+    return roots
+
+
+def load_media_action(home:pathlib.Path,token:str)->dict:
+    if not re.fullmatch(r"mact_[0-9a-f]{32}",token or ""):
+        raise ValueError("INVALID_ACTION_TOKEN")
+    manifest_path=home/".local/state/openhtpc/media-actions/current.json"
+    try:model=json.loads(manifest_path.read_text(encoding="utf-8"))
+    except OSError as exc:raise ValueError("ACTION_MANIFEST_MISSING") from exc
+    except json.JSONDecodeError as exc:raise ValueError("ACTION_MANIFEST_INVALID") from exc
+    if model.get("schema")!=1 or not isinstance(model.get("items"),dict):raise ValueError("ACTION_MANIFEST_INVALID")
+    action=model["items"].get(token)
+    if not isinstance(action,dict):raise ValueError("TOKEN_NOT_FOUND")
+    page_path=home/".local/state/openhtpc/media-actions/current-page"
+    try:current_page=page_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:raise ValueError("ACTION_MANIFEST_MISSING") from exc
+    if not current_page or action.get("page_id")!=current_page:raise ValueError("STALE_PAGE")
+    required=("page_id","item_type","source_id","relative_path","semantic_id")
+    if not all(isinstance(action.get(key),str) and action[key] for key in required):
+        raise ValueError("INVALID_ACTION_IDENTITY")
+    return action
+
+
+def resolve_media_request(home:pathlib.Path,expected_source_id:str,relative_value:str,generation:str)->tuple[pathlib.Path,pathlib.Path]:
+    try:model=json.loads((home/".local/state/openhtpc/media-actions/current.json").read_text(encoding="utf-8"))
+    except OSError as exc:raise ValueError("ACTION_MANIFEST_MISSING") from exc
+    except json.JSONDecodeError as exc:raise ValueError("ACTION_MANIFEST_INVALID") from exc
+    record=next((item for item in model.get("sources",[]) if item.get("source_id")==expected_source_id),None)
+    if not isinstance(record,dict):raise ValueError("PLAYBACK_SOURCE_INVALID")
+    configured=pathlib.Path(str(record.get("configured_path","")))
+    if not configured.is_absolute():raise ValueError("PLAYBACK_SOURCE_INVALID")
+    values=json.loads((home/".config/openhtpc/user-config.json").read_text(encoding="utf-8")).get("local_media_sources",[])
+    if str(configured) not in values:raise ValueError("PLAYBACK_SOURCE_INVALID")
+    try:root=configured.resolve(strict=True)
+    except OSError as exc:raise ValueError("PLAYBACK_SOURCE_UNAVAILABLE") from exc
+    if source_id(root)!=expected_source_id:raise ValueError("PLAYBACK_SOURCE_CHANGED")
+    relative=pathlib.PurePosixPath(relative_value)
+    if relative.is_absolute() or not relative.parts or any(part in ("",".","..") for part in relative.parts):raise ValueError("PLAYBACK_PATH_ESCAPE")
+    candidate=root.joinpath(*relative.parts)
+    try:target=candidate.resolve(strict=True)
+    except OSError as exc:raise ValueError("FILE_NOT_FOUND") from exc
+    if target!=root and root not in target.parents:raise ValueError("PLAYBACK_PATH_ESCAPE")
+    try:mode=target.stat().st_mode
+    except OSError as exc:raise ValueError("FILE_NOT_FOUND") from exc
+    if not stat.S_ISREG(mode):raise ValueError("PLAYBACK_FILE_NOT_REGULAR")
+    if target.suffix.casefold() not in VIDEO_EXTENSIONS:raise ValueError("PLAYBACK_FILE_UNSUPPORTED")
+    return target,root
+
+
+def canonical_media(value: str, roots: list[pathlib.Path], expected_source_id: str | None = None) -> tuple[pathlib.Path, pathlib.Path]:
+    supplied = pathlib.Path(value)
+    if not supplied.is_absolute():
+        raise ValueError("MEDIA_PATH_NOT_ABSOLUTE")
+    try:
+        target = supplied.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("PLAYBACK_FILE_NOT_FOUND") from exc
+    try:
+        mode = target.stat().st_mode
+    except OSError as exc:
+        raise ValueError("PLAYBACK_FILE_NOT_FOUND") from exc
+    if not stat.S_ISREG(mode):
+        raise ValueError("PLAYBACK_FILE_NOT_REGULAR")
+    if target.suffix.casefold() not in VIDEO_EXTENSIONS:
+        raise ValueError("PLAYBACK_FILE_UNSUPPORTED")
+    matches = [root for root in roots if target == root or root in target.parents]
+    if expected_source_id:
+        matches = [root for root in matches if source_id(root) == expected_source_id]
+    if not matches:
+        raise ValueError("PLAYBACK_PATH_ESCAPE")
+    return target, max(matches, key=lambda path: len(path.parts))
+
+
+def runtime_config(home: pathlib.Path) -> pathlib.Path:
+    profile = json.loads((home / ".config/openhtpc/profile.json").read_text(encoding="utf-8"))
+    pure = profile["runtime_profiles"]["profiles"]["PURE"]
+    if profile["runtime"].get("status") != "ready" or pure.get("generation_status") != "generated":
+        raise ValueError("PLAYBACK_RUNTIME_NOT_READY")
+    candidate = pathlib.Path(pure.get("config_path", ""))
+    if not candidate.is_absolute() or not candidate.is_file():
+        raise ValueError("PLAYBACK_RUNTIME_NOT_READY")
+    return candidate.resolve(strict=True)
+
+
+def sanitize_output(text: str, home: pathlib.Path, media: pathlib.Path | None) -> list[str]:
+    text = text.replace(str(home), "~")
+    if media is not None:
+        text = text.replace(str(media), "<media>").replace(media.name, "<media>")
+    text = re.sub(r"(?i)(token|secret|password|api[_-]?key)=\S+", r"\1=<redacted>", text)
+    return [line[:1000] for line in text.splitlines()[-MAX_DIAGNOSTIC_LINES:] if line.strip()]
+
+
+def append_event(log: pathlib.Path, **fields: object) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    encoded = " ".join(f"{key}={json.dumps(value, ensure_ascii=True, separators=(',', ':'))}" for key, value in fields.items())
+    with log.open("a", encoding="utf-8") as stream:
+        stream.write(f"{timestamp()} {encoded}\n")
+
+
+def private_state(home: pathlib.Path, media: pathlib.Path, source: pathlib.Path, fields: dict[str, object]) -> None:
+    target = home / ".local/state/openhtpc/playback-last-private.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = {**fields, "media_path": str(media), "source_path": str(source)}
+    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, sort_keys=True); stream.write("\n")
+        os.chmod(temporary, 0o600); os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+
+def update_action_state(home:pathlib.Path,**fields:object)->None:
+    target=home/".local/state/openhtpc/media-action-last.json"
+    try:data=json.loads(target.read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError):data={"schema":1,"media_action_seen":False}
+    data.update(fields);target.parent.mkdir(parents=True,exist_ok=True)
+    fd,temporary=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as stream:json.dump(data,stream,ensure_ascii=False,sort_keys=True);stream.write("\n")
+        os.chmod(temporary,0o600);os.replace(temporary,target)
+    finally:
+        if os.path.exists(temporary):os.unlink(temporary)
+
+
+def return_to_ui(home: pathlib.Path, install: pathlib.Path) -> int:
+    if os.environ.get("OPENHTPC_FLEX_RETAINED") == "1":
+        return 0
+    browser = home / ".local/bin/openhtpc-media-browser"
+    command = [str(browser), "--restore"] if browser.is_file() else [str(install / "openhtpc-session-start")]
+    os.execv(command[0], command)
+    return 1
+
+
+def notify(message: str) -> None:
+    if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("kdialog"):
+        subprocess.run(["kdialog", "--title", "OPENHTPC", "--error", message], check=False)
+    else:
+        print(f"[OPENHTPC] {message}", file=sys.stderr)
+
+
+def runtime_event(home:pathlib.Path,install: pathlib.Path, event: str,**fields:object) -> None:
+    helper = install / "openhtpc-runtime.py"
+    if helper.is_file():
+        try:
+            import importlib.util
+            spec=importlib.util.spec_from_file_location("openhtpc_runtime_events",helper);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            module.log(home,"playback",event,**fields)
+        except (OSError,AttributeError):pass
+
+
+def record_capability_validation(home:pathlib.Path,install:pathlib.Path,media:pathlib.Path,raw_log:str)->bool:
+    engine=install/"openhtpc-capabilities.py"
+    if not engine.is_file():return False
+    match=re.search(r"Using hardware decoding[^\n]*(vaapi|nvdec|vulkan-video)",raw_log,re.I)
+    backend=match.group(1).lower() if match else None
+    try:
+        spec=importlib.util.spec_from_file_location("openhtpc_capability_ledger",engine);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        record=module.record_playback_validation(home,media,backend,validated_at=timestamp())
+        if record is not None:runtime_event(home,install,"PLAYBACK_VALIDATION_RECORDED",codec=record.get("codec"),profile=record.get("profile"),bit_depth=record.get("bit_depth"),hardware_backend=record.get("hardware_decode_backend") or "unknown")
+        return record is not None
+    except (OSError,AttributeError,ValueError,ImportError):return False
+
+
+def flex_instances(install:pathlib.Path)->tuple[int,list[int]]:
+    try:
+        result=subprocess.run(["pgrep","-f",f"^{re.escape(str(install/'flex/bin/flex-launcher'))}(?: |$)"],text=True,capture_output=True,timeout=2,check=False)
+        pids=[int(value) for value in result.stdout.split() if value.isdigit()]
+    except (OSError,subprocess.TimeoutExpired,ValueError):pids=[]
+    return len(pids),pids
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+    log = home / ".local/state/openhtpc/playback.log"
+    expected_source = generation = relative_arg = item_id = item_type = None
+    activated=False
+    if len(argv)==1 and not argv[0].startswith("mact_"):media_arg=argv[0]
+    else:
+        parser=argparse.ArgumentParser(add_help=False);parser.add_argument("--action-token")
+        if len(argv)==1:args=argparse.Namespace(action_token=argv[0])
+        else:
+            try:args=parser.parse_args(argv)
+            except SystemExit:args=None
+        activated=True;token=args.action_token if args is not None else ""
+        # Token actions are emitted only by the persistent Flex model.
+        os.environ["OPENHTPC_FLEX_RETAINED"]="1"
+        count,pids=flex_instances(install)
+        action=dict(media_action_seen=True,dispatcher_seen=False,current_page="MEDIA",model_generation="unknown",source_id="unknown",item_id="unknown",item_type="unknown",path_resolved=False,path_absolute=False,file_exists=False,process_started=False,flex_instances=count,authoritative_flex_pid=pids[0] if len(pids)==1 else None,action_payload_valid=args is not None,action_token_valid=False,generation_valid=False,item_identity_valid=False,source_identity_valid=False,token_present=bool(token),manifest_present=(home/".local/state/openhtpc/media-actions/current.json").is_file(),page_id_match=False,token_found=False,error_class="ACTION_VALIDATION_PENDING")
+        update_action_state(home,**action)
+        try:
+            trusted=load_media_action(home,token)
+            expected_source=trusted["source_id"];generation=trusted["page_id"];relative_arg=trusted["relative_path"];item_id=trusted["semantic_id"];item_type=trusted["item_type"];media_arg=relative_arg
+            update_action_state(home,model_generation=generation,source_id=expected_source,item_id=item_id,item_type=item_type,action_token_valid=True,generation_valid=True,item_identity_valid=True,source_identity_valid=True,manifest_present=True,page_id_match=True,token_found=True,error_class="NONE")
+            runtime_event(home,install,"MEDIA_ITEM_ACTIVATED",item_type=item_type,model_generation=generation,semantic_id=item_id,token_present=True,manifest_present=True,page_id_match=True,token_found=True,source_identity_valid=True)
+            runtime_event(home,install,"ACTION_TOKEN_RESOLVED",item_type=item_type,page_id=generation)
+        except ValueError as exc:
+            reason=str(exc);token_valid=bool(re.fullmatch(r"mact_[0-9a-f]{32}",token or ""));manifest_present=(home/".local/state/openhtpc/media-actions/current.json").is_file();token_found=reason not in {"INVALID_ACTION_TOKEN","TOKEN_NOT_FOUND","ACTION_MANIFEST_MISSING","ACTION_MANIFEST_INVALID"};update_action_state(home,action_token_valid=token_valid,manifest_present=manifest_present,token_found=token_found,page_id_match=False,error_class=reason)
+            runtime_event(home,install,"MEDIA_ACTION_REJECTED",reason=reason,token_present=bool(token),manifest_present=manifest_present,page_id_match=False,token_found=token_found,action_token_valid=token_valid)
+            notify("Cette sélection média a expiré. Revenez à MEDIA puis réessayez." if reason=="STALE_PAGE" else "Sélection du média invalide.")
+            return 0
+        if item_type!="file":
+            update_action_state(home,error_class="ACTION_TYPE_INVALID")
+            runtime_event(home,install,"MEDIA_ACTION_REJECTED",reason="ACTION_TYPE_INVALID")
+            notify("Sélection du média invalide.")
+            return 0
+        if args is None:
+            append_event(log, kind="local", process_started=False, error_class="PLAYBACK_ARGUMENT_INVALID");notify("Sélection média invalide.");return return_to_ui(home,install)
+    media = source = None;dispatch_requested=False
+    try:
+        if activated:
+            if not all((expected_source,generation,relative_arg,item_id)):raise ValueError("INVALID_ACTION_IDENTITY")
+            relative=pathlib.PurePosixPath(relative_arg);expected_item=hashlib.blake2s(f"media:{expected_source}:file:{relative.as_posix()}".encode("utf-8"),digest_size=12).hexdigest()
+            if item_id!=expected_item:raise ValueError("ITEM_ID_INVALID")
+            dispatch_requested=True;update_action_state(home,dispatcher_seen=True,error_class="NONE");runtime_event(home,install,"FILE_DISPATCH_REQUEST",item_type="file",model_generation=generation,semantic_id=item_id)
+            media,source=resolve_media_request(home,expected_source,relative_arg,generation)
+        else:
+            roots = configured_roots(home);media, source = canonical_media(media_arg, roots, expected_source)
+        runtime = runtime_config(home)
+        mpv = shutil.which("mpv")
+        if not mpv:
+            raise ValueError("PLAYBACK_MPV_UNAVAILABLE")
+    except (OSError, KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+        error = str(exc) if isinstance(exc, ValueError) and str(exc).startswith(("PLAYBACK_", "MEDIA_", "FILE_", "STALE_")) else "PLAYBACK_CONFIG_INVALID"
+        append_event(log, kind="local", source_id=expected_source or "unknown", media="<redacted>", media_path_type="absolute" if pathlib.Path(media_arg).is_absolute() else "relative", media_exists=False, process_started=False, error_class=error)
+        update_action_state(home,path_resolved=False,path_absolute=False,file_exists=False,process_started=False,error_class=error)
+        if dispatch_requested:runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=False,exists=False,error_class=error)
+        notify("Le fichier média est indisponible ou n'appartient plus à une source configurée.")
+        return return_to_ui(home, install)
+
+    attempt = tempfile.NamedTemporaryFile(prefix="openhtpc-mpv-", delete=False)
+    attempt_path = pathlib.Path(attempt.name); attempt.close()
+    command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--force-window=immediate", "--border=no", "--terminal=no", f"--log-file={attempt_path}", "--", str(media)]
+    cwd = os.getcwd()
+    common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime="pure", mpv=mpv, argv_count=len(command), cwd_type="independent")
+    update_action_state(home,path_resolved=True,path_absolute=True,file_exists=True,extension=media.suffix.casefold(),runtime="pure",process_started=True,error_class="NONE")
+    runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
+    runtime_event(home,install, "PLAYBACK_BEGIN")
+    runtime_event(home,install,"PLAYBACK_DISPATCHED")
+    append_event(log, **common, event="PROCESS_STARTED", process_started=True)
+    runtime_event(home,install,"PLAYBACK_PROCESS_STARTED")
+    started = time.monotonic()
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, env=os.environ.copy())
+        rc = result.returncode
+    except OSError:
+        rc = 127
+    elapsed = max(0, round(time.monotonic() - started))
+    try: raw = attempt_path.read_text(encoding="utf-8", errors="replace")
+    except OSError: raw = ""
+    finally: attempt_path.unlink(missing_ok=True)
+    opened = any(marker in raw for marker in OPEN_MARKERS)
+    error_class = "NONE" if opened and rc == 0 else "MPV_EXIT_ERROR" if rc != 0 else "MEDIA_NOT_OPENED"
+    diagnostics = sanitize_output(raw, home, media)
+    append_event(log, **common, event="PROCESS_EXITED", process_started=True, media_opened=opened, exit_code=rc, elapsed=elapsed, error_class=error_class, diagnostic_lines=diagnostics)
+    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd})
+    if error_class=="NONE":record_capability_validation(home,install,media,raw)
+    update_action_state(home,media_opened=opened,exit_code=rc,elapsed=elapsed,error_class=error_class)
+    runtime_event(home,install,"PLAYBACK_PROCESS_EXITED",exit_code=rc,elapsed=elapsed,error_class=error_class)
+    runtime_event(home,install, "PLAYBACK_END")
+    if error_class != "NONE":
+        notify("Impossible d'ouvrir ce média. Les diagnostics de lecture ont été enregistrés.")
+    return return_to_ui(home, install)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

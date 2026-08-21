@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+home="${OPENHTPC_HOME:-$HOME}"; install="${OPENHTPC_INSTALL_DIR:-$home/.local/lib/openhtpc}"
+state="$home/.local/state/openhtpc"; runtime="$install/openhtpc-runtime.py"
+[[ ! -x $runtime ]] || "$runtime" log --component session --event QUIT_REQUESTED
+[[ ! -x $runtime ]] || "$runtime" stop-session >/dev/null || true
+if [[ -r $state/optical-monitor.pid ]]; then
+    pid="$(cat "$state/optical-monitor.pid" 2>/dev/null || true)"
+    if [[ $pid =~ ^[0-9]+$ ]] && [[ -r /proc/$pid/cmdline ]] && tr '\0' '\n' </proc/$pid/cmdline | grep -Fxq "$install/openhtpc-optical-monitor"; then
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
+fi
+rm -f -- "$state/optical-monitor.pid"
+python3 - "$state/runtime-session.json" <<'PY'
+import json,os,pathlib,sys,tempfile
+target=pathlib.Path(sys.argv[1]); target.parent.mkdir(parents=True,exist_ok=True); fd,tmp=tempfile.mkstemp(prefix=target.name+'.',dir=target.parent)
+with os.fdopen(fd,'w') as stream: json.dump({'schema':1,'state':'STOPPED','stop_reason':'USER_QUIT'},stream); stream.write('\n'); stream.flush(); os.fsync(stream.fileno())
+os.chmod(tmp,0o600); os.replace(tmp,target)
+PY
+[[ ! -x $install/openhtpc-appliance-mode ]] || "$install/openhtpc-appliance-mode" leave
+[[ ! -x $runtime ]] || "$runtime" log --component session --event PLASMA_CONFIGURATION_RESTORED
+restore=NOT_TESTED
+if [[ -x $install/openhtpc-desktop-restore.py ]]; then
+    [[ ! -x $runtime ]] || "$runtime" log --component session --event PLASMASHELL_RESTART_REQUESTED
+    if "$install/openhtpc-desktop-restore.py" >/dev/null; then
+        restore="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["result"])' "$state/desktop-restore.json" 2>/dev/null || echo UNKNOWN)"
+    else restore=FAILED; fi
+fi
+[[ ! -x $runtime ]] || "$runtime" log --component session --event "DESKTOP_RESTORE_${restore}"
+[[ ! -x $runtime ]] || "$runtime" record-exit --reason USER_QUIT_TO_DESKTOP --desktop-restore "$restore"
+[[ $restore != FAILED && $restore != FAILED_* ]]

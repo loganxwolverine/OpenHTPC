@@ -1,155 +1,131 @@
-<img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/40d27e5c-3464-4983-90a7-eb34fc30cbc0" />
+# OPENHTPC 1.1 Public Candidate
 
-• # Guide d’installation — OPENHTPC Basic V1.0.0
+This package is Public Candidate R2, version `1.1.0-dev31`, build
+`public-release-optical-badge-polish-dev1`. It is an optical-badge-only visual
+polish iteration derived from the stable dev30 functional baseline.
+It is not the final `1.1.0` release.
 
-  ## Prérequis
+The public RC2 tag `v1.1.0-rc2` identifies this qualified candidate and is
+derived from the technical runtime baseline `1.1.0-dev31`; the runtime version
+is intentionally not renamed. RC2 is physically qualified and frozen.
 
-  OPENHTPC Basic V1.0.0 a été validé sur :
+OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC. Its
+Core manages playback, capabilities and appliance lifecycle; the Hardware
+Passport records user-confirmed hardware choices; optional plugins extend the
+system without changing Core capability truth. Flex Launcher provides the
+ten-foot interface and MPV provides playback.
+
+## Qualified platform and video modes
+
+The currently qualified platform is Fedora 44 KDE Plasma on Wayland. Other
+platforms are not claimed as validated.
+
+`PURE` is the default presentation and uses the qualified native MPV path.
+`CINÉMA AUTO` combines content scope, the project Recipe Catalogue and the
+current local Performance Map. It selects the highest-quality project-qualified
+presentation that is technically stable on the local hardware. It does not
+mean that a shader is always enabled; PURE is a valid CINÉMA AUTO result.
 
-  - Fedora 44
-  - KDE Plasma
-  - session Wayland
-  - architecture x86_64
-
-  Avant l’installation, Fedora doit impérativement être entièrement à jour.
-
-  ## 1. Mettre Fedora à jour
-
-  Ouvrez Konsole puis exécutez :
-
-  sudo dnf upgrade --refresh
-
-  Lorsque la mise à jour est terminée, redémarrez l’ordinateur :
-
-  systemctl reboot
-
-  Après le redémarrage, connectez-vous à une session KDE Plasma utilisant Wayland.
-
-  ## 2. Télécharger OPENHTPC
-
-  Téléchargez l’archive suivante depuis la page GitHub Releases du projet :
-
-  OpenHTPC-Basic-V1.0.0.tar.gz
-
-  Téléchargez également le fichier de contrôle :
-
-  OpenHTPC-Basic-V1.0.0.tar.gz.sha256
-
-  Placez les deux fichiers dans le même dossier, par exemple Téléchargements.
-
-  ## 3. Vérifier l’archive
-
-  Dans Konsole :
-
-  cd ~/Téléchargements
-  sha256sum -c OpenHTPC-Basic-V1.0.0.tar.gz.sha256
-
-  Le résultat attendu est :
-
-  OpenHTPC-Basic-V1.0.0.tar.gz: OK
-
-  N’installez pas l’archive si la vérification échoue.
-
-  ## 4. Extraire OPENHTPC
-
-  tar -xzf OpenHTPC-Basic-V1.0.0.tar.gz
-  cd OpenHTPC-Basic-V1.0.0
-
-  ## 5. Lancer l’installation
-
-  ./install.sh
-
-  L’installateur suit une procédure contrôlée :
-
-  Vérifier → Expliquer → Demander → Installer → Confirmer
-
-  Il peut demander l’autorisation d’installer les dépendances multimédias nécessaires et d’activer certains dépôts Fedora/RPM Fusion.
-
-  Lisez chaque demande puis confirmez uniquement si vous l’acceptez. Le mot de passe administrateur peut être demandé par Fedora.
-
-  L’installateur ne réalise pas de mise à niveau générale de Fedora.
-
-  ## 6. Configurer OPENHTPC
-
-  Pendant la configuration :
-
-  1. Vérifiez les informations détectées par le Hardware Passport.
-  2. Configurez l’affichage.
-  3. Laissez OPENHTPC configurer automatiquement l’audio.
-  4. Ajoutez un ou plusieurs dossiers contenant vos médias.
-  5. Configurez éventuellement TMDb.
-
-  TMDb est facultatif. OPENHTPC peut lire les médias locaux et NAS sans clé API.
-
-  Exemples de sources média :
-
-  /home/utilisateur/Vidéos
-  /home/utilisateur/NAS/Films
-  /mnt/medias/Films
-
-  Les sources doivent être accessibles par votre utilisateur avant de démarrer OPENHTPC.
-
-  ## 7. Vérifier l’installation
-
-  Contrôlez la version :
-
-  openhtpc version
-
-  Résultat attendu :
-
-  1.0.0
-
-  Lancez ensuite le diagnostic :
-
-  openhtpc doctor
-
-  Une installation saine doit se terminer par :
-
-  Overall: READY
-
-  Lors du tout premier diagnostic, certains éléments liés à une session précédente peuvent légitimement apparaître comme FIRST_RUN, NOT_TESTED,
-  NOT_INITIALIZED ou INACTIVE.
-
-  ## 8. Démarrer OPENHTPC
-
-  openhtpc start
-
-  OPENHTPC peut également démarrer automatiquement lors de l’ouverture de la session KDE, selon la configuration installée.
-
-  ## Commandes utiles
-
-  openhtpc start
-  openhtpc stop
-  openhtpc setup
-  openhtpc doctor
-  openhtpc support-bundle
-  openhtpc version
-
-  - openhtpc setup permet notamment de modifier les sources média.
-  - openhtpc doctor vérifie l’état de l’installation.
-  - openhtpc support-bundle crée un paquet de diagnostic assaini.
-  - Quittez normalement OPENHTPC depuis son interface pour revenir au bureau KDE.
-
-  ## Mise à jour d’une installation existante
-
-  Depuis le dossier extrait de la nouvelle version :
-
-  ./update.sh
-
-  La mise à jour conserve notamment la configuration utilisateur et les sources média.
-
-  ## Désinstallation
-
-  Depuis le dossier de la version installée :
-
-  ./uninstall.sh
-
-  La désinstallation standard conserve la configuration et ne supprime jamais les fichiers multimédias.
-
-  Pour supprimer également la configuration, le cache et l’état OPENHTPC :
-
-  ./uninstall.sh --purge-config
-
-  Cette option ne supprime toujours pas vos films ou autres médias.
-<img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/95b094fc-c993-462a-bf2e-d65713499935" />
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/208f490b-58f1-4983-baaa-6ca32f7b1ae8" />
+Calibration is local, signature-driven and based on observed playback
+stability. It uses no cloud or AI service. The Hardware Passport and Performance
+Map remain user-local. `openhtpc doctor` reports product health; an unknown or
+unsupported capability is not automatically a product failure.
+
+Appliance mode inhibits desktop idle/suspend while OPENHTPC owns the couch
+session. Explicit quit restores the KDE Plasma desktop lifecycle.
+
+## Verify the download
+
+Keep the archive and its `.sha256` file together, then run:
+
+```bash
+sha256sum -c OpenHTPC-1.1-PublicR2-Dev31.tar.gz.sha256
+```
+
+## Install
+
+Extract the archive, enter the extracted directory and inspect first:
+
+```bash
+./install.sh --check
+```
+
+Install with the normal user account, not a root shell:
+
+```bash
+./install.sh
+```
+
+The installer accepts only Fedora 44 with KDE Plasma. It may propose specific
+missing packages, RPM Fusion repositories and `libdvdcss`. Every system or
+repository mutation is explained and requires interactive consent before
+`sudo`/DNF is invoked. OPENHTPC never performs a general Fedora upgrade.
+
+The installation lives under `~/.local/lib/openhtpc`; commands are linked under
+`~/.local/bin`. Reconnect the session or add that directory to `PATH` if it is
+not already present. OPENHTPC installs a managed KDE autostart entry and starts
+on the next login. First installation runs local hardware discovery and initial
+setup; updates preserve the existing Hardware Passport when present.
+
+## Update and uninstall
+
+From the extracted candidate directory:
+
+```bash
+./update.sh
+./uninstall.sh
+./uninstall.sh --purge-config
+```
+
+Update preserves user configuration, configured media sources, Hardware
+Passport, Performance Map, runtime and system dependencies. A versioned
+managed-file manifest removes only files proven to have belonged to the prior
+OPENHTPC installation and absent from the target payload. Unknown files and
+all user-persistent paths are outside this cleanup contract.
+
+Normal uninstall removes the managed product, command links and autostart entry
+while preserving user configuration. `--purge-config` also removes OPENHTPC
+configuration, cache, state and shared data. Neither mode removes media files,
+Fedora packages, RPM Fusion repositories or `libdvdcss`.
+
+## Graphical Media Sources
+
+The MÉDIA page supports zero to multiple configured filesystem sources. From
+the couch UI you can add a source, open it, navigate folders and files, or use
+RIGHT on a source to expose the non-destructive removal action. Removal only
+updates OPENHTPC configuration: it never deletes, moves or modifies media.
+Duplicate additions produce an explicit `SOURCE DÉJÀ AJOUTÉE` result.
+
+Sources must already be accessible as local filesystem paths. An existing CIFS
+or NFS mount can be selected through the picker, but OPENHTPC does not configure
+or mount SMB/NFS shares itself. SMB/NFS service integration remains future
+plugin work.
+
+## Public commands in dev31
+
+```text
+openhtpc start
+openhtpc stop
+openhtpc setup
+openhtpc doctor
+openhtpc doctor --json
+openhtpc version
+openhtpc plugins
+openhtpc capabilities
+openhtpc capabilities --json
+openhtpc capabilities --refresh
+openhtpc support-bundle
+```
+
+There is no `openhtpc status` or `openhtpc update` command in this baseline.
+
+See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md),
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[assets/ASSET_PROVENANCE.md](assets/ASSET_PROVENANCE.md) before distribution.
+
+## Candidate status
+
+This package preserves the qualified dev27 Media Sources behavior while adding
+public packaging, managed-update hygiene and provenance-safe UI polish. The
+RC2 candidate completed physical validation and is frozen. This status does
+not constitute a final `1.1.0` release announcement.

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# OPENHTPC Phase C4 Calibration UI wrapper.
+# Runs C3 calibration and regenerates system pages after completion.
+# This script is blocking — Flex waits for it while calibration runs fullscreen.
+set -u
+readonly INSTALL="${OPENHTPC_INSTALL_DIR:-${OPENHTPC_HOME:-$HOME}/.local/lib/openhtpc}"
+readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
+
+# Run calibration (fullscreen MPV takes over, then exits)
+"$INSTALL/openhtpc-calibrate.py" --force
+cal_rc=$?
+
+mkdir -p "${HOME_DIR}/.local/state/openhtpc"
+
+if [[ "$cal_rc" -eq 0 ]]; then
+    # State D: Calibration succeeded, record status and atomically activate CINEMA_AUTO
+    printf '{"status": "SUCCESS", "exit_code": 0, "timestamp": "%s"}\n' "$(date --iso-8601=seconds)" > "${HOME_DIR}/.local/state/openhtpc/calibration-ui-status.json"
+    "$INSTALL/openhtpc-video-profile.py" set CINEMA_AUTO 2>/dev/null || true
+else
+    # State H: Calibration failed, record status and fallback to PURE
+    printf '{"status": "FAILED", "exit_code": %d, "timestamp": "%s"}\n' "$cal_rc" "$(date --iso-8601=seconds)" > "${HOME_DIR}/.local/state/openhtpc/calibration-ui-status.json"
+    "$INSTALL/openhtpc-video-profile.py" set PURE 2>/dev/null || true
+fi
+
+# Log the event
+printf '%s calibration_ui_exit rc=%s\n' "$(date --iso-8601=seconds)" "$cal_rc" >> "${HOME_DIR}/.local/state/openhtpc/calibration.log"
+
+exit "$cal_rc"

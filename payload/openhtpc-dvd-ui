@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+home="${OPENHTPC_HOME:-$HOME}"; install="${OPENHTPC_INSTALL_DIR:-$home/.local/lib/openhtpc}"
+exec python3 "$install/openhtpc-disc-sheet.py"

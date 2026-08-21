@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -u
+readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
+readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
+readonly RETURN_UI="${OPENHTPC_RETURN_UI:-$INSTALL/openhtpc-dvd-ui}"
+return_ui(){ exec "$RETURN_UI"; }
+[[ $# -eq 1 && $1 == /dev/* ]] || return_ui
+device=$1
+state="$(python3 "$INSTALL/openhtpc-optical.py" --print 2>/dev/null)" || return_ui
+python3 - "$device" "$state" <<'PY'
+import json,sys
+s=json.loads(sys.argv[2]); raise SystemExit(0 if sys.argv[1] in s.get("drives",[]) else 1)
+PY
+[[ $? -eq 0 ]] || return_ui
+udisksctl unmount -b "$device" >/dev/null 2>&1 || true
+python3 - "$HOME_DIR" "$device" <<'PY'
+import json,pathlib,sys
+home=pathlib.Path(sys.argv[1])
+target=home/".local/state/openhtpc/optical-ejecting.json"
+target.parent.mkdir(parents=True,exist_ok=True)
+target.write_text(json.dumps({"device":sys.argv[2],"state":"EJECTING","empty_observed":False})+"\n")
+target.chmod(0o600)
+PY
+if ! eject "$device" >/dev/null 2>&1; then
+    if command -v kdialog >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+        kdialog --title OPENHTPC --error "Impossible d'éjecter le disque." || true
+    fi
+    return_ui
+fi
+return_ui

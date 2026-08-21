@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -u
+readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
+readonly ENGINE="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}/openhtpc-optical.py"
+readonly LOCK="$HOME_DIR/.local/state/openhtpc/optical-monitor.lock"
+mkdir -p "$(dirname "$LOCK")"
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+RUNTIME="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}/openhtpc-runtime.py"
+[[ ! -x $RUNTIME ]] || "$RUNTIME" log --component optical-monitor --event START
+while :; do
+    python3 "$ENGINE" --refresh >/dev/null 2>&1 || true
+    sleep 2
+done

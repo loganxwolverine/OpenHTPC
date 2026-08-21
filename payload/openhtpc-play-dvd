@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -u
+readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
+readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
+readonly PROFILE="$HOME_DIR/.config/openhtpc/profile.json"
+return_ui(){ [[ ${OPENHTPC_FLEX_RETAINED:-0} == 1 ]] && exit 0; exec "$INSTALL/openhtpc-dvd-ui"; }
+[[ $# -eq 1 && $1 == /dev/* ]] || return_ui
+device=$1
+state="$(cat "$HOME_DIR/.local/state/openhtpc/optical-current.json" 2>/dev/null)" || return_ui
+python3 - "$device" "$state" <<'PY'
+import json,sys
+s=json.loads(sys.argv[2]); raise SystemExit(0 if s.get("state")=="DVD" and s.get("device")==sys.argv[1] else 1)
+PY
+[[ $? -eq 0 ]] || return_ui
+runtime="$(python3 - "$PROFILE" <<'PY'
+import json,pathlib,sys
+try:
+ p=json.loads(pathlib.Path(sys.argv[1]).read_text()); x=p["runtime_profiles"]["profiles"]["PURE"]; c=pathlib.Path(x["config_path"])
+ if p["runtime"]["status"]!="ready" or x["generation_status"]!="generated" or not c.is_file(): raise ValueError
+ print(c)
+except Exception: raise SystemExit(1)
+PY
+)" || return_ui
+mkdir -p "$HOME_DIR/.local/state/openhtpc"
+printf '{"schema":1,"kind":"disc_sheet","device":"%s"}\n' "$device" >"$HOME_DIR/.local/state/openhtpc/playback-context.json"
+chmod 0600 "$HOME_DIR/.local/state/openhtpc/playback-context.json"
+log="$HOME_DIR/.local/state/openhtpc/playback.log"; mpv_bin="$(command -v mpv 2>/dev/null)" || return_ui
+generation="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("generation",0))' "$state" 2>/dev/null || printf 0)"
+
+readahead_args=()
+if [[ -x $INSTALL/openhtpc-readahead.py ]]; then
+    readahead_json="$("$INSTALL/openhtpc-readahead.py" --source=OPTICAL --json 2>/dev/null || true)"
+    if [[ -n "$readahead_json" ]]; then
+        while IFS= read -r arg; do
+            [[ -n "$arg" ]] && readahead_args+=("$arg")
+        done < <(python3 -c 'import json,sys
+try:
+    d=json.loads(sys.argv[1])
+    for opt in d.get("mpv_options",[]): print(opt)
+except Exception: pass' "$readahead_json" 2>/dev/null)
+        readahead_target="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("target_readahead_seconds",0))' "$readahead_json" 2>/dev/null || printf 0)"
+        readahead_max="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("maximum_cache_bytes",0))' "$readahead_json" 2>/dev/null || printf 0)"
+        [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event READAHEAD_POLICY_APPLIED --source OPTICAL --target "$readahead_target" --cache_bytes "$readahead_max"
+    fi
+fi
+if [[ ${#readahead_args[@]} -eq 0 ]]; then
+    readahead_args=(--cache=yes --demuxer-readahead-secs=12.0 --demuxer-max-bytes=268435456 --demuxer-max-back-bytes=67108864 --demuxer-thread=yes --cache-pause=yes --cache-pause-initial=no --cache-pause-wait=1 --cache-on-disk=no)
+fi
+
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_BEGIN
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_DISPATCHED
+printf '%s kind=dvd device=%q optical_generation=%q runtime=%q mpv=%q readahead=%q\n' "$(date --iso-8601=seconds)" "$device" "$generation" "$runtime" "$mpv_bin" "${readahead_args[*]}" >>"$log"
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_PROCESS_STARTED
+# C4: Resolve video profile and shader args for CINEMA_AUTO
+video_profile="$(python3 -c '
+import json, pathlib, os
+home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+path = home / ".config/openhtpc/video-profile.json"
+try:
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    p = data.get("active_profile", "PURE")
+    print(p if p in {"PURE", "CINEMA_AUTO"} else "PURE")
+except Exception:
+    print("PURE")
+' 2>/dev/null || printf 'PURE')"
+
+shader_args=()
+if [[ "$video_profile" == "CINEMA_AUTO" ]]; then
+    # Resolve recipe for DVD_PAL_FILM scope
+    cinema_result="$(python3 "$INSTALL/openhtpc-cinema-auto.py" --scope DVD_PAL_FILM --json 2>/dev/null || true)"
+    if [[ -n "$cinema_result" ]]; then
+        recipe_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("recipe_id","RECIPE_0_PURE"))' "$cinema_result" 2>/dev/null || printf 'RECIPE_0_PURE')"
+        printf '%s kind=dvd c4_profile=CINEMA_AUTO c4_recipe=%q\n' "$(date --iso-8601=seconds)" "$recipe_id" >> "$log"
+        if [[ "$recipe_id" != "RECIPE_0_PURE" ]]; then
+            # Get shader files from catalog
+            shaders_json="$(python3 -c '
+import json, pathlib, sys
+install = pathlib.Path(sys.argv[1])
+catalog_path = install / "assets" / "c3_calibration_catalog.json"
+recipe_id = sys.argv[2]
+try:
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    for scope_def in catalog.get("scopes", {}).values():
+        for cand in scope_def.get("candidates", []):
+            if cand.get("recipe_id") == recipe_id:
+                print(json.dumps(cand.get("shader_ids", [])))
+                raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception:
+    pass
+print("[]")' "$INSTALL" "$recipe_id" 2>/dev/null || printf '[]')"
+            shader_count="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$shaders_json" 2>/dev/null || printf '0')"
+            if [[ "$shader_count" -gt 0 ]]; then
+                while IFS= read -r shader_opt; do
+                    [[ -n "$shader_opt" ]] && shader_args+=("$shader_opt")
+                done < <(python3 -c '
+import json, pathlib, sys
+install = pathlib.Path(sys.argv[1])
+shaders_dir = install / "assets" / "shaders"
+shaders = json.loads(sys.argv[2])
+opt_prefix = "glsl" + "-shaders"
+all_valid = True
+opts = []
+for s in shaders:
+    sp = shaders_dir / s
+    if sp.is_file():
+        opts.append(f"--{opt_prefix}={sp}")
+    else:
+        all_valid = False
+        break
+if all_valid:
+    for o in opts:
+        print(o)
+' "$INSTALL" "$shaders_json" 2>/dev/null)
+                if [[ ${#shader_args[@]} -eq 0 && "$shader_count" -gt 0 ]]; then
+                    printf '%s kind=dvd c4_shader_missing fallback=PURE\n' "$(date --iso-8601=seconds)" >> "$log"
+                fi
+            fi
+        fi
+    fi
+fi
+
+"$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
+rc=$?
+printf '%s kind=dvd exit_code=%s\n' "$(date --iso-8601=seconds)" "$rc" >>"$log"
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_PROCESS_EXITED
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_END
+if [[ $rc -ne 0 ]] && command -v kdialog >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+    kdialog --title OPENHTPC --error "La lecture du DVD a échoué (code $rc)." || true
+fi
+return_ui

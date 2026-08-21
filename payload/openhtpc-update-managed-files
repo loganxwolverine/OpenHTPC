@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Remove only obsolete files proven to be managed by an OPENHTPC manifest."""
+from __future__ import annotations
+
+import argparse
+import pathlib
+
+MANIFEST_NAME = ".openhtpc-managed-files"
+
+
+def load_manifest(path: pathlib.Path) -> set[pathlib.PurePosixPath]:
+    entries: set[pathlib.PurePosixPath] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        value = raw.strip()
+        if not value or value.startswith("#"):
+            continue
+        item = pathlib.PurePosixPath(value)
+        if item.is_absolute() or ".." in item.parts or value != item.as_posix():
+            raise ValueError(f"unsafe managed path: {value}")
+        entries.add(item)
+    return entries
+
+
+def cleanup(install: pathlib.Path, previous: pathlib.Path, target: pathlib.Path) -> list[str]:
+    install = install.resolve(strict=True)
+    previous_entries = load_manifest(previous)
+    target_entries = load_manifest(target)
+    removed: list[str] = []
+    for relative in sorted(previous_entries - target_entries, key=lambda p: p.as_posix()):
+        candidate = install.joinpath(*relative.parts)
+        try:
+            parent = candidate.parent.resolve(strict=True)
+        except OSError:
+            continue
+        if parent != install and install not in parent.parents:
+            raise ValueError(f"managed path escapes install root: {relative}")
+        if candidate.is_symlink() or candidate.is_file():
+            candidate.unlink()
+            removed.append(relative.as_posix())
+    return removed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--install-dir", required=True, type=pathlib.Path)
+    parser.add_argument("--previous", required=True, type=pathlib.Path)
+    parser.add_argument("--target", required=True, type=pathlib.Path)
+    args = parser.parse_args()
+    for removed in cleanup(args.install_dir, args.previous, args.target):
+        print(f"REMOVED {removed}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

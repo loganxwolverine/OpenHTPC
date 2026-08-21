@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "recipe_catalog_version": 1,
+  "description": "OPENHTPC Phase C3 Auto Calibration Catalogue — Phase C2 DVD_PAL_FILM qualification",
+  "scopes": {
+    "DVD_PAL_FILM": {
+      "benchmark_asset_id": "C1_DVD_PAL",
+      "benchmark_asset_filename": "c1_dvd_pal.mpg",
+      "description": "PAL DVD 25fps film content — Phase C2 blind visual qualification (EVIL DEAD II, Region 2, 720x576 MPEG-2)",
+      "qualification_note": "Covers film-originated 576p PAL material only. Does NOT claim to represent interlaced sports, animation, or video-originated content.",
+      "candidates": [
+        {
+          "quality_priority": 1,
+          "recipe_id": "RECIPE_0_PURE",
+          "shader_ids": [],
+          "qualification_verdict": "PROJECT_QUALIFIED/PREFERRED",
+          "qualification_phase": "C2",
+          "blind_ranking": "1st (winner)"
+        },
+        {
+          "quality_priority": 2,
+          "recipe_id": "RECIPE_C2_DVD_KRIG_BILATERAL",
+          "shader_ids": ["KrigBilateral.glsl"],
+          "qualification_verdict": "PROJECT_QUALIFIED/QUALIFIED_ALTERNATIVE",
+          "qualification_phase": "C2",
+          "blind_ranking": "2nd (finalist)"
+        },
+        {
+          "quality_priority": 3,
+          "recipe_id": "RECIPE_C2_DVD_FSRCNNX_8",
+          "shader_ids": ["FSRCNNX_x2_8-0-4-1.glsl"],
+          "qualification_verdict": "PROJECT_QUALIFIED/HIGH_GPU_WORKLOAD",
+          "qualification_phase": "C2",
+          "blind_ranking": "3rd (interesting / high GPU workload)"
+        }
+      ]
+    }
+  }
+}

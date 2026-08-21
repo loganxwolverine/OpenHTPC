@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Eject the currently detected optical drive through the validated helper."""
+import importlib.util
+import os
+import pathlib
+
+home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+spec = importlib.util.spec_from_file_location("optical", install / "openhtpc-optical.py")
+optical = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(optical)
+state = optical.current_state(home=home)
+device = state.get("device")
+if isinstance(device, str) and device.startswith("/dev/"):
+    os.environ["OPENHTPC_RETURN_UI"] = "/bin/true" if os.environ.get("OPENHTPC_STAY_IN_FLEX") == "1" else str(install / "openhtpc-session-start")
+    os.execv(install / "openhtpc-eject", [str(install / "openhtpc-eject"), device])
+if os.environ.get("OPENHTPC_STAY_IN_FLEX") == "1": raise SystemExit(0)
+os.execv(install / "openhtpc-session-start", [str(install / "openhtpc-session-start")])

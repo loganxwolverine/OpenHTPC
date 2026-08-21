@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Generate the scalable SYSTÈME dashboard without launching a UI."""
+import importlib.util, importlib.machinery, os, pathlib
+
+home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()))
+install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"))
+def load(name,path):
+ loader=importlib.machinery.SourceFileLoader(name,str(path)); spec=importlib.util.spec_from_loader(name,loader); module=importlib.util.module_from_spec(spec); loader.exec_module(module); return module
+system=load("openhtpc_system_model",install/"openhtpc-system-page")
+ui=load("openhtpc_ui",install/"openhtpc-ui.py")
+target=home/".cache/openhtpc/system-dashboard.svg"
+model=system.status_model(home,install)
+ui.atomic_text(target,ui.dashboard_svg(model))
+png=target.with_suffix(".png"); ui.dashboard_png(model,png,install/"flex/assets/fonts/OpenSans-Regular.ttf")
+print(png)

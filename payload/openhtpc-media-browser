@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+readonly OPENHTPC_HOME="${OPENHTPC_HOME:-$HOME}"
+readonly INSTALL_DIR="${OPENHTPC_INSTALL_DIR:-$OPENHTPC_HOME/.local/lib/openhtpc}"
+exec python3 "$INSTALL_DIR/openhtpc-media-browser.py" "$@"

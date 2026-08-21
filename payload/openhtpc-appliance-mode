@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Scoped appliance-session marker; Plasma configuration is never mutated."""
+import json,os,pathlib,subprocess,sys,tempfile
+home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home())); target=home/".local/state/openhtpc/appliance-mode.json"; target.parent.mkdir(parents=True,exist_ok=True)
+active=len(sys.argv)==2 and sys.argv[1]=="enter"
+helper=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"))/"openhtpc-kde-device-popup"
+if active:
+ mitigation=subprocess.run([helper,"enter"],timeout=8,check=False).returncode==0 if helper.is_file() else False
+ fd,tmp=tempfile.mkstemp(prefix="appliance.",dir=target.parent)
+ with os.fdopen(fd,"w") as stream: json.dump({"active":True,"popup_mitigation":"PLASMA_DEVICE_NOTIFIER_SCOPED" if mitigation else "UNAVAILABLE","desktop_mutated":mitigation},stream)
+ os.chmod(tmp,0o600); os.replace(tmp,target)
+else:
+ if helper.is_file(): subprocess.run([helper,"leave"],timeout=8,check=False)
+ try: target.unlink()
+ except FileNotFoundError: pass

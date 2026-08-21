@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Render the couch-readable SYSTÈME dashboard from canonical OPENHTPC state."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import pathlib
+import tempfile
+import re
+
+
+def load(name: str, path: pathlib.Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def text(value, limit: int | None = None) -> str:
+    value = value if value not in (None,"") else "N/A"
+    if value in (None, "", [], {}):
+        return "N/A"
+    if isinstance(value, dict):
+        value = value.get("model") or value.get("name") or value.get("description") or "N/A"
+    value = str(value).replace(";", "—").replace("\n", " ").replace("\r", " ")
+    return value if not limit or len(value) <= limit else value[: limit - 1].rstrip() + "…"
+
+
+def display_name(value) -> str:
+    """Derive a truthful compact display name without discarding the raw value."""
+    raw = text(value)
+    compact = re.sub(r"\s+", " ", raw).strip()
+    compact = re.sub(r"\s*\([^)]*(?:Corporation|Inc\.|Ltd\.)[^)]*\)\s*", " ", compact, flags=re.I)
+    compact = re.sub(r"^(?:Intel|Advanced Micro Devices|NVIDIA) Corporation\s+", lambda m: "Intel " if m.group(0).lower().startswith("intel") else "AMD " if m.group(0).lower().startswith("advanced") else "NVIDIA ", compact, flags=re.I)
+    compact = re.sub(r"\[([^]]+)\]", r"— \1", compact)
+    return re.sub(r"\s+", " ", compact).strip(" —") or raw
+
+
+def first_label(values) -> str:
+    if not isinstance(values, list) or not values:
+        return "N/A"
+    return text(values[0])
+
+
+def status_model(home: pathlib.Path, install: pathlib.Path) -> dict:
+    core = load("openhtpc_core_system", install / "openhtpc-core.py")
+    if hasattr(core,"health_report"): report=core.health_report(home,install)
+    else:
+        state=core.capability_state(home,install); overall,_=core.doctor(home,install); report={"overall":overall,"checks":[],"capabilities":state,"runtime":{"ui_instances":1,"monitor_instances":1,"appliance_state":"RUNNING","recent_flex_crashes":0},"graphics":{"status":"NOT_RUNNING","session":"UI runtime unavailable","desktop":"Unknown"}}
+    presenter_path=install/"openhtpc-system-model.py"
+    if not presenter_path.is_file():presenter_path=pathlib.Path(__file__).with_name("openhtpc-system-model.py")
+    presenter=load("openhtpc_system_presenter",presenter_path)
+    version=core.read_json(install/"version.json") or {"version":(install/"VERSION").read_text().strip() if (install/"VERSION").is_file() else "UNKNOWN","build_id":"UNKNOWN"}
+    return presenter.build(home,install,report,version)
+
+
+def write_menu(home: pathlib.Path, install: pathlib.Path, model: dict) -> pathlib.Path:
+    theme = load("openhtpc_theme_system", install / "openhtpc-theme.py")
+    ui_path = install / "openhtpc-ui.py"
+    if not ui_path.is_file(): ui_path = pathlib.Path(__file__).with_name("openhtpc-ui.py")
+    ui = load("openhtpc_ui_system", ui_path)
+    font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
+    logo = theme.assets(install)["logo"]
+    icon = install / "assets/ui/optical-empty.png"
+    dashboard = home / ".cache/openhtpc/system-dashboard.png"
+    ui.system_page_png(model, dashboard, font, "overview")
+    entries = [f"Entry1=RETOUR;{icon};:back"]
+    content = f"""[General]
+DefaultMenu=SYSTEME
+VSync=true
+OnLaunch=Blank
+WrapEntries=true
+MouseSelect=true
+InhibitOSScreensaver=true
+[Background]
+Mode=Image
+Color=#020711
+Image={dashboard}
+Overlay=false
+[Layout]
+MaxButtons=1
+IconSize=84
+IconSpacing=1%
+VCenter=92%
+{theme.title_block(font, 30, 14)}
+{theme.highlight_block()}
+[Clock]
+Enabled=true
+ShowDate=true
+Alignment=Right
+Font={font}
+FontSize=40
+FontColor=#FFFFFF
+Shadows=true
+Margin=4%
+Opacity=100%
+TimeFormat=24hr
+DateFormat=Auto
+IncludeWeekday=true
+[Hotkeys]
+Hotkey1=#1B;:back
+Hotkey2=#08;:back
+[SYSTEME]
+{os.linesep.join(entries)}
+"""
+    menu = home / ".config/openhtpc/system.ini"
+    menu.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="system.", dir=menu.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, menu)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return menu
+
+
+def main() -> int:
+    home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+    model=status_model(home,install);font=install/"flex/assets/fonts/OpenSans-Regular.ttf";ui=load("openhtpc_ui_system_main",install/"openhtpc-ui.py")
+    target=home/".cache/openhtpc/system-dashboard.png";ui.system_page_png(model,target,font,"overview");print(target)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

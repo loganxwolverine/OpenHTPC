@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Configure TMDb privately without changing media sources, then refresh sheet."""
+import importlib.util,json,os,pathlib,subprocess
+home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home())); install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc")); config_path=home/".config/openhtpc/user-config.json"
+try: config=json.loads(config_path.read_text())
+except (OSError,json.JSONDecodeError): config={"schema":1,"configuration_completed":True,"local_media_sources":[]}
+result=subprocess.run(["kdialog","--title","TMDb — Métadonnées enrichies","--password","Clé TMDb privée :"],text=True,capture_output=True)
+if result.returncode==0 and result.stdout.strip():
+ spec=importlib.util.spec_from_file_location("setup",install/"openhtpc-initial-setup.py"); setup=importlib.util.module_from_spec(spec); spec.loader.exec_module(setup); setup.write_private(home/".config/openhtpc/secrets/tmdb-token",result.stdout.strip()); config["tmdb"]={"configured":True}; config_path.write_text(json.dumps(config,ensure_ascii=False,indent=2)+"\n"); config_path.chmod(0o600)
+ cap=install/"openhtpc-capabilities.py"
+ if cap.is_file(): subprocess.run([str(cap),"--refresh"],env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(install)},timeout=30,check=False)
+ disc_view=install/"openhtpc-disc-view.py"
+ if disc_view.is_file(): subprocess.run([str(disc_view),"--home",str(home),"--enrich"],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False)
+os.execv(install/"openhtpc-dvd-ui",[str(install/"openhtpc-dvd-ui")])

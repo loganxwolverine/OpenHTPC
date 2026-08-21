@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Graphical couch directory picker for adding OPENHTPC media sources."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+
+def load_theme(install: pathlib.Path):
+    path = install / "openhtpc-theme.py"
+    if not path.is_file():
+        path = pathlib.Path(__file__).with_name("openhtpc-theme.py")
+    spec = importlib.util.spec_from_file_location("media_theme", path)
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    raise RuntimeError("Theme module unavailable")
+
+
+def get_roots(home: pathlib.Path) -> list[tuple[str, pathlib.Path]]:
+    roots = []
+    # User home
+    roots.append(("Dossier personnel", home))
+    
+    # Common user media directories
+    for name, label in (("Movies", "Films"), ("Videos", "Vidéos"), ("Vidéos", "Vidéos")):
+        p = home / name
+        if p.is_dir() and (label, p) not in roots:
+            roots.append((label, p))
+            
+    # System mount points
+    mnt = pathlib.Path("/mnt")
+    if mnt.is_dir():
+        try:
+            has_entries = any(mnt.iterdir())
+        except OSError:
+            has_entries = False
+        if has_entries:
+            roots.append(("Volumes montés", mnt))
+        
+    # Removable media mounts
+    run_media = pathlib.Path("/run/media") / home.name
+    if run_media.is_dir():
+        roots.append(("Disques amovibles", run_media))
+    elif pathlib.Path("/run/media").is_dir():
+        roots.append(("Disques amovibles", pathlib.Path("/run/media")))
+
+    # Root
+    roots.append(("Racine du système", pathlib.Path("/")))
+    
+    # Filter only existing and readable
+    valid = []
+    seen = set()
+    for label, path in roots:
+        try:
+            resolved = path.resolve()
+            if path.is_dir() and resolved not in seen:
+                seen.add(resolved)
+                valid.append((label, path))
+        except OSError:
+            pass
+    return valid
+
+
+def main() -> int:
+    home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+    theme = load_theme(install)
+    font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
+    if not font.is_file():
+        font = pathlib.Path(__file__).resolve().parent / "flex/assets/fonts/OpenSans-Regular.ttf"
+
+    media_icon = install / "assets/ui/media.png"
+    if not media_icon.is_file():
+        media_icon = pathlib.Path(__file__).resolve().parent / "assets/ui/media.png"
+
+    folder_icon = install / "flex/assets/icons/drive-empty.png"
+    if not folder_icon.is_file():
+        folder_icon = pathlib.Path(__file__).resolve().parent / "flex/assets/icons/drive-empty.png"
+
+    back_icon = install / "assets/ui/system-back.png"
+    if not back_icon.is_file():
+        back_icon = install / "assets/ui/retour.png"
+    if not back_icon.is_file():
+        back_icon = folder_icon
+
+    picker_bin = install / "openhtpc-media-picker"
+    sources_action = install / "openhtpc-media-sources-action"
+    flex_bin = install / "flex/bin/flex-launcher"
+
+    cfg_file = home / ".config/openhtpc/user-config.json"
+    configured_sources = set()
+    if cfg_file.is_file():
+        try:
+            cfg_data = json.loads(cfg_file.read_text(encoding="utf-8"))
+            for s in cfg_data.get("local_media_sources", []):
+                configured_sources.add(str(s))
+                try:
+                    configured_sources.add(str(pathlib.Path(s).resolve()))
+                except OSError:
+                    pass
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    current_arg = sys.argv[1] if len(sys.argv) >= 2 else "root"
+    
+    entries = []
+    
+    if current_arg == "root" or not current_arg:
+        # Show top-level roots
+        roots = get_roots(home)
+        for label, path in roots:
+            entries.append((
+                f"EXPLORER : {label}",
+                folder_icon,
+                f":replace {picker_bin} \"{str(path)}\""
+            ))
+        entries.append(("ANNULER (RETOUR À OPENHTPC)", back_icon, ":quit"))
+    else:
+        # Directory navigation
+        curr_path = pathlib.Path(current_arg).expanduser()
+        if not curr_path.is_dir():
+            # Inaccessible folder -> fallback to root
+            return os.execv(sys.executable, [sys.executable, str(picker_bin), "root"])
+
+        display_name = curr_path.name or str(curr_path)
+        try:
+            curr_resolved = str(curr_path.resolve())
+        except OSError:
+            curr_resolved = str(curr_path)
+        is_already_added = str(curr_path) in configured_sources or curr_resolved in configured_sources
+        
+        # Primary Action 1: Use this directory or show already added
+        if is_already_added:
+            entries.append((
+                f"SOURCE DÉJÀ AJOUTÉE : {display_name}",
+                media_icon,
+                ":quit"
+            ))
+        else:
+            entries.append((
+                f"✓ UTILISER CE DOSSIER : {display_name}",
+                media_icon,
+                f":replace {sources_action} add \"{str(curr_path)}\""
+            ))
+        
+        # Subdirectories
+        try:
+            subdirs = sorted(
+                [d for d in curr_path.iterdir() if d.is_dir() and not d.name.startswith(".")],
+                key=lambda d: d.name.casefold()
+            )
+        except OSError:
+            subdirs = []
+
+        for sub in subdirs[:80]:
+            try:
+                sub_res = str(sub.resolve())
+            except OSError:
+                sub_res = str(sub)
+            if str(sub) in configured_sources or sub_res in configured_sources:
+                entries.append((
+                    f"DOSSIER — {sub.name} (DÉJÀ AJOUTÉ)",
+                    folder_icon,
+                    f":replace {picker_bin} \"{str(sub)}\""
+                ))
+            else:
+                entries.append((
+                    f"DOSSIER — {sub.name}",
+                    folder_icon,
+                    f":replace {picker_bin} \"{str(sub)}\""
+                ))
+            
+        # Parent directory
+        if curr_path != curr_path.parent:
+            entries.append((
+                f"DOSSIER PARENT (..)",
+                back_icon,
+                f":replace {picker_bin} \"{str(curr_path.parent)}\""
+            ))
+        else:
+            entries.append((
+                "RETOUR AUX RACINES DU SYSTÈME",
+                back_icon,
+                f":replace {picker_bin} root"
+            ))
+            
+        # Cancel
+        entries.append((
+            "ANNULER (RETOUR À OPENHTPC)",
+            back_icon,
+            ":quit"
+        ))
+
+    # Build Flex INI
+    body = "\n".join(f"Entry{i}={label};{entry_icon};{command}" for i, (label, entry_icon, command) in enumerate(entries, 1))
+    
+    content = f"""[General]
+DefaultMenu=MEDIA_PICKER
+VSync=true
+OnLaunch=Blank
+WrapEntries=true
+MouseSelect=true
+{theme.background_block(install, 58)}
+[Layout]
+MaxButtons=5
+IconSize=160
+IconSpacing=4%
+VCenter=50%
+{theme.title_block(font, 48, 24)}
+{theme.highlight_block(accent=True)}
+[Hotkeys]
+Hotkey1=#1B;:quit
+Hotkey2=#08;:quit
+[MEDIA_PICKER]
+{body}
+"""
+
+    menu_target = home / ".config/openhtpc/media-picker.ini"
+    menu_target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=menu_target.name + ".", dir=menu_target.parent)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, menu_target)
+
+    os.execv(flex_bin, [str(flex_bin), "-c", str(menu_target)])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

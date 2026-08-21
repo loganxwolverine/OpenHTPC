@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Bounded SYSTEME actions through canonical OPENHTPC commands."""
+import argparse,datetime,importlib.machinery,importlib.util,json,os,pathlib,subprocess,tempfile
+
+def atomic(target,value):
+ target.parent.mkdir(parents=True,exist_ok=True);fd,tmp=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+ try:
+  with os.fdopen(fd,"w",encoding="utf-8") as stream:json.dump(value,stream,ensure_ascii=False,sort_keys=True);stream.write("\n");stream.flush();os.fsync(stream.fileno())
+  os.chmod(tmp,0o600);os.replace(tmp,target)
+ finally:
+  if os.path.exists(tmp):os.unlink(tmp)
+
+def load(name,path):
+ loader=importlib.machinery.SourceFileLoader(name,str(path));spec=importlib.util.spec_from_loader(name,loader);module=importlib.util.module_from_spec(spec);loader.exec_module(module);return module
+
+def render(home,install):
+ system=load("system_action_page",install/"openhtpc-system-page");ui=load("system_action_ui",install/"openhtpc-ui.py");model=system.status_model(home,install);font=install/"flex/assets/fonts/OpenSans-Regular.ttf";cache=home/".cache/openhtpc"
+ for name,page in (("system-dashboard.png","root"),("system-overview.png","overview"),("system-codecs.png","codecs"),("system-display.png","display"),("system-audio.png","audio"),("system-media_optical.png","media_optical"),("system-processing.png","processing"),("system-diagnostics.png","diagnostics"),("system-technical.png","technical"),("system-hardware.png","hardware"),("system-display-video.png","display_video"),("system-audio-media.png","audio_media")):ui.system_page_png(model,cache/name,font,page)
+
+def main():
+ parser=argparse.ArgumentParser();parser.add_argument("action",choices=("refresh","support"));args=parser.parse_args()
+ home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()));install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"));command=home/".local/bin/openhtpc";state=home/".local/state/openhtpc/system-action.json"
+ argv=[str(command),"capabilities","--refresh"] if args.action=="refresh" else [str(command),"support-bundle"]
+ try:
+  result=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60,check=False)
+  status="PASS" if result.returncode==0 else "PARTIAL";message="Capacités actualisées" if args.action=="refresh" and status=="PASS" else "Rapport créé" if status=="PASS" else "Certaines informations n'ont pas pu être actualisées"
+ except (OSError,subprocess.TimeoutExpired):status="FAILED";message="Certaines informations n'ont pas pu être actualisées"
+ atomic(state,{"schema":1,"action":args.action,"status":status,"message":message,"timestamp":datetime.datetime.now(datetime.timezone.utc).isoformat()})
+ try:render(home,install)
+ except (OSError,ValueError,ImportError):pass
+ return 0 if status=="PASS" else 1
+if __name__=="__main__":raise SystemExit(main())

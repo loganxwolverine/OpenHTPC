@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly OPENHTPC_HOME="${OPENHTPC_HOME:-$HOME}"
+readonly INSTALL_DIR="${OPENHTPC_INSTALL_DIR:-$OPENHTPC_HOME/.local/lib/openhtpc}"
+readonly SOURCES_MGR="$INSTALL_DIR/openhtpc-media-sources"
+if [[ $# -ge 2 && -x $SOURCES_MGR ]]; then
+    action="$1"
+    shift
+    "$SOURCES_MGR" "$action" "$@" || true
+fi
+
+exit 0
