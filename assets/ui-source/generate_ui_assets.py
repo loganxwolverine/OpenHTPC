@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "assets" / "ui"
+OUT = ROOT / "payload" / "assets" / "ui"
 WHITE = (244, 248, 255, 255)
 CYAN = (70, 210, 230, 255)
 BLUE = (70, 125, 230, 255)
@@ -41,6 +41,11 @@ SPECS = {
     "system-overview.png": ((513, 305), "overview"),
     "system-processing.png": ((2400, 2218), "processing"),
     "system-video.png": ((600, 600), "video"),
+    "playback-video.png": ((512, 512), "playback-video"),
+    "playback-language.png": ((512, 512), "playback-language"),
+    "playback-subtitles.png": ((512, 512), "playback-subtitles"),
+    "playback-audio-status.png": ((512, 512), "playback-audio-status"),
+    "playback-about.png": ((512, 512), "playback-about"),
     "traitement_video.png": ((2400, 2218), "processing"),
     "vue_ensemble.png": ((513, 305), "overview"),
 }
@@ -82,6 +87,28 @@ def render(size, kind):
         d.polygon([(w*.40,h*.34),(w*.40,h*.66),(w*.68,h*.50)], fill=WHITE)
         for x in (.23,.77):
             for y in (.27,.50,.73): d.ellipse((w*x-sw/2,h*y-sw/2,w*x+sw/2,h*y+sw/2), fill=GOLD)
+    elif kind == "playback-video":
+        d.rounded_rectangle((w*.10,h*.18,w*.90,h*.76), radius=s*.06, outline=CYAN, width=sw)
+        d.polygon([(w*.41,h*.32),(w*.41,h*.63),(w*.69,h*.475)], fill=WHITE)
+        line(d, [(w*.30,h*.86),(w*.70,h*.86)], GOLD, sw)
+    elif kind == "playback-language":
+        d.polygon([(w*.10,h*.41),(w*.29,h*.41),(w*.45,h*.25),(w*.45,h*.75),(w*.29,h*.59),(w*.10,h*.59)], fill=WHITE)
+        d.arc((w*.36,h*.28,w*.72,h*.72), -55, 55, fill=CYAN, width=sw)
+        centered_text(d,(w*.62,h*.18,w*.94,h*.82),"FR",max(42,int(s*.18)),GOLD)
+    elif kind == "playback-subtitles":
+        d.rounded_rectangle((w*.10,h*.18,w*.90,h*.76), radius=s*.07, outline=CYAN, width=sw)
+        d.polygon([(w*.25,h*.76),(w*.19,h*.90),(w*.43,h*.76)], fill=CYAN)
+        for y, width in ((.38,.56),(.53,.46)):
+            line(d, [(w*.22,h*y),(w*(.22+width),h*y)], WHITE, max(3,sw//2))
+    elif kind == "playback-audio-status":
+        for index, height in enumerate((.36,.60,.82,.52,.72)):
+            x=w*(.18+index*.16)
+            d.rounded_rectangle((x-sw,h*(1-height),x+sw,h*.82),radius=sw,fill=(CYAN,GOLD,WHITE,BLUE,VIOLET)[index])
+        line(d,[(w*.12,h*.84),(w*.88,h*.84)],WHITE,max(3,sw//2))
+    elif kind == "playback-about":
+        d.ellipse((w*.17,h*.17,w*.83,h*.83), outline=CYAN, width=sw)
+        d.ellipse((w*.46,h*.29,w*.54,h*.37), fill=GOLD)
+        line(d,[(cx,h*.45),(cx,h*.70)],WHITE,sw*2)
     elif kind == "diagnostic":
         line(d, [(w*.12,h*.55),(w*.28,h*.55),(w*.38,h*.30),(w*.52,h*.72),(w*.64,h*.43),(w*.88,h*.43)], CYAN, sw)
         d.ellipse((w*.15,h*.15,w*.85,h*.85), outline=WHITE, width=max(3,sw//2))

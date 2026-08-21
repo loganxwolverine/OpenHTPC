@@ -80,6 +80,11 @@ assets/ui/optical-bluray.png
 assets/ui/optical-dvd.png
 assets/ui/optical-empty.png
 assets/ui/optical-uhd.png
+assets/ui/playback-about.png
+assets/ui/playback-audio-status.png
+assets/ui/playback-language.png
+assets/ui/playback-subtitles.png
+assets/ui/playback-video.png
 assets/ui/power.png
 assets/ui/quit.png
 assets/ui/retour.png
@@ -131,6 +136,7 @@ openhtpc-media-sources-action
 openhtpc-optical-monitor
 openhtpc-optical.py
 openhtpc-play
+openhtpc-playback-setting
 openhtpc-play-dvd
 openhtpc-playback-policy.py
 openhtpc-playback-analyze.py

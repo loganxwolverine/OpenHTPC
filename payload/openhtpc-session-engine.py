@@ -522,9 +522,15 @@ def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon
     return os.linesep.join(lines)
 
 
-def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icon: pathlib.Path) -> tuple[str, str, str, str]:
+def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: dict[str, pathlib.Path]) -> tuple[str, str, str, str]:
     """Couch-native selectors backed by persistent user configuration."""
+    if not isinstance(icons, dict):
+        icons = {key: icons for key in ("video", "audio", "subtitles", "status", "about", "back")}
     policy_path = install / "openhtpc-playback-policy.py"
+    setting = install / "openhtpc-playback-setting"
+    video_icon, audio_icon = icons["video"], icons["audio"]
+    subtitle_icon, status_icon = icons["subtitles"], icons["status"]
+    about_icon, back_icon = icons["about"], icons["back"]
     try:
         spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_menu", policy_path)
         policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
@@ -535,30 +541,30 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icon: p
     audio = {"AUTO":"AUTO","FR":"FRANÇAIS","DEFAULT":"PISTE PAR DÉFAUT"}[prefs["audio_language_policy"]]
     subtitle = {"AUTO":"AUTO","OFF":"DÉSACTIVÉS","FR_FORCED":"FRANÇAIS FORCÉS","FR_FULL":"FRANÇAIS COMPLETS"}[prefs["subtitle_policy"]]
     root = os.linesep.join((
-        f"Entry1=MODE VIDÉO · {presentation};{icon};:submenu PLAYBACK_VIDEO",
-        f"Entry2=LANGUE AUDIO · {audio};{icon};:submenu PLAYBACK_AUDIO",
-        f"Entry3=SOUS-TITRES · {subtitle};{icon};:submenu PLAYBACK_SUBTITLES",
-        f"Entry4=ÉTAT AUDIO;{icon};:submenu SYSTEM_AUDIO",
-        f"Entry5=CALIBRATION CINÉMA AUTO;{icon};:submenu SYSTEM_PROCESSING",
-        f"Entry6=RETOUR;{icon};:back",
+        f"Entry1=MODE VIDÉO;{video_icon};:submenu PLAYBACK_VIDEO",
+        f"Entry2=LANGUE AUDIO;{audio_icon};:submenu PLAYBACK_AUDIO",
+        f"Entry3=SOUS-TITRES;{subtitle_icon};:submenu PLAYBACK_SUBTITLES",
+        f"Entry4=ÉTAT AUDIO;{status_icon};:submenu SYSTEM_AUDIO",
+        f"Entry5=À PROPOS;{about_icon};:submenu SYSTEM_ABOUT",
+        f"Entry6=RETOUR;{back_icon};:back",
     ))
     video = os.linesep.join((
-        f"Entry1=PURE;{icon};:fork {policy_path} set presentation_mode PURE",
-        f"Entry2=CINÉMA AUTO;{icon};:fork {policy_path} set presentation_mode CINEMA_AUTO",
-        f"Entry3=RETOUR;{icon};:back",
+        f"Entry1=PURE;{video_icon};:fork {setting} presentation_mode PURE",
+        f"Entry2=CINÉMA AUTO;{video_icon};:fork {setting} presentation_mode CINEMA_AUTO",
+        f"Entry3=RETOUR;{back_icon};:back",
     ))
     audio_menu = os.linesep.join((
-        f"Entry1=AUTO;{icon};:fork {policy_path} set audio_language_policy AUTO",
-        f"Entry2=FRANÇAIS;{icon};:fork {policy_path} set audio_language_policy FR",
-        f"Entry3=PISTE PAR DÉFAUT;{icon};:fork {policy_path} set audio_language_policy DEFAULT",
-        f"Entry4=RETOUR;{icon};:back",
+        f"Entry1=AUTO;{audio_icon};:fork {setting} audio_language_policy AUTO",
+        f"Entry2=FRANÇAIS;{audio_icon};:fork {setting} audio_language_policy FR",
+        f"Entry3=PISTE PAR DÉFAUT;{audio_icon};:fork {setting} audio_language_policy DEFAULT",
+        f"Entry4=RETOUR;{back_icon};:back",
     ))
     subtitles = os.linesep.join((
-        f"Entry1=AUTO;{icon};:fork {policy_path} set subtitle_policy AUTO",
-        f"Entry2=DÉSACTIVÉS;{icon};:fork {policy_path} set subtitle_policy OFF",
-        f"Entry3=FRANÇAIS FORCÉS;{icon};:fork {policy_path} set subtitle_policy FR_FORCED",
-        f"Entry4=FRANÇAIS COMPLETS;{icon};:fork {policy_path} set subtitle_policy FR_FULL",
-        f"Entry5=RETOUR;{icon};:back",
+        f"Entry1=AUTO;{subtitle_icon};:fork {setting} subtitle_policy AUTO",
+        f"Entry2=DÉSACTIVÉS;{subtitle_icon};:fork {setting} subtitle_policy OFF",
+        f"Entry3=FRANÇAIS FORCÉS;{subtitle_icon};:fork {setting} subtitle_policy FR_FORCED",
+        f"Entry4=FRANÇAIS COMPLETS;{subtitle_icon};:fork {setting} subtitle_policy FR_FULL",
+        f"Entry5=RETOUR;{back_icon};:back",
     ))
     return root, video, audio_menu, subtitles
 
@@ -663,7 +669,15 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     icon_processing = resolve_sys_icon("system-processing.png", resolve_sys_icon("traitement_video.png", logo))
     icon_diagnostic = resolve_sys_icon("system-diagnostics.png", resolve_sys_icon("diagnostic.png", logo))
     icon_back = resolve_sys_icon("system-back.png", resolve_sys_icon("retour.png", logo))
-    playback_root, playback_video, playback_audio, playback_subtitles = _playback_policy_sections(home, install, icon_processing)
+    playback_icons = {
+        "video": resolve_sys_icon("playback-video.png", icon_codecs),
+        "audio": resolve_sys_icon("playback-language.png", icon_audio),
+        "subtitles": resolve_sys_icon("playback-subtitles.png", media_icon),
+        "status": resolve_sys_icon("playback-audio-status.png", icon_audio),
+        "about": resolve_sys_icon("playback-about.png", logo),
+        "back": icon_back,
+    }
+    playback_root, playback_video, playback_audio, playback_subtitles = _playback_policy_sections(home, install, playback_icons)
     disc_sheet = home / ".cache/openhtpc/disc-sheet.png"
     if disc_view.is_file():
         subprocess.run([str(disc_view), "--home", str(home)], timeout=12, check=False,

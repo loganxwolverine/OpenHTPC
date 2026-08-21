@@ -177,9 +177,13 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
 def osd_text(decision: dict) -> str:
     p = decision["presentation"]; a = decision["audio"]; s = decision["subtitle"]
     mode = "CINÉMA AUTO → " + p["resolved"] if p["requested"] == "CINEMA_AUTO" else p["resolved"]
-    audio = "Français" if a["requested"] == "FR" and a["resolved"] != "MPV_DEFAULT" else "Piste par défaut" if a["requested"] == "DEFAULT" else "Auto"
-    subtitles = "Aucun" if s["resolved"] == "NONE" else "Français forcés" if s["requested"] == "FR_FORCED" else "Français complets" if s["requested"] == "FR_FULL" else "Auto"
-    return f"OPENHTPC • {mode}\\NAudio : {audio}\\NSous-titres : {subtitles}"
+    audio = "Français" if a["resolved"].startswith("AID_") and a["requested"] == "FR" else "Piste par défaut" if a["requested"] == "DEFAULT" else "Auto"
+    if s["requested"] == "OFF": subtitles = "Désactivés"
+    elif s["resolved"] == "NONE": subtitles = "Aucun"
+    elif s["requested"] == "FR_FORCED": subtitles = "Français forcés"
+    elif s["requested"] == "FR_FULL": subtitles = "Français"
+    else: subtitles = "Auto"
+    return f"OPENHTPC\\NMode vidéo : {mode}\\NAudio : {audio}\\NSous-titres : {subtitles}"
 
 
 def main() -> int:

@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Persist a playback preference and refresh its couch status page.
+
+Copyright 2026 Steve Dehanne
+SPDX-License-Identifier: Apache-2.0
+
+Part of the OPENHTPC project.
+Original project by Steve Dehanne.
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+import pathlib
+import subprocess
+import sys
+
+
+def load(path: pathlib.Path):
+    spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_setting", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        return 2
+    home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", pathlib.Path(__file__).resolve().parent))
+    policy = load(install / "openhtpc-playback-policy.py")
+    policy.write_preference(home, sys.argv[1], sys.argv[2])
+    refresh = install / "openhtpc-system-action"
+    if refresh.is_file():
+        subprocess.run([str(refresh), "playback"], check=False, timeout=15)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

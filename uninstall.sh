@@ -12,7 +12,7 @@ for command in openhtpc openhtpc-builder openhtpc-player-test openhtpc-session-s
 done
 autostart="$HOME/.config/autostart/openhtpc.desktop"
 if [[ -f $autostart ]] && grep -Fq 'X-OPENHTPC-Managed=true' "$autostart"; then rm -- "$autostart"; fi
-if [[ -f $INSTALL_DIR/VERSION ]] && grep -Eq '^(4\.0\.0-basic-v1-rc[0-9]+|1\.0\.0|1\.1\.0-dev[1-9]|1\.1\.0-dev1[0-9]|1\.1\.0-dev2[0-9])$' "$INSTALL_DIR/VERSION"; then rm -rf -- "$INSTALL_DIR"; fi
+if [[ -f $INSTALL_DIR/VERSION ]] && grep -Eq '^(4\.0\.0-basic-v1-rc[0-9]+|1\.0\.0|1\.1\.0-dev[1-9]|1\.1\.0-dev1[0-9]|1\.1\.0-dev2[0-9]|1\.1\.0-dev3[0-9])$' "$INSTALL_DIR/VERSION"; then rm -rf -- "$INSTALL_DIR"; fi
 
 
 

@@ -29,6 +29,11 @@ capsule, a small geometric disc medallion, OPENHTPC palette accents and generic
 text rendered with the already licensed Open Sans font. They do not trace,
 copy or reproduce DVD-Video, Blu-ray Disc or Ultra HD Blu-ray trademarks.
 
+Dev33 adds five original playback-control icons generated from primitives:
+screen/play symbol, speaker plus `FR`, generic subtitle bubble, audio-level
+bars and an information symbol. They visually distinguish actions without
+copying an icon pack, trademark or official closed-caption logo.
+
 These replacement PNGs and their generator are OPENHTPC project artwork/code:
 
 Copyright 2026 OPENHTPC contributors

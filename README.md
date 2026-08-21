@@ -1,8 +1,10 @@
 # OPENHTPC 1.1 RC3 Development Candidate
 
-This development package is version `1.1.0-dev32`, build
-`rc3-playback-policy-language-provenance-dev1`. It is derived from the
-physically qualified and frozen public RC2 baseline. It is not RC3 final and
+This development package is version `1.1.0-dev33`, build
+`rc3-playback-ui-osd-polish-dev1`. It is derived from the dev32 playback-policy
+candidate and preserves its policy decisions while refining only the couch UI
+and resolved playback OSD. Its history descends normally from the physically
+qualified and frozen public RC2 baseline. It is not RC3 final and
 requires physical playback-policy validation.
 
 The public RC2 tag `v1.1.0-rc2` remains immutable. No RC3 tag is created by

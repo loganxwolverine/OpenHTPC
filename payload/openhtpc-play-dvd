@@ -132,7 +132,7 @@ subtitle_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["
     --field "audio_requested=$audio_requested" --field "audio_resolved=$audio_resolved" \
     --field "subtitle_requested=$subtitle_requested" --field "subtitle_resolved=$subtitle_resolved"
 
-"$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --osd-playing-msg-duration=4000 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
+"$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
 printf '%s kind=dvd exit_code=%s\n' "$(date --iso-8601=seconds)" "$rc" >>"$log"
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_PROCESS_EXITED

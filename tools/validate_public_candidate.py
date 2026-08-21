@@ -47,8 +47,8 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     results.append((name, bool(condition), detail))
 
 metadata = json.loads((PAYLOAD / "version.json").read_text())
-check("candidate_version", metadata.get("version") == "1.1.0-dev32", str(metadata.get("version")))
-check("candidate_build", metadata.get("build_id") == "rc3-playback-policy-language-provenance-dev1", str(metadata.get("build_id")))
+check("candidate_version", metadata.get("version") == "1.1.0-dev33", str(metadata.get("version")))
+check("candidate_build", metadata.get("build_id") == "rc3-playback-ui-osd-polish-dev1", str(metadata.get("build_id")))
 check("required_docs", all((ROOT / p).is_file() for p in REQUIRED_DOCS))
 check("filmgrain_removed", not any(ROOT.rglob("filmgrain.glsl")))
 check("benchmark_manifest", (PAYLOAD / "assets/benchmark/manifest.json").is_file())
@@ -57,7 +57,7 @@ for name, expected in EXPECTED_BENCHMARKS.items():
     check(f"benchmark:{name}", path.is_file() and digest(path) == expected, expected)
 
 ui = sorted((PAYLOAD / "assets/ui").glob("*.png"))
-check("ui_asset_count", len(ui) == 26, str(len(ui)))
+check("ui_asset_count", len(ui) == 31, str(len(ui)))
 for path in ui:
     with Image.open(path) as image:
         check(f"ui_rgba:{path.name}", image.mode == "RGBA" and image.getpixel((0, 0))[3] == 0)
@@ -74,7 +74,7 @@ combined = "\n".join(text for _, text in text_files)
 private_home = "/" + "home" + "/" + "steve"
 check("no_private_home", private_home not in combined)
 check("no_private_ips", not re.search(r"192\.168\.1\.(?:10|132|229)\b", combined))
-check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[3-9]|[4-9][0-9])\b", combined, re.I))
+check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[4-9]|[4-9][0-9])\b", combined, re.I))
 check("no_secret_values", not re.search(r"BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|https?://[^\s/:]+:[^\s/@]+@", combined))
 
 reference_text = "\n".join(text for path, text in text_files if path.name != "legacy-managed-files-dev27.txt")

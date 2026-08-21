@@ -1,6 +1,15 @@
 # Changelog
 
-## OPENHTPC 1.1 RC3 development candidate — 1.1.0-dev32
+## OPENHTPC 1.1 RC3 development candidate — 1.1.0-dev33
+
+- Separates the LECTURE page into an informational active-preferences zone and
+  a bottom action row with distinct first-party icons.
+- Refreshes the active-preferences page immediately after a saved selection.
+- Shows the resolved playback policy in a top-left MPV OSD for five seconds.
+- Backlog: `FUTURE_MEDIA_LANGUAGE_PREFERENCE` will generalize the currently
+  qualified French media-language policy after RC3, without changing dev33.
+
+## Previous candidate — 1.1.0-dev32
 
 - Added persistent couch-native presentation, audio-language and subtitle
   preferences under SYSTÈME → LECTURE.
