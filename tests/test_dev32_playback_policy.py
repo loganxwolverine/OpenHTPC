@@ -119,7 +119,7 @@ class EndToEndContract(unittest.TestCase):
             home=pathlib.Path(value);policy.write_preference(home,"presentation_mode","CINEMA_AUTO")
             result=policy.resolve(home,probe={"streams":[]})
             self.assertEqual((result["presentation"]["requested"],result["presentation"]["resolved"]),("CINEMA_AUTO","PURE"))
-            self.assertIn("Profil appliqué : PURE",policy.osd_text(result))
+            self.assertIn("Mode vidéo : CINÉMA AUTO",policy.osd_text(result))
 
     def test_real_dispatcher_command_reaches_mpv(self):
         with tempfile.TemporaryDirectory() as value:
@@ -133,7 +133,7 @@ class EndToEndContract(unittest.TestCase):
             env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(PAYLOAD),"OPENHTPC_FLEX_RETAINED":"1","PATH":str(fake)+os.pathsep+os.environ["PATH"]}
             result=subprocess.run([str(PAYLOAD/"openhtpc-play"),str(media)],env=env,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
-            raw_args=arglog.read_text();args=raw_args.splitlines();self.assertIn("--aid=2",args);self.assertIn("--sid=1",args);self.assertIn("--osd-playing-msg=Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE\nAudio : Français\nSous-titres : Français forcés",raw_args)
+            raw_args=arglog.read_text();args=raw_args.splitlines();self.assertIn("--aid=2",args);self.assertIn("--sid=1",args);self.assertIn("--osd-playing-msg=Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Français forcés",raw_args)
             records=[json.loads(line) for line in (home/".local/state/openhtpc/runtime.log").read_text().splitlines()]
             event=next(item for item in records if item["event"]=="PLAYBACK_POLICY");self.assertEqual((event["audio_resolved"],event["subtitle_resolved"]),("AID_2","SID_1"))
 

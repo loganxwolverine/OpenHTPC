@@ -1,5 +1,12 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 final UI and optical artwork — 1.1.0-dev37
+
+- Separates the approved playback dock icons vertically from their labels.
+- Shows only the active user video-mode preference in the startup OSD.
+- Integrates deterministic UI derivatives of Steve's optical-media artwork.
+- Leaves playback, DVD detection and all media policies unchanged.
+
 ## OPENHTPC 1.1 RC3 playback UX corrective — 1.1.0-dev36
 
 - Keeps LECTURE available when system capabilities are partial or unavailable.

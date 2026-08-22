@@ -70,8 +70,8 @@ class EffectiveOsd(unittest.TestCase):
 
     def test_auto_and_pure_show_policy_and_effective_mode(self):
         expected = {
-            "CINEMA_AUTO": "Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE\nAudio : Auto\nSous-titres : Désactivés",
-            "PURE": "Politique vidéo : PURE\nProfil appliqué : PURE\nAudio : Auto\nSous-titres : Désactivés",
+            "CINEMA_AUTO": "Mode vidéo : CINÉMA AUTO\nAudio : Auto\nSous-titres : Désactivés",
+            "PURE": "Mode vidéo : PURE\nAudio : Auto\nSous-titres : Désactivés",
         }
         for requested in ("CINEMA_AUTO", "PURE"):
             text = policy.osd_text(self.decision(requested))

@@ -88,11 +88,11 @@ class OsdAndPreservedPolicy(unittest.TestCase):
 
     def test_pure_pure_osd(self):
         self.assertEqual(policy.osd_text(self.decision("PURE")),
-            "Politique vidéo : PURE\nProfil appliqué : PURE\nAudio : Français\nSous-titres : Désactivés")
+            "Mode vidéo : PURE\nAudio : Français\nSous-titres : Désactivés")
 
     def test_auto_pure_osd(self):
         self.assertEqual(policy.osd_text(self.decision("CINEMA_AUTO")),
-            "Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE\nAudio : Français\nSous-titres : Désactivés")
+            "Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Désactivés")
 
     def test_logs_and_dvd_global_shortcut_remain(self):
         for player in ("openhtpc-play", "openhtpc-play-dvd"):
@@ -103,13 +103,11 @@ class OsdAndPreservedPolicy(unittest.TestCase):
         self.assertIn(":submenu DVD_VIDEO_MODE", session_source)
         self.assertIn("presentation_mode CINEMA_AUTO", session_source)
 
-    def test_policy_failure_fallback_uses_same_user_semantics(self):
+    def test_policy_failure_fallback_remains_multiline(self):
         local = (PAYLOAD / "openhtpc-play").read_text(encoding="utf-8")
         dvd = (PAYLOAD / "openhtpc-play-dvd").read_text(encoding="utf-8")
-        for source in (local, dvd):
-            self.assertIn("Politique vidéo :", source)
-            self.assertIn("Profil appliqué :", source)
-        self.assertNotIn('osd = "OPENHTPC', local)
+        self.assertIn("Audio : Auto", local)
+        self.assertIn("Sous-titres : Auto", dvd)
 
     def test_audio_fr_and_subtitle_off_are_unchanged(self):
         probe = {"streams":[{"codec_type":"audio","tags":{"language":"fra","title":"TrueFrench VFF"},"disposition":{}}]}

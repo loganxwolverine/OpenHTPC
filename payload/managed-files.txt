@@ -74,6 +74,12 @@ assets/ui/diagnostic.png
 assets/ui/eject.png
 assets/ui/folder.png
 assets/ui/logodvd.png
+assets/ui/dvd-media.png
+assets/ui/dvd-media-badge.png
+assets/ui/bluray-media.png
+assets/ui/bluray-media-badge.png
+assets/ui/uhd-bluray-media.png
+assets/ui/uhd-bluray-media-badge.png
 assets/ui/media.png
 assets/ui/media_optique.png
 assets/ui/optical-bluray.png

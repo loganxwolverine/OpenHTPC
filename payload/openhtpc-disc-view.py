@@ -59,9 +59,9 @@ def poster_image(path,size,font_path,allowed_roots=()):
 # Media-type profiles — logo key: physical-media logo asset for poster overlay.
 # None = fall back to textual pill badge. Future Blu-ray/UHD logos drop in here.
 MEDIA_PROFILES = {
-    "DVD":    {"badge": "DVD VIDÉO",       "icon": "assets/ui/optical-dvd.png",    "logo": "assets/ui/logodvd.png", "label": "DVD"},
-    "BLURAY": {"badge": "BLU-RAY",         "icon": "assets/ui/optical-bluray.png", "logo": None,                    "label": "Blu-ray"},
-    "UHD":    {"badge": "4K UHD BLU-RAY",  "icon": "assets/ui/optical-uhd.png",   "logo": None,                    "label": "UHD Blu-ray"},
+    "DVD":    {"badge": "DVD VIDÉO",      "icon": "assets/ui/optical-dvd.png",    "logo": "assets/ui/dvd-media-badge.png",        "label": "DVD"},
+    "BLURAY": {"badge": "BLU-RAY",        "icon": "assets/ui/optical-bluray.png", "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray"},
+    "UHD":    {"badge": "4K UHD BLU-RAY", "icon": "assets/ui/optical-uhd.png",    "logo": "assets/ui/uhd-bluray-media-badge.png", "label": "UHD Blu-ray"},
 }
 
 # ─── Task A: Physical-media logo overlay — top-right corner of poster ────────
@@ -71,7 +71,7 @@ MEDIA_PROFILES = {
 # Logo: scaled to LOGO_W wide, anchored to top-right corner with a slight
 # outward bleed so it visually clings to the frame corner.
 _LOGO_W   = 115                   # width in px — smaller than previous version
-_LOGO_AR  = 1299 / 709            # source aspect ratio (1299×709)
+_LOGO_AR  = 2.0                   # deterministic badge canvas ratio (512×256)
 _LOGO_H   = round(_LOGO_W / _LOGO_AR)   # ≈ 63 px
 _LOGO_PAD = 7
 # Top-right: right edge bleeds 18 px outside poster, top edge 10 px above poster
@@ -90,13 +90,8 @@ def _draw_logo_overlay(base, install, media_prof):
     try:
         with Image.open(logo_path) as src:
             src.load()
-            # Source is black-on-transparent RGBA.
-            # Invert RGB channels → white logo; preserve original alpha.
             logo_rgba = src.convert("RGBA")
-            r, g, b, a = logo_rgba.split()
-            inv = r.point(lambda v: 255 - v)
-            logo_white = Image.merge("RGBA", (inv, inv, inv, a))
-            logo_scaled = logo_white.resize((_LOGO_W, _LOGO_H), Image.Resampling.LANCZOS)
+            logo_scaled = logo_rgba.resize((_LOGO_W, _LOGO_H), Image.Resampling.LANCZOS)
 
         # 1. Soft drop shadow (+4/+4 offset, rounded)
         shadow = Image.new("RGBA", base.size, (0, 0, 0, 0))

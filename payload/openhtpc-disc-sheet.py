@@ -24,7 +24,7 @@ def identity(state):
   return re.sub(r"(?i)(?:[ _.-]+)(?:DVD|DISC|DISK)\s*[12]\s*$","",str(raw)).strip() or "Disque identifié"
  return {"DVD":"DVD","BLURAY":"Blu-ray","UHD":"UHD Blu-ray","INITIALIZING":"Initialisation du disque…"}.get(state.get("state"),"Aucun disque détecté")
 def model(home,install,state):
- title=identity(state); metadata={"status":"NOT_CONFIGURED"}; artwork={"DVD":"optical-dvd.png","BLURAY":"optical-bluray.png","UHD":"optical-uhd.png"}.get(state.get("state"),"optical-empty.png"); artwork=install/"assets/ui"/artwork
+ title=identity(state); metadata={"status":"NOT_CONFIGURED"}; artwork={"DVD":"dvd-media.png","BLURAY":"bluray-media.png","UHD":"uhd-bluray-media.png"}.get(state.get("state"),"optical-empty.png"); artwork=install/"assets/ui"/artwork
  if state.get("state")=="DVD" and (install/"openhtpc-tmdb.py").is_file():
   tmdb=load("tmdb",install/"openhtpc-tmdb.py"); metadata=tmdb.lookup(home,title); poster=tmdb.poster(home,metadata)
   if metadata.get("status")=="PASS": title=metadata.get("title") or title

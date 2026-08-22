@@ -1002,15 +1002,16 @@ static void calculate_button_geometry(Entry *entry, int buttons)
             entry->icon_rect.w = width;
             entry->icon_rect.h = (geo.screen_height * 8) / 100;
             if (is_system_subpage()) {
-                int icon_size = (geo.screen_height * 5) / 100;
-                int pad = (geo.screen_width * 9) / 1000;
-                int text_area_x = entry->icon_rect.x + pad + icon_size + pad;
-                int text_area_w = width - icon_size - 3 * pad;
-                entry->text_rect.x = text_area_x + (text_area_w - entry->text_rect.w) / 2;
+                int icon_size = (geo.screen_height * 4) / 100;
+                int safety_margin = (geo.screen_height * 1) / 100;
+                int stack_height = icon_size + safety_margin + entry->text_rect.h;
+                int stack_y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
+                entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
+                entry->text_rect.y = stack_y + icon_size + safety_margin;
             } else {
                 entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
+                entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
             }
-            entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
             entry = entry->next;
         }
         return;
@@ -1898,10 +1899,11 @@ static void draw_screen()
 
             SDL_Rect artwork_rect = entry->icon_rect;
             if (is_system_subpage()) {
-                int icon_size = (geo.screen_height * 5) / 100;
-                int pad = (geo.screen_width * 9) / 1000;
-                artwork_rect.x = entry->icon_rect.x + pad;
-                artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - icon_size) / 2;
+                int icon_size = (geo.screen_height * 4) / 100;
+                int safety_margin = (geo.screen_height * 1) / 100;
+                int stack_height = icon_size + safety_margin + entry->text_rect.h;
+                artwork_rect.x = entry->icon_rect.x + (entry->icon_rect.w - icon_size) / 2;
+                artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
                 artwork_rect.w = icon_size;
                 artwork_rect.h = icon_size;
             }

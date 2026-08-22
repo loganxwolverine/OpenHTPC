@@ -34,6 +34,29 @@ screen/play symbol, speaker plus `FR`, generic subtitle bubble, audio-level
 bars and an information symbol. They visually distinguish actions without
 copying an icon pack, trademark or official closed-caption logo.
 
+## Project-provided optical-media artwork — dev37
+
+The following source masters were provided for OPENHTPC by Steve Dehanne in
+`openhtpc/assets/systeme/` on the project NAS. They are not redistributed or
+modified as masters:
+
+- `Dvd_logo.jpg` — SHA256
+  `77924fff80e273b7ac09dc2c0cf6b1aae5e6036c45f1aa01807a16764da848d7`
+- `bluray_logo.jpg` — SHA256
+  `b58ed1513beff775341131aada124d26914dcef0a58a612b86569c577dcfaac8`
+- `bluray_UH_4K_logo.jpg` — SHA256
+  `32e9e104dc162bb830d77db34896c99a2bdfe78ae3c5f61b49b040a88db2286c`
+
+`assets/ui-source/derive_optical_media.py` reproducibly crops those masters,
+preserves their aspect ratios, applies Lanczos downscaling, and places the
+result on an RGBA canvas. It produces `dvd-media.png`, `bluray-media.png`,
+`uhd-bluray-media.png` and their matching `*-badge.png` variants.
+
+Project-provided optical-media artwork. Created for OPENHTPC by Steve Dehanne.
+These are descriptive project media identifiers, not official DVD Forum,
+Blu-ray Disc Association, or Ultra HD Blu-ray logos. OPENHTPC claims no
+official affiliation with those trademark holders.
+
 These replacement PNGs and their generator are OPENHTPC project artwork/code:
 
 Copyright 2026 OPENHTPC contributors
