@@ -1,9 +1,9 @@
 # OPENHTPC 1.1 RC3 Development Candidate
 
-This development package is version `1.1.0-dev33`, build
-`rc3-playback-ui-osd-polish-dev1`. It is derived from the dev32 playback-policy
-candidate and preserves its policy decisions while refining only the couch UI
-and resolved playback OSD. Its history descends normally from the physically
+This corrective development package is version `1.1.0-dev34`, build
+`rc3-playback-ui-persistence-osd-fix-dev1`. It is derived from dev33 and
+preserves its policy decisions while correcting only the couch playback-page
+layout, preference refresh and multiline OSD transport. Its history descends normally from the physically
 qualified and frozen public RC2 baseline. It is not RC3 final and
 requires physical playback-policy validation.
 

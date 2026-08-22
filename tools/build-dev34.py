@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the distinct OPENHTPC dev33 physical-validation candidate.
+"""Build the distinct OPENHTPC dev34 corrective validation candidate.
 
 Copyright 2026 Steve Dehanne
 SPDX-License-Identifier: Apache-2.0
@@ -18,7 +18,7 @@ import tarfile
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NAME = "OpenHTPC-1.1-RC3-Candidate-Dev33"
+NAME = "OpenHTPC-1.1-RC3-Candidate-Dev34"
 ARTIFACTS = ROOT / "artifacts"
 EXCLUDED_PARTS = {".git", "artifacts", "__pycache__"}
 
@@ -52,7 +52,7 @@ def build() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     report = ARTIFACTS / f"{NAME}-report.json"
     if any(path.exists() for path in (archive, checksum, report)):
-        raise FileExistsError("DEV33_ARTIFACT_COLLISION")
+        raise FileExistsError("DEV34_ARTIFACT_COLLISION")
     with tempfile.NamedTemporaryFile(dir=ARTIFACTS, prefix=NAME + ".", delete=False) as raw:
         temporary = pathlib.Path(raw.name)
     try:
@@ -72,11 +72,11 @@ def build() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
     sha = digest(archive)
     checksum.write_text(f"{sha}  {archive.name}\n", encoding="utf-8")
     report.write_text(json.dumps({
-        "schema": 1, "product": "OPENHTPC", "version": "1.1.0-dev33",
-        "build_id": "rc3-playback-ui-osd-polish-dev1", "artifact": archive.name,
-        "sha256": sha, "baseline_version": "1.1.0-dev32",
-        "baseline_commit": "181dfd406aed0970ca5745206e00dcdad405ae1e",
-        "status": "DEV33_TECHNICAL_TESTS_PASS",
+        "schema": 1, "product": "OPENHTPC", "version": "1.1.0-dev34",
+        "build_id": "rc3-playback-ui-persistence-osd-fix-dev1", "artifact": archive.name,
+        "sha256": sha, "baseline_version": "1.1.0-dev33",
+        "baseline_commit": "da2c22974bf294ea4f2f1b3436b7e2d813b4f297",
+        "status": "DEV34_TECHNICAL_TESTS_PASS",
         "official_release_signing": "OFFICIAL_RELEASE_SIGNING_KEY_PENDING",
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return archive, checksum, report

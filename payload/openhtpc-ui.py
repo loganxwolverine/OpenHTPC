@@ -609,17 +609,17 @@ def system_page_png(
         presentation = "CINÉMA AUTO" if p.get("presentation_mode") == "CINEMA_AUTO" else "PURE"
         audio = {"AUTO":"Auto","FR":"Français","DEFAULT":"Piste par défaut"}.get(p.get("audio_language_policy"), "Auto")
         subtitle = {"AUTO":"Auto","OFF":"Désactivés","FR_FORCED":"Français forcés","FR_FULL":"Français complets"}.get(p.get("subtitle_policy"), "Auto")
-        card((70, 170, 1780, 540), "LECTURE — PRÉFÉRENCES ACTIVES", [
+        card((70, 170, 1780, 360), "LECTURE — PRÉFÉRENCES ACTIVES", [
             ("Mode vidéo", presentation, "#78d9ae" if presentation == "PURE" else "#22c7ff"),
             ("Langue audio", audio, None),
             ("Sous-titres", subtitle, None),
             ("Application", "À la prochaine lecture", None),
             ("Persistance", "Configuration utilisateur", None),
         ])
-        txt((90, 760), "ACTIONS", 20, "#22c7ff", True)
-        txt((90, 802), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
+        txt((90, 590), "ACTIONS", 20, "#22c7ff", True)
+        txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
     elif page == "about":
-        version = model.get("technical", {}).get("version", "1.1.0-dev33")
+        version = model.get("technical", {}).get("version", "1.1.0-dev34")
         card((70, 170, 1780, 680), "À PROPOS", [
             ("Projet", "OPENHTPC", "#22c7ff"),
             ("Version", version, None),

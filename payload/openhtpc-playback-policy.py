@@ -183,7 +183,9 @@ def osd_text(decision: dict) -> str:
     elif s["requested"] == "FR_FORCED": subtitles = "Français forcés"
     elif s["requested"] == "FR_FULL": subtitles = "Français"
     else: subtitles = "Auto"
-    return f"OPENHTPC\\NMode vidéo : {mode}\\NAudio : {audio}\\NSous-titres : {subtitles}"
+    # Pass literal newlines as one argv value.  MPV's osd-playing-msg parser
+    # treats a literal ``\N`` as an invalid property-expansion escape.
+    return f"OPENHTPC\nMode vidéo : {mode}\nAudio : {audio}\nSous-titres : {subtitles}"
 
 
 def main() -> int:

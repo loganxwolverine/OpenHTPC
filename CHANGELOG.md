@@ -1,5 +1,12 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 corrective candidate — 1.1.0-dev34
+
+- Separates the LECTURE status card from its bottom action zone.
+- Makes presentation-mode page refresh observable without restarting Flex.
+- Sends the startup OSD as literal multiline UTF-8 in one argument.
+- Preserves the dev33 icons and qualified audio/subtitle engines.
+
 ## OPENHTPC 1.1 RC3 development candidate — 1.1.0-dev33
 
 - Separates the LECTURE page into an informational active-preferences zone and
