@@ -47,8 +47,8 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     results.append((name, bool(condition), detail))
 
 metadata = json.loads((PAYLOAD / "version.json").read_text())
-check("candidate_version", metadata.get("version") == "1.1.0-dev35", str(metadata.get("version")))
-check("candidate_build", metadata.get("build_id") == "rc3-playback-ux-finalize-dev1", str(metadata.get("build_id")))
+check("candidate_version", metadata.get("version") == "1.1.0-dev36", str(metadata.get("version")))
+check("candidate_build", metadata.get("build_id") == "rc3-playback-ux-corrective-dev1", str(metadata.get("build_id")))
 check("required_docs", all((ROOT / p).is_file() for p in REQUIRED_DOCS))
 check("filmgrain_removed", not any(ROOT.rglob("filmgrain.glsl")))
 check("benchmark_manifest", (PAYLOAD / "assets/benchmark/manifest.json").is_file())
@@ -74,7 +74,7 @@ combined = "\n".join(text for _, text in text_files)
 private_home = "/" + "home" + "/" + "steve"
 check("no_private_home", private_home not in combined)
 check("no_private_ips", not re.search(r"192\.168\.1\.(?:10|132|229)\b", combined))
-check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[6-9]|[4-9][0-9])\b", combined, re.I))
+check("no_unreleased_later_dev", not re.search(r"1\.1\.0-dev(?:3[7-9]|[4-9][0-9])\b", combined, re.I))
 check("no_secret_values", not re.search(r"BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|https?://[^\s/:]+:[^\s/@]+@", combined))
 
 reference_text = "\n".join(text for path, text in text_files if path.name != "legacy-managed-files-dev27.txt")

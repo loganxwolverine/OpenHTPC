@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         osd = policy.osd_text(decision)
     except (OSError, AttributeError, ImportError, ValueError):
         decision = {"presentation":{"requested":"PURE","resolved":"PURE","reason":"policy_fallback"},"audio":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback"},"subtitle":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback"}}
-        policy_args = []; osd = "OPENHTPC • PURE"
+        policy_args = []; osd = "Politique vidéo : PURE\nProfil appliqué : PURE\nAudio : Auto\nSous-titres : Auto"
 
     attempt = tempfile.NamedTemporaryFile(prefix="openhtpc-mpv-", delete=False)
     attempt_path = pathlib.Path(attempt.name); attempt.close()

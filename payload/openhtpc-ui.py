@@ -315,7 +315,7 @@ def system_page_png(
     txt((1440, 42), f"ÉTAT : {product.get('health', 'PRÊT')}", 22, health_color, True, 410)
     txt((1440, 78), product.get("version") or "", 18, "#a9bdd1", False, 410)
 
-    if not model.get("available"):
+    if not model.get("available") and page != "playback":
         card(
             (70, 170, 1780, 680),
             "INFORMATIONS SYSTÈME",
@@ -619,7 +619,7 @@ def system_page_png(
         txt((90, 590), "ACTIONS", 20, "#22c7ff", True)
         txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
     elif page == "about":
-        version = model.get("technical", {}).get("version", "1.1.0-dev35")
+        version = model.get("technical", {}).get("version", "1.1.0-dev36")
         card((70, 170, 1780, 680), "À PROPOS", [
             ("Projet", "OPENHTPC", "#22c7ff"),
             ("Version", version, None),

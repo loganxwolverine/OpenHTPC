@@ -68,7 +68,7 @@ class OsdTransport(unittest.TestCase):
 
     def test_multiline_utf8_arrow_and_no_broken_escape(self):
         text = policy.osd_text(self.decision())
-        self.assertEqual(text, "Mode vidéo appliqué : PURE\nAudio : Français\nSous-titres : Désactivés")
+        self.assertEqual(text, "Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE\nAudio : Français\nSous-titres : Désactivés")
         self.assertNotIn("\\N", text)
         self.assertNotIn("broken escape sequence", text)
 
@@ -80,8 +80,8 @@ class OsdTransport(unittest.TestCase):
     def test_requested_resolved_match_log_and_osd_contract(self):
         auto = self.decision("CINEMA_AUTO")
         pure = self.decision("PURE")
-        self.assertIn("Mode vidéo appliqué : PURE", policy.osd_text(auto))
-        self.assertIn("Mode vidéo appliqué : PURE", policy.osd_text(pure))
+        self.assertIn("Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE", policy.osd_text(auto))
+        self.assertIn("Politique vidéo : PURE\nProfil appliqué : PURE", policy.osd_text(pure))
         source = (PAYLOAD / "openhtpc-play").read_text(encoding="utf-8")
         self.assertIn('presentation_requested=decision["presentation"]["requested"]', source)
         self.assertIn('presentation_resolved=decision["presentation"]["resolved"]', source)

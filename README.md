@@ -1,7 +1,7 @@
 # OPENHTPC 1.1 RC3 Development Candidate
 
-This bounded UX development package is version `1.1.0-dev35`, build
-`rc3-playback-ux-finalize-dev1`. It is derived from dev34 and preserves its
+This bounded corrective development package is version `1.1.0-dev36`, build
+`rc3-playback-ux-corrective-dev1`. It is derived from dev35 and preserves its
 playback policy while finalizing playback action geometry, immediate parent
 refresh, effective-mode OSD wording and the global-mode DVD shortcut. Its history descends normally from the physically
 qualified and frozen public RC2 baseline. It is not RC3 final and

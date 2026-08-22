@@ -1001,7 +1001,15 @@ static void calculate_button_geometry(Entry *entry, int buttons)
             entry->icon_rect.y = (geo.screen_height * 88) / 100;
             entry->icon_rect.w = width;
             entry->icon_rect.h = (geo.screen_height * 8) / 100;
-            entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
+            if (is_system_subpage()) {
+                int icon_size = (geo.screen_height * 5) / 100;
+                int pad = (geo.screen_width * 9) / 1000;
+                int text_area_x = entry->icon_rect.x + pad + icon_size + pad;
+                int text_area_w = width - icon_size - 3 * pad;
+                entry->text_rect.x = text_area_x + (text_area_w - entry->text_rect.w) / 2;
+            } else {
+                entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
+            }
             entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
             entry = entry->next;
         }
@@ -1874,7 +1882,7 @@ static void draw_screen()
                 if (entry->cmd == NULL || strstr(entry->cmd, "openhtpc-bind-disc") == NULL) {
                     icon = NULL;
                 }
-            } else if (is_disc_sheet() || is_system_subpage()) {
+            } else if (is_disc_sheet()) {
                 icon = NULL;
             }
             /*
@@ -1889,6 +1897,14 @@ static void draw_screen()
             int texture_h = 0;
 
             SDL_Rect artwork_rect = entry->icon_rect;
+            if (is_system_subpage()) {
+                int icon_size = (geo.screen_height * 5) / 100;
+                int pad = (geo.screen_width * 9) / 1000;
+                artwork_rect.x = entry->icon_rect.x + pad;
+                artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - icon_size) / 2;
+                artwork_rect.w = icon_size;
+                artwork_rect.h = icon_size;
+            }
 
             if (icon != NULL && SDL_QueryTexture(
                     icon,
@@ -1905,28 +1921,32 @@ static void draw_screen()
                     (double) texture_h;
 
                 const double target_ratio =
-                    (double) entry->icon_rect.w /
-                    (double) entry->icon_rect.h;
+                    (double) artwork_rect.w /
+                    (double) artwork_rect.h;
 
                 if (source_ratio > target_ratio) {
                     /*
                      * Landscape image:
                      * full available width.
                      */
-                    artwork_rect.w = entry->icon_rect.w;
+                    int target_width = artwork_rect.w;
+                    int target_height = artwork_rect.h;
+                    int target_x = artwork_rect.x;
+                    int target_y = artwork_rect.y;
+                    artwork_rect.w = target_width;
                     artwork_rect.h =
                         (int) (
-                            entry->icon_rect.w /
+                            target_width /
                             source_ratio
                         );
 
                     artwork_rect.x =
-                        entry->icon_rect.x;
+                        target_x;
 
                     artwork_rect.y =
-                        entry->icon_rect.y +
+                        target_y +
                         (
-                            entry->icon_rect.h -
+                            target_height -
                             artwork_rect.h
                         ) / 2;
 
@@ -1935,20 +1955,24 @@ static void draw_screen()
                      * Portrait image:
                      * full available height.
                      */
-                    artwork_rect.h = entry->icon_rect.h;
+                    int target_width = artwork_rect.w;
+                    int target_height = artwork_rect.h;
+                    int target_x = artwork_rect.x;
+                    int target_y = artwork_rect.y;
+                    artwork_rect.h = target_height;
                     artwork_rect.w =
                         (int) (
-                            entry->icon_rect.h *
+                            target_height *
                             source_ratio
                         );
 
                     artwork_rect.y =
-                        entry->icon_rect.y;
+                        target_y;
 
                     artwork_rect.x =
-                        entry->icon_rect.x +
+                        target_x +
                         (
-                            entry->icon_rect.w -
+                            target_width -
                             artwork_rect.w
                         ) / 2;
                 }

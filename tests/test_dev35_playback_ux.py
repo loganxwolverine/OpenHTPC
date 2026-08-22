@@ -68,11 +68,14 @@ class EffectiveOsd(unittest.TestCase):
                 "audio":{"requested":"AUTO","resolved":"MPV_AUTO"},
                 "subtitle":{"requested":"OFF","resolved":"NONE"}}
 
-    def test_auto_and_pure_show_only_effective_mode(self):
-        expected = "Mode vidéo appliqué : PURE\nAudio : Auto\nSous-titres : Désactivés"
+    def test_auto_and_pure_show_policy_and_effective_mode(self):
+        expected = {
+            "CINEMA_AUTO": "Politique vidéo : CINÉMA AUTO\nProfil appliqué : PURE\nAudio : Auto\nSous-titres : Désactivés",
+            "PURE": "Politique vidéo : PURE\nProfil appliqué : PURE\nAudio : Auto\nSous-titres : Désactivés",
+        }
         for requested in ("CINEMA_AUTO", "PURE"):
             text = policy.osd_text(self.decision(requested))
-            self.assertEqual(text, expected)
+            self.assertEqual(text, expected[requested])
             self.assertNotIn("OPENHTPC", text)
             self.assertNotIn("→", text)
 
@@ -123,7 +126,7 @@ class DvdGlobalShortcut(unittest.TestCase):
             prefs = policy.read_preferences(home)
             self.assertEqual((prefs["audio_language_policy"], prefs["subtitle_policy"]), ("FR", "OFF"))
             action = (PAYLOAD / "openhtpc-system-action").read_text(encoding="utf-8")
-            self.assertIn('model={"playback_policy":policy.read_preferences(home)}', action)
+            self.assertIn('model={"available":True,"playback_policy":policy.read_preferences(home)}', action)
 
 
 if __name__ == "__main__": unittest.main()

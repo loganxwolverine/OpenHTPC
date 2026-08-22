@@ -1,5 +1,12 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 playback UX corrective — 1.1.0-dev36
+
+- Keeps LECTURE available when system capabilities are partial or unavailable.
+- Restores the approved six first-party icons inside the lower action dock.
+- Explains requested policy and resolved profile on separate OSD lines.
+- Preserves the global DVD mode shortcut and qualified playback policy.
+
 ## OPENHTPC 1.1 RC3 playback UX candidate — 1.1.0-dev35
 
 - Places all playback controls in the real Flex bottom dock below status.
