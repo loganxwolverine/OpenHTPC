@@ -14,7 +14,11 @@ def load(name,path):
  loader=importlib.machinery.SourceFileLoader(name,str(path));spec=importlib.util.spec_from_loader(name,loader);module=importlib.util.module_from_spec(spec);loader.exec_module(module);return module
 
 def render(home,install,playback_only=False):
- system=load("system_action_page",install/"openhtpc-system-page");ui=load("system_action_ui",install/"openhtpc-ui.py");model=system.status_model(home,install);font=install/"flex/assets/fonts/OpenSans-Regular.ttf";cache=home/".cache/openhtpc"
+ ui=load("system_action_ui",install/"openhtpc-ui.py");font=install/"flex/assets/fonts/OpenSans-Regular.ttf";cache=home/".cache/openhtpc"
+ if playback_only:
+  policy=load("system_action_playback_policy",install/"openhtpc-playback-policy.py");model={"playback_policy":policy.read_preferences(home)}
+ else:
+  system=load("system_action_page",install/"openhtpc-system-page");model=system.status_model(home,install)
  pages=(("system-playback.png","playback"),) if playback_only else (("system-dashboard.png","root"),("system-overview.png","overview"),("system-codecs.png","codecs"),("system-display.png","display"),("system-audio.png","audio"),("system-media_optical.png","media_optical"),("system-processing.png","processing"),("system-playback.png","playback"),("system-diagnostics.png","diagnostics"),("system-technical.png","technical"),("system-about.png","about"),("system-hardware.png","hardware"),("system-display-video.png","display_video"),("system-audio-media.png","audio_media"))
  for name,page in pages:
   target=cache/name

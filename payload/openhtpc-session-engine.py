@@ -407,6 +407,20 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         elif meta_status in {"UNAVAILABLE", "AUTH_ERROR", "AUTH_FAILED"}:
             entries.append(("RECONNECTER TMDb", tmdb_icon, f":fork {install/'openhtpc-configure-tmdb'}"))
 
+    if state == "DVD":
+        presentation = "PURE"
+        try:
+            policy_path = install / "openhtpc-playback-policy.py"
+            spec = importlib.util.spec_from_file_location("openhtpc_dvd_playback_policy", policy_path)
+            policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
+            presentation = policy.read_preferences(home or pathlib.Path.home())["presentation_mode"]
+        except (OSError, AttributeError, ImportError, KeyError):
+            pass
+        label = "CINÉMA AUTO" if presentation == "CINEMA_AUTO" else "PURE"
+        video_icon = install / "assets/ui/playback-video.png"
+        insert_at = next((index + 1 for index, item in enumerate(entries) if item[0] == "LIRE LE DVD"), len(entries))
+        entries.insert(insert_at, (f"MODE VIDÉO : {label}", video_icon, ":submenu DVD_VIDEO_MODE"))
+
     device = shlex.quote(str(optical.get("device") or ""))
     entries.append(("ÉJECTER", eject_icon, f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {device}" if device else ":fork true"))
     entries.append(("RETOUR", back_icon, ":back"))
@@ -549,21 +563,21 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: 
         f"Entry6=RETOUR;{back_icon};:back",
     ))
     video = os.linesep.join((
-        f"Entry1=PURE;{video_icon};:fork {setting} presentation_mode PURE",
-        f"Entry2=CINÉMA AUTO;{video_icon};:fork {setting} presentation_mode CINEMA_AUTO",
+        f"Entry1=PURE;{video_icon};:applyback {setting} presentation_mode PURE",
+        f"Entry2=CINÉMA AUTO;{video_icon};:applyback {setting} presentation_mode CINEMA_AUTO",
         f"Entry3=RETOUR;{back_icon};:back",
     ))
     audio_menu = os.linesep.join((
-        f"Entry1=AUTO;{audio_icon};:fork {setting} audio_language_policy AUTO",
-        f"Entry2=FRANÇAIS;{audio_icon};:fork {setting} audio_language_policy FR",
-        f"Entry3=PISTE PAR DÉFAUT;{audio_icon};:fork {setting} audio_language_policy DEFAULT",
+        f"Entry1=AUTO;{audio_icon};:applyback {setting} audio_language_policy AUTO",
+        f"Entry2=FRANÇAIS;{audio_icon};:applyback {setting} audio_language_policy FR",
+        f"Entry3=PISTE PAR DÉFAUT;{audio_icon};:applyback {setting} audio_language_policy DEFAULT",
         f"Entry4=RETOUR;{back_icon};:back",
     ))
     subtitles = os.linesep.join((
-        f"Entry1=AUTO;{subtitle_icon};:fork {setting} subtitle_policy AUTO",
-        f"Entry2=DÉSACTIVÉS;{subtitle_icon};:fork {setting} subtitle_policy OFF",
-        f"Entry3=FRANÇAIS FORCÉS;{subtitle_icon};:fork {setting} subtitle_policy FR_FORCED",
-        f"Entry4=FRANÇAIS COMPLETS;{subtitle_icon};:fork {setting} subtitle_policy FR_FULL",
+        f"Entry1=AUTO;{subtitle_icon};:applyback {setting} subtitle_policy AUTO",
+        f"Entry2=DÉSACTIVÉS;{subtitle_icon};:applyback {setting} subtitle_policy OFF",
+        f"Entry3=FRANÇAIS FORCÉS;{subtitle_icon};:applyback {setting} subtitle_policy FR_FORCED",
+        f"Entry4=FRANÇAIS COMPLETS;{subtitle_icon};:applyback {setting} subtitle_policy FR_FULL",
         f"Entry5=RETOUR;{back_icon};:back",
     ))
     return root, video, audio_menu, subtitles
@@ -830,6 +844,12 @@ Entry1=RETOUR;{local_icon};:back
 [DISQUE]
 BackgroundImage={disc_sheet}
 {disc_menu_entries(optical, install, (optical_icon, media_icon, eject_icon, logo), home)}
+
+[DVD_VIDEO_MODE]
+BackgroundImage={disc_sheet}
+Entry1=PURE;{playback_icons['video']};:applyback {install/'openhtpc-playback-setting'} presentation_mode PURE
+Entry2=CINÉMA AUTO;{playback_icons['video']};:applyback {install/'openhtpc-playback-setting'} presentation_mode CINEMA_AUTO
+Entry3=RETOUR;{icon_back};:back
 
 {media_sections}
 

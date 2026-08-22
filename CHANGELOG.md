@@ -1,5 +1,12 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 playback UX candidate — 1.1.0-dev35
+
+- Places all playback controls in the real Flex bottom dock below status.
+- Applies each playback preference synchronously and reloads its parent view.
+- Shows only the effective applied presentation mode in the startup OSD.
+- Adds a DVD-sheet shortcut to the same global presentation preference.
+
 ## OPENHTPC 1.1 RC3 corrective candidate — 1.1.0-dev34
 
 - Separates the LECTURE status card from its bottom action zone.

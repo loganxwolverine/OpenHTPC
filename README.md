@@ -1,9 +1,9 @@
 # OPENHTPC 1.1 RC3 Development Candidate
 
-This corrective development package is version `1.1.0-dev34`, build
-`rc3-playback-ui-persistence-osd-fix-dev1`. It is derived from dev33 and
-preserves its policy decisions while correcting only the couch playback-page
-layout, preference refresh and multiline OSD transport. Its history descends normally from the physically
+This bounded UX development package is version `1.1.0-dev35`, build
+`rc3-playback-ux-finalize-dev1`. It is derived from dev34 and preserves its
+playback policy while finalizing playback action geometry, immediate parent
+refresh, effective-mode OSD wording and the global-mode DVD shortcut. Its history descends normally from the physically
 qualified and frozen public RC2 baseline. It is not RC3 final and
 requires physical playback-policy validation.
 

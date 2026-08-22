@@ -91,11 +91,11 @@ class PlaybackPage(unittest.TestCase):
 class ResolvedOsd(unittest.TestCase):
     def test_pure(self):
         text = policy.osd_text(decision())
-        self.assertIn("Mode vidéo : PURE", text)
+        self.assertIn("Mode vidéo appliqué : PURE", text)
         self.assertNotIn("→", text)
 
     def test_cinema_auto_to_pure(self):
-        self.assertIn("Mode vidéo : CINÉMA AUTO → PURE", policy.osd_text(decision("CINEMA_AUTO")))
+        self.assertIn("Mode vidéo appliqué : PURE", policy.osd_text(decision("CINEMA_AUTO")))
 
     def test_resolved_audio_and_subtitles(self):
         fr_off = policy.osd_text(decision(audio="FR", subtitle="OFF", aid="AID_2", sid="NONE"))

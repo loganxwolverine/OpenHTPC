@@ -176,7 +176,7 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
 
 def osd_text(decision: dict) -> str:
     p = decision["presentation"]; a = decision["audio"]; s = decision["subtitle"]
-    mode = "CINÉMA AUTO → " + p["resolved"] if p["requested"] == "CINEMA_AUTO" else p["resolved"]
+    mode = p["resolved"]
     audio = "Français" if a["resolved"].startswith("AID_") and a["requested"] == "FR" else "Piste par défaut" if a["requested"] == "DEFAULT" else "Auto"
     if s["requested"] == "OFF": subtitles = "Désactivés"
     elif s["resolved"] == "NONE": subtitles = "Aucun"
@@ -185,7 +185,7 @@ def osd_text(decision: dict) -> str:
     else: subtitles = "Auto"
     # Pass literal newlines as one argv value.  MPV's osd-playing-msg parser
     # treats a literal ``\N`` as an invalid property-expansion escape.
-    return f"OPENHTPC\nMode vidéo : {mode}\nAudio : {audio}\nSous-titres : {subtitles}"
+    return f"Mode vidéo appliqué : {mode}\nAudio : {audio}\nSous-titres : {subtitles}"
 
 
 def main() -> int:
