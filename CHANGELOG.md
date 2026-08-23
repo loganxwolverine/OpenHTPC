@@ -1,5 +1,13 @@
 # Changelog
 
+## OPENHTPC 1.1 RC3 final corrective — 1.1.0-dev38
+
+- Resolve DVD `FR_FULL` from qualified `lsdvd` language inventory through MPV's
+  documented DVD language selector, without assuming lsdvd-to-MPV track IDs.
+- Refresh an already-loaded DVD detail menu after the global presentation mode
+  changes from SYSTÈME → LECTURE.
+- Preserve dev37 UI geometry, artwork, OSD, audio and presentation semantics.
+
 ## OPENHTPC 1.1 RC3 final UI and optical artwork — 1.1.0-dev37
 
 - Separates the approved playback dock icons vertically from their labels.

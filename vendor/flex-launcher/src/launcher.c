@@ -2051,6 +2051,11 @@ static void execute_command(const char *command)
             Menu *parent = current_menu != NULL ? current_menu->back : NULL;
             if (settings_command != NULL && parent != NULL && run_process_sync(settings_command)) {
                 reload_menu_section(parent);
+                /* presentation_mode is global.  Keep an already-created DVD
+                 * detail menu coherent when the selector was used in SYSTEME. */
+                Menu *disc = get_menu("DISQUE");
+                if (disc != NULL && disc != parent)
+                    reload_menu_section(disc);
                 if (parent->background_path != NULL) {
                     SDL_Texture *next = load_texture_from_file(parent->background_path);
                     if (next != NULL) {

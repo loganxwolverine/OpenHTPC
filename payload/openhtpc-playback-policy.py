@@ -153,6 +153,23 @@ def choose_subtitle(policy: str, probe: dict | None) -> dict:
     return {"requested": policy, "resolved": f"SID_{chosen['mpv_id']}" if chosen else "NONE", "track": chosen, "reason": reason, "mpv_args": [f"--sid={chosen['mpv_id']}"] if chosen else ["--sid=no"]}
 
 
+def choose_dvd_subtitle(policy: str, optical_state: dict | None) -> dict:
+    """Resolve DVD subtitles without treating lsdvd order as an MPV track ID."""
+    if policy in {"AUTO", "OFF", "FR_FORCED"}:
+        return choose_subtitle(policy, None)
+    physical = optical_state.get("physical_edition", {}) if isinstance(optical_state, dict) else {}
+    subtitles = physical.get("subtitles", []) if isinstance(physical, dict) and physical.get("lsdvd_ok") is True else []
+    french = next((track for track in subtitles
+                   if isinstance(track, dict) and str(track.get("langcode", "")).casefold().strip() in FR_LANGS), None)
+    if french is None:
+        return {"requested": policy, "resolved": "NONE", "track": None,
+                "reason": "dvd_no_qualified_full_track", "mpv_args": ["--sid=no"]}
+    # lsdvd subpicture order is not MPV's track-list ID.  MPV documents --slang
+    # for dvd:// playback and resolves the usable track for the selected title.
+    return {"requested": policy, "resolved": "MPV_FR_LANGUAGE", "track": french,
+            "reason": "dvd_french_full_track", "mpv_args": ["--slang=fr,fra,fre"]}
+
+
 def probe_media(path: pathlib.Path, ffprobe: str | None = None) -> dict | None:
     binary = ffprobe or shutil.which("ffprobe")
     if not binary: return None
@@ -164,13 +181,15 @@ def probe_media(path: pathlib.Path, ffprobe: str | None = None) -> dict | None:
         return None
 
 
-def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "local", probe: dict | None = None) -> dict:
+def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "local", probe: dict | None = None,
+            optical_state: dict | None = None) -> dict:
     prefs = read_preferences(home)
     if probe is None and media is not None: probe = probe_media(media)
     requested = prefs["presentation_mode"]
     presentation = {"requested": requested, "resolved": "PURE", "reason": "requested_pure" if requested == "PURE" else "no_qualified_local_auto_scope"}
     audio = choose_audio(prefs["audio_language_policy"], probe)
-    subtitle = choose_subtitle(prefs["subtitle_policy"], probe)
+    subtitle = (choose_dvd_subtitle(prefs["subtitle_policy"], optical_state)
+                if kind == "dvd" else choose_subtitle(prefs["subtitle_policy"], probe))
     return {"presentation": presentation, "audio": audio, "subtitle": subtitle, "mpv_args": [*audio["mpv_args"], *subtitle["mpv_args"]], "kind": kind}
 
 
@@ -193,14 +212,21 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("get")
     setter = sub.add_parser("set"); setter.add_argument("key", choices=sorted(VALID)); setter.add_argument("value")
-    resolver = sub.add_parser("resolve"); resolver.add_argument("--media", type=pathlib.Path); resolver.add_argument("--kind", choices=("local", "dvd"), default="local")
+    resolver = sub.add_parser("resolve"); resolver.add_argument("--media", type=pathlib.Path); resolver.add_argument("--kind", choices=("local", "dvd"), default="local"); resolver.add_argument("--dvd-state", type=pathlib.Path)
     args = parser.parse_args()
     if args.command == "get": print(json.dumps(read_preferences(args.home), ensure_ascii=False, sort_keys=True)); return 0
     if args.command == "set":
         try: result = write_preference(args.home, args.key, args.value.upper())
         except ValueError: return 2
         print(json.dumps(result, ensure_ascii=False, sort_keys=True)); return 0
-    result = resolve(args.home, args.media, args.kind); result["osd"] = osd_text(result); print(json.dumps(result, ensure_ascii=False, sort_keys=True)); return 0
+    optical_state = None
+    if args.dvd_state is not None:
+        try:
+            candidate = json.loads(args.dvd_state.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict): optical_state = candidate
+        except (OSError, json.JSONDecodeError):
+            pass
+    result = resolve(args.home, args.media, args.kind, optical_state=optical_state); result["osd"] = osd_text(result); print(json.dumps(result, ensure_ascii=False, sort_keys=True)); return 0
 
 
 if __name__ == "__main__": raise SystemExit(main())

@@ -3,10 +3,11 @@ set -u
 readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
 readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
 readonly PROFILE="$HOME_DIR/.config/openhtpc/profile.json"
+readonly OPTICAL_STATE="$HOME_DIR/.local/state/openhtpc/optical-current.json"
 return_ui(){ [[ ${OPENHTPC_FLEX_RETAINED:-0} == 1 ]] && exit 0; exec "$INSTALL/openhtpc-dvd-ui"; }
 [[ $# -eq 1 && $1 == /dev/* ]] || return_ui
 device=$1
-state="$(cat "$HOME_DIR/.local/state/openhtpc/optical-current.json" 2>/dev/null)" || return_ui
+state="$(cat "$OPTICAL_STATE" 2>/dev/null)" || return_ui
 python3 - "$device" "$state" <<'PY'
 import json,sys
 s=json.loads(sys.argv[2]); raise SystemExit(0 if s.get("state")=="DVD" and s.get("device")==sys.argv[1] else 1)
@@ -53,7 +54,7 @@ printf '%s kind=dvd device=%q optical_generation=%q runtime=%q mpv=%q readahead=
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_PROCESS_STARTED
 # Dev32: one persistent policy feeds presentation, audio and subtitles.
 # RC2 migration compatibility remains in openhtpc-playback-policy.py: video-profile.json.
-policy_json="$(python3 "$INSTALL/openhtpc-playback-policy.py" --home "$HOME_DIR" resolve --kind dvd 2>/dev/null || printf '{"presentation":{"requested":"PURE","resolved":"PURE","reason":"policy_fallback"},"audio":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback","mpv_args":[]},"subtitle":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback","mpv_args":[]},"mpv_args":[]}')"
+policy_json="$(python3 "$INSTALL/openhtpc-playback-policy.py" --home "$HOME_DIR" resolve --kind dvd --dvd-state "$OPTICAL_STATE" 2>/dev/null || printf '{"presentation":{"requested":"PURE","resolved":"PURE","reason":"policy_fallback"},"audio":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback","mpv_args":[]},"subtitle":{"requested":"AUTO","resolved":"MPV_AUTO","reason":"policy_fallback","mpv_args":[]},"mpv_args":[]}')"
 video_profile="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["presentation"]["requested"])' "$policy_json" 2>/dev/null || printf PURE)"
 policy_args=()
 while IFS= read -r policy_opt; do [[ -n $policy_opt ]] && policy_args+=("$policy_opt"); done < <(python3 -c 'import json,sys
@@ -129,10 +130,11 @@ audio_requested="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["au
 audio_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["audio"]["resolved"])' "$policy_json")"
 subtitle_requested="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["requested"])' "$policy_json")"
 subtitle_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["resolved"])' "$policy_json")"
+subtitle_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["reason"])' "$policy_json")"
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_POLICY \
     --field "presentation_requested=$video_profile" --field "presentation_resolved=$resolved_presentation" --field "presentation_reason=$presentation_reason" \
     --field "audio_requested=$audio_requested" --field "audio_resolved=$audio_resolved" \
-    --field "subtitle_requested=$subtitle_requested" --field "subtitle_resolved=$subtitle_resolved"
+    --field "subtitle_requested=$subtitle_requested" --field "subtitle_resolved=$subtitle_resolved" --field "subtitle_reason=$subtitle_reason"
 
 "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?

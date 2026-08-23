@@ -1,14 +1,14 @@
 {
-  "binary_sha256": "b2e101c87a1c5c3d468e5706163ffe6408ed1b5802ac62dacbcb3a06b4945042",
-  "build_id": "fb291158ccfa97d6f879c43aff52ceeecdbb6474",
+  "binary_sha256": "f23d52f11784a617b26979619b10b8575a564af5e7a6b9965d6451961adcfd0f",
+  "build_id": "c302d37d17e3207efcfc63113da74b33cd9a397a",
   "compile_sdl": "2.32.70",
   "compile_sdl_image": "2.8.12",
   "compile_sdl_ttf": "2.24.0",
   "compiler": "cc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2)",
   "flex_source_fingerprint": "8e58660f13b94478aa3d8bf31e24b404ed613632e23333106d03dba8e56930aa",
-  "product_version": "1.1.0-dev37",
+  "product_version": "1.1.0-dev38",
   "schema": 1,
-  "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-1.1-final-ui-dev37",
+  "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-1.1-dvd-detail-refresh-dev38",
   "target": "Fedora 44 x86_64",
   "timestamp_policy": "release metadata deterministic; no wall-clock timestamp"
 }
