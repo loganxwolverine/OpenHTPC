@@ -550,7 +550,7 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: 
         policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
         prefs = policy.read_preferences(home)
     except (OSError, AttributeError, ImportError):
-        prefs = {"presentation_mode":"PURE","audio_language_policy":"AUTO","subtitle_policy":"AUTO"}
+        prefs = {"presentation_mode":"PURE","audio_language_policy":"AUTO","audio_output_mode":"PCM","subtitle_policy":"AUTO"}
     presentation = "CINÉMA AUTO" if prefs["presentation_mode"] == "CINEMA_AUTO" else "PURE"
     audio = {"AUTO":"AUTO","FR":"FRANÇAIS","DEFAULT":"PISTE PAR DÉFAUT"}[prefs["audio_language_policy"]]
     subtitle = {"AUTO":"AUTO","OFF":"DÉSACTIVÉS","FR_FORCED":"FRANÇAIS FORCÉS","FR_FULL":"FRANÇAIS COMPLETS"}[prefs["subtitle_policy"]]
@@ -692,6 +692,11 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         "back": icon_back,
     }
     playback_root, playback_video, playback_audio, playback_subtitles = _playback_policy_sections(home, install, playback_icons)
+    try:
+        audio_mode = load_optional_object(home / ".config/openhtpc/user-config.json").get("audio_output_mode", "PCM")
+    except (OSError, AttributeError):
+        audio_mode = "PCM"
+    if audio_mode not in {"PCM", "BITSTREAM"}: audio_mode = "PCM"
     disc_sheet = home / ".cache/openhtpc/disc-sheet.png"
     if disc_view.is_file():
         subprocess.run([str(disc_view), "--home", str(home)], timeout=12, check=False,
@@ -721,7 +726,7 @@ LiveOpticalState={live_optical_state}
 {theme.background_block(install, 52)}
 
 [Layout]
-MaxButtons=8
+MaxButtons=9
 IconSize={scale['icon']}
 IconSpacing=3%
 VCenter=50%
@@ -781,10 +786,11 @@ Entry1=VUE D'ENSEMBLE;{icon_overview};:submenu SYSTEM_OVERVIEW
 Entry2=COMPATIBILITÉ VIDÉO;{icon_codecs};:submenu SYSTEM_CODECS
 Entry3=AFFICHAGE;{icon_display};:submenu SYSTEM_DISPLAY
 Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK
-Entry5=MÉDIAS & OPTIQUE;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
-Entry6=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
-Entry7=À PROPOS;{logo};:submenu SYSTEM_ABOUT
-Entry8=RETOUR;{icon_back};:back
+Entry5=AUDIO;{icon_audio};:submenu SYSTEM_AUDIO
+Entry6=MÉDIAS & OPTIQUE;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
+Entry7=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
+Entry8=À PROPOS;{logo};:submenu SYSTEM_ABOUT
+Entry9=RETOUR;{icon_back};:back
 
 [SYSTEM_OVERVIEW]
 BackgroundImage={system_pages['overview']}
@@ -800,7 +806,14 @@ Entry1=RETOUR;{local_icon};:back
 
 [SYSTEM_AUDIO]
 BackgroundImage={system_pages['audio']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=MODE AUDIO : {audio_mode};{playback_icons['audio']};:submenu AUDIO_OUTPUT_MODE
+Entry2=RETOUR;{icon_back};:back
+
+[AUDIO_OUTPUT_MODE]
+BackgroundImage={system_pages['audio']}
+Entry1=PCM;{playback_icons['audio']};:applyback {install/'openhtpc-playback-setting'} audio_output_mode PCM
+Entry2=BITSTREAM;{playback_icons['audio']};:applyback {install/'openhtpc-playback-setting'} audio_output_mode BITSTREAM
+Entry3=RETOUR;{icon_back};:back
 
 [SYSTEM_MEDIA_OPTICAL]
 BackgroundImage={system_pages['media_optical']}
@@ -839,7 +852,7 @@ Entry1=RETOUR;{local_icon};:back
 
 [SYSTEM_ABOUT]
 BackgroundImage={system_pages['about']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=RETOUR;{icon_back};:back
 
 [DISQUE]
 BackgroundImage={disc_sheet}

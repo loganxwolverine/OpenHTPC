@@ -51,6 +51,7 @@ def save(home: pathlib.Path, sources: list[str], tmdb_value: str | None) -> path
         **previous,
         "schema": 1,
         "configuration_completed": True,
+        "audio_output_mode": previous.get("audio_output_mode") if previous.get("audio_output_mode") in {"PCM", "BITSTREAM"} else "PCM",
         "local_media_sources": normalized,
         "tmdb": {"configured": configured},
     }

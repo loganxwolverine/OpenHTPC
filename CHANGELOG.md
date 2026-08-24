@@ -1,5 +1,15 @@
 # Changelog
 
+## OPENHTPC 1.1 maintenance candidate — 1.1.1-rc1
+
+- Add one persistent PCM/BITSTREAM output policy, with safe PCM migration and
+  codec-bounded MPV passthrough for AC3, E-AC3, DTS/DTS-HD and TrueHD.
+- Remove audio-mode and HDR-capability questions from fresh installation.
+- Record requested and observed audio policy without treating channel count or
+  configured `audio-spdif` as proof of active passthrough.
+- Include bounded audio policy, MPV observation and default PipeWire sink data
+  in the support bundle.
+
 ## OPENHTPC 1.1 RC3 final corrective — 1.1.0-dev38
 
 - Resolve DVD `FR_FULL` from qualified `lsdvd` language inventory through MPV's

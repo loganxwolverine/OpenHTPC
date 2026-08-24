@@ -30,6 +30,31 @@ def timestamp() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def record_audio_policy(home: pathlib.Path, decision: dict, raw_log: str = "") -> dict:
+    output = decision.get("audio_output", {})
+    requested = output.get("requested", "PCM")
+    spdif_active = bool(re.search(r"AO:\s*\[[^]]+\].*\bspdif[-:]|\baudio format:\s*spdif", raw_log, re.I))
+    unavailable = bool(re.search(r"(?:spdif|passthrough).*(?:not supported|unsupported|failed|unavailable)", raw_log, re.I))
+    passthrough = "ACTIVE" if spdif_active else "UNAVAILABLE" if requested == "BITSTREAM" and unavailable else "INACTIVE"
+    ao_match = re.search(r"AO:\s*\[([^]]+)\]", raw_log)
+    device_match = re.search(r"(?:audio-device|device)\s*[=:]\s*([^\s,]+)", raw_log, re.I)
+    value = {"schema": 1, "timestamp": timestamp(), "requested": requested,
+             "source_codec": output.get("source_codec", "UNKNOWN"), "resolved": "BITSTREAM" if spdif_active else "PCM",
+             "reason": output.get("reason"), "passthrough": passthrough,
+             "audio_spdif": output.get("audio_spdif", "none"), "ao": ao_match.group(1) if ao_match else "UNKNOWN",
+             "audio_device": device_match.group(1) if device_match else "DEFAULT"}
+    target = home / ".local/state/openhtpc/audio-policy-last.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, sort_keys=True); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600); os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+    return value
+
+
 def configured_roots(home: pathlib.Path) -> list[pathlib.Path]:
     data = json.loads((home / ".config/openhtpc/user-config.json").read_text(encoding="utf-8"))
     values = data.get("local_media_sources")
@@ -293,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime=decision["presentation"]["resolved"].casefold(), mpv=mpv, argv_count=len(command), cwd_type="independent")
     update_action_state(home,path_resolved=True,path_absolute=True,file_exists=True,extension=media.suffix.casefold(),runtime="pure",process_started=True,error_class="NONE")
     runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
+    audio_output = decision.get("audio_output", {"requested":"PCM","source_codec":"UNKNOWN","resolved":"PCM","reason":"policy_fallback","audio_spdif":"none"})
     runtime_event(home,install,"PLAYBACK_POLICY",presentation_requested=decision["presentation"]["requested"],presentation_resolved=decision["presentation"]["resolved"],presentation_reason=decision["presentation"]["reason"],audio_requested=decision["audio"]["requested"],audio_resolved=decision["audio"]["resolved"],audio_reason=decision["audio"]["reason"],subtitle_requested=decision["subtitle"]["requested"],subtitle_resolved=decision["subtitle"]["resolved"],subtitle_reason=decision["subtitle"]["reason"])
+    runtime_event(home,install,"AUDIO_POLICY",requested=audio_output["requested"],source_codec=audio_output["source_codec"],resolved=audio_output["resolved"],reason=audio_output["reason"],audio_spdif=audio_output["audio_spdif"])
     runtime_event(home,install, "PLAYBACK_BEGIN")
     runtime_event(home,install,"PLAYBACK_DISPATCHED")
     append_event(log, **common, event="PROCESS_STARTED", process_started=True)
@@ -311,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
     opened = any(marker in raw for marker in OPEN_MARKERS)
     error_class = "NONE" if opened and rc == 0 else "MPV_EXIT_ERROR" if rc != 0 else "MEDIA_NOT_OPENED"
     diagnostics = sanitize_output(raw, home, media)
+    observed_audio = record_audio_policy(home, decision, raw)
+    runtime_event(home,install,"AUDIO_POLICY_OBSERVED",requested=observed_audio["requested"],source_codec=observed_audio["source_codec"],resolved=observed_audio["resolved"],passthrough=observed_audio["passthrough"],ao=observed_audio["ao"],audio_device=observed_audio["audio_device"])
     append_event(log, **common, event="PROCESS_EXITED", process_started=True, media_opened=opened, exit_code=rc, elapsed=elapsed, error_class=error_class, diagnostic_lines=diagnostics)
     private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)

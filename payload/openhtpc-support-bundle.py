@@ -18,6 +18,14 @@ def sanitize(text:str,home:pathlib.Path)->str:
 def command(argv):
  try:r=subprocess.run(argv,text=True,capture_output=True,timeout=12);return r.stdout+r.stderr
  except (OSError,subprocess.TimeoutExpired) as exc:return f"source unavailable: {exc}\n"
+def pipewire_summary()->str:
+ raw=command(["wpctl","inspect","@DEFAULT_AUDIO_SINK@"]) # bounded below
+ allowed={"node.description","device.description","media.class","audio.channels","audio.position","audio.format"}
+ lines=[]
+ for line in raw.splitlines():
+  match=re.match(r'^\s*([\w.]+)\s*=\s*(.+?)\s*$',line)
+  if match and match.group(1) in allowed:lines.append(f"{match.group(1)}={match.group(2)}")
+ return "\n".join(lines)+"\n" if lines else "default PipeWire sink details unavailable\n"
 def playback_summary(home:pathlib.Path)->str:
  action=home/".local/state/openhtpc/media-action-last.json";state=home/".local/state/openhtpc/playback-last-private.json"
  try:data=json.loads(action.read_text(encoding="utf-8"))
@@ -66,6 +74,15 @@ def create(home:pathlib.Path,install:pathlib.Path,output:pathlib.Path|None=None)
   for source,name in ((install/"version.json","version.json"),(home/".config/openhtpc/profile.json","hardware-passport.json"),(home/".local/state/openhtpc/runtime.log","runtime.log"),(home/".local/state/openhtpc/optical-current.json","optical-state.json"),(install/"flex/BUILD-METADATA.json","flex-build.json")):
    try:add(name,source.read_text(encoding="utf-8"))
    except OSError:add(name,"source unavailable")
+  try:add("audio-policy.json",(home/".local/state/openhtpc/audio-policy-last.json").read_text(encoding="utf-8"))
+  except OSError:
+   try:
+    config=json.loads((home/".config/openhtpc/user-config.json").read_text(encoding="utf-8"));requested=config.get("audio_output_mode","PCM")
+   except (OSError,json.JSONDecodeError):requested="PCM"
+   add("audio-policy.json",json.dumps({"requested":requested,"passthrough":"UNKNOWN","status":"NO_PLAYBACK_OBSERVATION"}))
+  add("pipewire-audio.txt",pipewire_summary())
+  try:add("playback-audio-log.txt","\n".join((home/".local/state/openhtpc/playback.log").read_text(encoding="utf-8",errors="replace").splitlines()[-200:])+"\n")
+  except OSError:add("playback-audio-log.txt","playback log unavailable\n")
   add("user-services.txt",command(["systemctl","--user","--no-pager","--full","status","plasma-plasmashell.service"]))
   add("journal.txt",command(["journalctl","--user","--since=-2 hours","--no-pager","-n","400","-g","OPENHTPC|flex-launcher|plasmashell"]))
   version=json.loads((install/"version.json").read_text()) if (install/"version.json").is_file() else {"version":"unknown"}

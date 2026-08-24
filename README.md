@@ -1,14 +1,12 @@
-# OPENHTPC 1.1 RC3 Development Candidate
+# OPENHTPC 1.1.1 Audio Maintenance Candidate
 
-This bounded final RC3 corrective package is version `1.1.0-dev38`, build
-`rc3-final-dvd-policy-refresh-corrective-dev1`. It is derived from dev37 and preserves its
-playback policy while finalizing playback action geometry, immediate parent
-refresh, effective-mode OSD wording and the global-mode DVD shortcut. Its history descends normally from the physically
-qualified and frozen public RC2 baseline. It is not RC3 final and
-requires physical playback-policy validation.
+This bounded post-RC3 maintenance candidate is version `1.1.1-rc1`, build
+`post-rc3-audio-passthrough-p0-rc1`. It is derived directly from public RC3,
+adds the binary PCM/BITSTREAM policy, and preserves the qualified RC3 video,
+DVD, subtitle and media behavior. It requires physical AVR validation.
 
-The public RC2 tag `v1.1.0-rc2` remains immutable. No RC3 tag is created by
-this development iteration.
+The public RC3 tag `v1.1.0-rc3` remains immutable. This maintenance candidate
+is not tagged or published.
 
 OPENHTPC was created as an original project by Steve Dehanne and is licensed
 under Apache-2.0. Third-party components retain their own copyrights and

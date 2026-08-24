@@ -231,12 +231,21 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
         "codecs": codecs,
     }
 
+    user_config = read_json(home / ".config/openhtpc/user-config.json")
+    requested_audio_mode = user_config.get("audio_output_mode") if user_config.get("audio_output_mode") in {"PCM", "BITSTREAM"} else "PCM"
+    last_audio = read_json(home / ".local/state/openhtpc/audio-policy-last.json")
+    observed = last_audio.get("passthrough")
+    if observed not in {"ACTIVE", "INACTIVE", "UNAVAILABLE", "UNKNOWN"}: observed = "UNKNOWN"
+    if requested_audio_mode == "PCM": observed = "INACTIVE"
+    elif last_audio.get("requested") != requested_audio_mode: observed = "UNKNOWN"
     audio_dict = {
         "audio_output": short_device(audio.get("default_sink")),
         "audio_backend": clean(audio.get("backend")),
         "connection": clean(audio.get("connection_class")),
         "channels": f"{audio.get('channels')} canaux" if audio.get("channels") else "Indéterminés",
-        "passthrough": state(audio.get("passthrough", {})),
+        "requested_mode": requested_audio_mode,
+        "receiver": short_device(audio.get("default_sink")),
+        "passthrough": {"ACTIVE":"Actif", "INACTIVE":"Inactif", "UNAVAILABLE":"Non disponible", "UNKNOWN":"Indéterminé"}[observed],
     }
 
     media_optical_dict = {

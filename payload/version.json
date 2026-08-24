@@ -1,6 +1,6 @@
 {
-  "build_date": "2026-08-21",
-  "build_id": "rc3-final-dvd-policy-refresh-corrective-dev1",
-  "product": "OPENHTPC 1.1 RC3 Development Candidate",
-  "version": "1.1.0-dev38"
+  "build_date": "2026-08-24",
+  "build_id": "post-rc3-audio-passthrough-p0-rc1",
+  "product": "OPENHTPC 1.1 Maintenance Candidate",
+  "version": "1.1.1-rc1"
 }

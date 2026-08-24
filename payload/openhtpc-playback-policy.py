@@ -22,11 +22,13 @@ import tempfile
 DEFAULTS = {
     "presentation_mode": "PURE",
     "audio_language_policy": "AUTO",
+    "audio_output_mode": "PCM",
     "subtitle_policy": "AUTO",
 }
 VALID = {
     "presentation_mode": {"PURE", "CINEMA_AUTO"},
     "audio_language_policy": {"AUTO", "FR", "DEFAULT"},
+    "audio_output_mode": {"PCM", "BITSTREAM"},
     "subtitle_policy": {"AUTO", "OFF", "FR_FORCED", "FR_FULL"},
 }
 FR_LANGS = {"fr", "fra", "fre"}
@@ -134,6 +136,26 @@ def choose_audio(policy: str, probe: dict | None) -> dict:
     return {"requested": policy, "resolved": "MPV_DEFAULT", "track": None, "reason": "no_french_track", "mpv_args": []}
 
 
+PASSTHROUGH_CODECS = ("ac3", "eac3", "dts", "dts-hd", "truehd")
+PASSTHROUGH_SOURCE_CODECS = {"ac3", "eac3", "dts", "truehd"}
+
+
+def choose_audio_output(mode: str, audio_track: dict | None) -> dict:
+    codec = str((audio_track or {}).get("codec_name") or "UNKNOWN").casefold()
+    source_codec = codec.upper() if codec != "unknown" else "UNKNOWN"
+    if mode == "PCM":
+        return {"requested": "PCM", "source_codec": source_codec, "resolved": "PCM",
+                "reason": "user_requested_pcm", "mpv_args": [], "audio_spdif": "none"}
+    candidate = codec in PASSTHROUGH_SOURCE_CODECS
+    return {
+        "requested": "BITSTREAM", "source_codec": source_codec,
+        "resolved": "BITSTREAM" if candidate else "PCM" if codec != "unknown" else "BITSTREAM_REQUESTED",
+        "reason": "passthrough_candidate" if candidate else "codec_not_passthrough_candidate" if codec != "unknown" else "source_codec_unknown",
+        "mpv_args": ["--audio-spdif=" + ",".join(PASSTHROUGH_CODECS)],
+        "audio_spdif": ",".join(PASSTHROUGH_CODECS),
+    }
+
+
 def choose_subtitle(policy: str, probe: dict | None) -> dict:
     tracks = _typed_streams(probe or {}, "subtitle")
     if policy == "AUTO":
@@ -188,9 +210,13 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
     requested = prefs["presentation_mode"]
     presentation = {"requested": requested, "resolved": "PURE", "reason": "requested_pure" if requested == "PURE" else "no_qualified_local_auto_scope"}
     audio = choose_audio(prefs["audio_language_policy"], probe)
+    source_audio_tracks = _typed_streams(probe or {}, "audio")
+    effective_audio_track = audio.get("track") or next((track for track in source_audio_tracks if _flag(track, "default")), None) or (source_audio_tracks[0] if source_audio_tracks else None)
+    audio_output = choose_audio_output(prefs["audio_output_mode"], effective_audio_track)
     subtitle = (choose_dvd_subtitle(prefs["subtitle_policy"], optical_state)
                 if kind == "dvd" else choose_subtitle(prefs["subtitle_policy"], probe))
-    return {"presentation": presentation, "audio": audio, "subtitle": subtitle, "mpv_args": [*audio["mpv_args"], *subtitle["mpv_args"]], "kind": kind}
+    return {"presentation": presentation, "audio": audio, "audio_output": audio_output, "subtitle": subtitle,
+            "mpv_args": [*audio["mpv_args"], *audio_output["mpv_args"], *subtitle["mpv_args"]], "kind": kind}
 
 
 def osd_text(decision: dict) -> str:

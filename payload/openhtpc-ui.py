@@ -452,7 +452,9 @@ def system_page_png(
             (960, 170, 890, 680),
             "PASSTHROUGH & CONFIGURATION",
             [
+                ("Mode demandé", a.get("requested_mode"), None),
                 ("Passthrough numérique", a.get("passthrough"), None),
+                ("Récepteur", a.get("receiver"), None),
                 ("Contrôle du volume", "Géré par PipeWire", None),
                 ("Gestionnaire de flux", "PipeWire / WirePlumber", None),
             ],
@@ -619,7 +621,7 @@ def system_page_png(
         txt((90, 590), "ACTIONS", 20, "#22c7ff", True)
         txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
     elif page == "about":
-        version = model.get("technical", {}).get("version", "1.1.0-dev38")
+        version = model.get("technical", {}).get("version", "1.1.1-rc1")
         card((70, 170, 1780, 680), "À PROPOS", [
             ("Projet", "OPENHTPC", "#22c7ff"),
             ("Version", version, None),

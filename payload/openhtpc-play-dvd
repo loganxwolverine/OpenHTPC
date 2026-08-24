@@ -131,10 +131,18 @@ audio_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["aud
 subtitle_requested="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["requested"])' "$policy_json")"
 subtitle_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["resolved"])' "$policy_json")"
 subtitle_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["subtitle"]["reason"])' "$policy_json")"
+output_requested="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_output",{}).get("requested","PCM"))' "$policy_json")"
+output_codec="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_output",{}).get("source_codec","UNKNOWN"))' "$policy_json")"
+output_resolved="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_output",{}).get("resolved","PCM"))' "$policy_json")"
+output_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_output",{}).get("reason","policy_fallback"))' "$policy_json")"
+output_spdif="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_output",{}).get("audio_spdif","none"))' "$policy_json")"
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_POLICY \
     --field "presentation_requested=$video_profile" --field "presentation_resolved=$resolved_presentation" --field "presentation_reason=$presentation_reason" \
     --field "audio_requested=$audio_requested" --field "audio_resolved=$audio_resolved" \
     --field "subtitle_requested=$subtitle_requested" --field "subtitle_resolved=$subtitle_resolved" --field "subtitle_reason=$subtitle_reason"
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event AUDIO_POLICY \
+    --field "requested=$output_requested" --field "source_codec=$output_codec" --field "resolved=$output_resolved" \
+    --field "reason=$output_reason" --field "audio_spdif=$output_spdif"
 
 "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?

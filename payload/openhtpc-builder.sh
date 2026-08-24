@@ -211,16 +211,14 @@ fi
 title "ÉCRAN 2 — VOTRE AFFICHAGE"
 ask_choice "Résolution de l'écran :" display_resolution \
     "1920x1080" "3840x2160" "Autre"
-ask_choice "Capacités HDR connues :" display_hdr \
-    "SDR" "HDR / HDR10" "HDR + Dolby Vision" "Je ne sais pas"
+display_hdr="Je ne sais pas"
 ask_choice "Fréquence connue :" display_refresh \
     "60 Hz" "120 Hz" "Autre" "Je ne sais pas"
 
 title "ÉCRAN 3 — VOTRE AUDIO"
-ask_choice "Destination audio :" audio_destination \
-    "Téléviseur" "Barre de son" "Amplificateur Home Cinema / AVR" "DAC / analogique"
-ask_choice "Mode audio souhaité :" audio_mode \
-    "PCM" "Bitstream" "Automatique"
+audio_destination="Détection système"
+audio_mode="PCM"
+printf 'Fondations audio détectées automatiquement. Mode initial sûr : PCM.\n'
 
 has_mpeg2=false has_h264=false has_hevc=false has_hevc10=false has_vp9=false has_av1=false
 grep -Eq 'VAProfileMPEG2.*VAEntrypointVLD' "$WORK_DIR/vaapi.txt" && has_mpeg2=true
