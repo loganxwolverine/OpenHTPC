@@ -6,7 +6,7 @@
   "compile_sdl_ttf": "2.24.0",
   "compiler": "cc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2)",
   "flex_source_fingerprint": "b8ebb8ff1356b1554cdd394bd57f7fc6be418536f2937d5c7f1412e801277862",
-  "product_version": "1.1.1-rc2",
+  "product_version": "1.1.1-rc3",
   "schema": 1,
   "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-audio-output-dock-rc2",
   "target": "Fedora 44 x86_64",

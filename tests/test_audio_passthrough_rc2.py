@@ -107,10 +107,14 @@ class AudioTruthAndDock(unittest.TestCase):
     def test_active_inactive_and_absent_observation_truth(self):
         with tempfile.TemporaryDirectory() as raw:
             home = pathlib.Path(raw)
+            self.assertEqual(self.build_audio(home, "PCM")["passthrough"], "Inactif")
             self.assertEqual(self.build_audio(home, "BITSTREAM")["passthrough"], "Indéterminé")
             decision = {"audio_output":{"requested":"BITSTREAM","source_codec":"AC3","reason":"passthrough_candidate","audio_spdif":"qualified"}}
             policy.record_audio_observation(home, decision, "AO: [pipewire] stereo 2ch spdif-ac3")
             self.assertEqual(self.build_audio(home, "BITSTREAM")["passthrough"], "Actif")
+            history = (home / ".local/state/openhtpc/audio-policy-last.json").read_text()
+            self.assertEqual(self.build_audio(home, "PCM")["passthrough"], "Inactif")
+            self.assertEqual((home / ".local/state/openhtpc/audio-policy-last.json").read_text(), history)
             decision["audio_output"]["requested"] = "PCM"
             policy.record_audio_observation(home, decision, "AO: [pipewire] 48000Hz 5.1 6ch floatp")
             self.assertEqual(self.build_audio(home, "PCM")["passthrough"], "Inactif")

@@ -236,9 +236,8 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     last_audio = read_json(home / ".local/state/openhtpc/audio-policy-last.json")
     observed = last_audio.get("passthrough")
     if observed not in {"ACTIVE", "INACTIVE", "UNAVAILABLE", "UNKNOWN"}: observed = "UNKNOWN"
-    if not last_audio: observed = "UNKNOWN"
-    elif last_audio.get("requested") != requested_audio_mode: observed = "UNKNOWN"
-    elif requested_audio_mode == "PCM": observed = "INACTIVE"
+    if requested_audio_mode == "PCM": observed = "INACTIVE"
+    elif not last_audio or last_audio.get("requested") != requested_audio_mode: observed = "UNKNOWN"
     audio_dict = {
         "audio_output": short_device(audio.get("default_sink")),
         "audio_backend": clean(audio.get("backend")),

@@ -1,5 +1,11 @@
 # Changelog
 
+## OPENHTPC 1.1 audio final semantic corrective — 1.1.1-rc3
+
+- Make requested PCM deterministically report passthrough as inactive,
+  immediately and without requiring playback observation.
+- Preserve BITSTREAM observation semantics and all forensic history.
+
 ## OPENHTPC 1.1 audio corrective — 1.1.1-rc2
 
 - Preserve the physically validated PCM/BITSTREAM MPV and PipeWire policy.
