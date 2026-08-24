@@ -1,12 +1,12 @@
-# OPENHTPC 1.1.1 Audio Maintenance Candidate
+# OPENHTPC 1.1.2 AMD Base Validation Candidate
 
-This bounded post-RC3 maintenance candidate is version `1.1.1-rc3`, build
-`post-rc3-audio-passthrough-p0-rc3`. It is derived directly from public RC3,
-adds the binary PCM/BITSTREAM policy, and preserves the qualified RC3 video,
-DVD, subtitle and media behavior. It requires physical AVR validation.
+This bounded post-1.1.1 candidate is version `1.1.2-dev1`, build
+`amd-base-runtime-validation-dev1`. It is derived from the frozen Audio P0 head
+and permits PURE runtime generation from observed capabilities instead of GPU
+vendor identity. It requires first physical validation on AMD hardware.
 
-The public RC3 tag `v1.1.0-rc3` remains immutable. This maintenance candidate
-is not tagged or published.
+The public RC3 tag `v1.1.0-rc3` and the qualified Audio P0 artifact remain
+immutable. This development candidate is not tagged or published.
 
 OPENHTPC was created as an original project by Steve Dehanne and is licensed
 under Apache-2.0. Third-party components retain their own copyrights and

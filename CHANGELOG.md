@@ -1,5 +1,12 @@
 # Changelog
 
+## OPENHTPC AMD Base validation candidate — 1.1.2-dev1
+
+- Remove the historical Intel-only runtime-generation veto.
+- Generate PURE/REFERENCE candidates only when the existing observed Vulkan,
+  VAAPI, render-node, direct-display and MPV capability gates all pass.
+- Keep AMD physical validation pending and preserve unvalidated-offload safety.
+
 ## OPENHTPC 1.1 audio final semantic corrective — 1.1.1-rc3
 
 - Make requested PCM deterministically report passthrough as inactive,

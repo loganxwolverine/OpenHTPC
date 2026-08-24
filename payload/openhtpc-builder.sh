@@ -772,8 +772,6 @@ elif display_path == "offload_pending":
     ready, reason = False, "Chemin multi-GPU à valider."
 elif display_path != "direct":
     ready, reason = False, "Le chemin entre affichage et traitement reste à valider."
-elif backend.get("vendor") != "intel":
-    ready, reason = False, "Backend AMD/NVIDIA non validé physiquement dans Build 3."
 elif backend.get("status") != "observed":
     ready, reason = False, "Le backend vidéo n’est pas observé."
 elif backend.get("decode_api") != "vaapi" or backend.get("render_api") != "vulkan":
