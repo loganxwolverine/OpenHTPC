@@ -1,0 +1,18 @@
+OPENHTPC AMD Codec Phase 2B — read-only driver-path forensic
+
+No package or repository change is performed. No media is played.
+
+1. Copy these three files from the NAS into one directory:
+   openhtpc-amd-codec-forensic.sh
+   openhtpc-codec-capability-audit.py
+   OPENHTPC-1.1.2-AMD-CODEC-PHASE2B-DEV3-FORENSIC-INSTRUCTIONS.txt
+
+2. Run:
+   chmod +x openhtpc-amd-codec-forensic.sh
+   ./openhtpc-amd-codec-forensic.sh
+
+3. Return the printed openhtpc-amd-codec-forensic-<timestamp>.txt file.
+
+The collector reads the Hardware Passport render node, compares Fedora and
+freeworld radeonsi through per-process LIBVA_DRIVERS_PATH values, and audits
+duplicated codec capability fields. It does not use sudo or modify the host.

@@ -7,6 +7,7 @@ timestamp="$(date -u +%Y%m%d-%H%M%S)"
 output="${1:-$PWD/openhtpc-amd-codec-forensic-${timestamp}.txt}"
 profile="${OPENHTPC_PROFILE:-${HOME}/.config/openhtpc/profile.json}"
 pure="${OPENHTPC_PURE_CONF:-${HOME}/.config/openhtpc/runtime/mpv/pure.conf}"
+audit_tool="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/openhtpc-codec-capability-audit.py"
 
 section() { printf '\n===== %s =====\n' "$1"; }
 run() {
@@ -46,7 +47,7 @@ fi
 
 {
     printf 'OPENHTPC AMD MEDIA CODEC FORENSIC — PHASE 2A\n'
-    printf 'collector_version=1\ncollected_utc=%s\n' "$(date -u --iso-8601=seconds)"
+    printf 'collector_version=2\ncollected_utc=%s\n' "$(date -u --iso-8601=seconds)"
     printf 'output=%s\nprofile=%s\npassport_render_node=%s\n' "$output" "$profile" "${render_node:-NOT_FOUND}"
 
     section 'OPERATING SYSTEM'
@@ -71,7 +72,7 @@ fi
         rpm -qa --qf '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\t%{VENDOR}\t%{PACKAGER}\n' 2>&1 |
             grep -Ei '(^|[-])(mesa|libva|ffmpeg|libavcodec|mpv)([-[:space:]]|$)' | sort || true
         printf '\n[VA driver file owners]\n'
-        for driver in /usr/lib64/dri/*_drv_video.so /usr/lib/dri/*_drv_video.so; do
+        for driver in /usr/lib64/dri/*_drv_video.so /usr/lib64/dri-freeworld/*_drv_video.so /usr/lib/dri/*_drv_video.so; do
             [[ -e $driver ]] || continue
             printf '%s\t' "$driver"
             rpm -qf --qf '%{NAME} %{EPOCHNUM}:%{VERSION}-%{RELEASE} %{VENDOR} %{PACKAGER}\n' "$driver" 2>&1 || true
@@ -102,6 +103,16 @@ fi
         printf 'No render node found in Hardware Passport; vainfo not guessed.\n'
     fi
 
+    section 'LIBVA DRIVER-PATH COMPARISON (READ ONLY)'
+    printf 'LIBVA_DRIVERS_PATH=%s\n' "${LIBVA_DRIVERS_PATH:-UNSET}"
+    [[ -r /etc/ld.so.conf.d/mesa-freeworld-lib64.conf ]] && run sed -n '1,80p' /etc/ld.so.conf.d/mesa-freeworld-lib64.conf
+    if available vainfo && [[ -n $render_node && -e $render_node ]]; then
+        for driver_path in /usr/lib64/dri /usr/lib64/dri-freeworld; do
+            [[ -r $driver_path/radeonsi_drv_video.so ]] || continue
+            run env LIBVA_DRIVERS_PATH="$driver_path" vainfo --display drm --device "$render_node"
+        done
+    fi
+
     section 'FFMPEG'
     if available ffmpeg; then
         run ffmpeg -version
@@ -124,6 +135,13 @@ keys = ("gpu_topology", "video_backend", "media_stack", "runtime_profiles", "run
 print(json.dumps({key: data.get(key) for key in keys if key in data}, ensure_ascii=False, indent=2, sort_keys=True))
 PY
     else printf 'Hardware Passport: NOT_READABLE\n'; fi
+
+    section 'OPENHTPC CAPABILITY CONSISTENCY'
+    if [[ -r $profile && -r $audit_tool ]] && available python3; then
+        run python3 "$audit_tool" "$profile"
+    else
+        printf 'Capability consistency audit: NOT_AVAILABLE\n'
+    fi
 
     section 'OPENHTPC PURE RUNTIME'
     if [[ -r $pure ]]; then run sed -n '1,240p' "$pure"
