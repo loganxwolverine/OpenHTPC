@@ -1,5 +1,13 @@
 # Changelog
 
+## OPENHTPC AMD canonical capability refresh — 1.1.2-dev4
+
+- Synchronize current `profile.json` codec mirrors from the same observation
+  produced by every successful `openhtpc capabilities --refresh` operation.
+- Preserve GPU identity, runtime configuration and bounded per-codec history.
+- Run the canonical refresh after installation even when codec dependencies
+  are already installed and no package transaction occurs.
+
 ## OPENHTPC AMD codec consistency candidate — 1.1.2-dev3
 
 - Keep the qualified Dev2 RPM Fusion Free remediation and accept MPEG-2

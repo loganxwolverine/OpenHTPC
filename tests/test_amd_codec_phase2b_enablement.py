@@ -114,6 +114,12 @@ class AmdCodecPhase2BEnablement(unittest.TestCase):
         self.assertIn('hwdec=vaapi', builder)
         self.assertIn('gpu-api=vulkan', builder)
 
+    def test_installer_always_runs_canonical_refresh_after_noop_package_path(self):
+        installer = INSTALLER.read_text(encoding="utf-8")
+        canonical = '"$INSTALL_DIR/openhtpc-capabilities.py" --refresh'
+        self.assertEqual(installer.count(canonical), 1)
+        self.assertGreater(installer.index(canonical), installer.index("install_multimedia_extension"))
+
     def run_profile_refresh(self, initial, values=(True, True, True, False, True, False)):
         scenario = function_prefix() + """
 DNF=fake-dnf; MEDIA_FILE="$TEMP_DIR/media"

@@ -57,6 +57,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("profile", type=pathlib.Path)
     parser.add_argument("--before", type=pathlib.Path)
+    parser.add_argument("--boolean", action="store_true")
     args = parser.parse_args()
     try:
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
@@ -70,7 +71,11 @@ def main() -> int:
     except (OSError, ValueError) as error:
         print(f"codec capability audit failed: {error}", file=sys.stderr)
         return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    if args.boolean:
+        status = result["capability_consistency"]["status"]
+        print(f"CONSISTENT = {'True' if status == 'PASS' else 'False' if status == 'CONTRADICTION' else 'Unknown'}")
+    else:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 1 if result["capability_consistency"]["status"] == "CONTRADICTION" else 0
 
 

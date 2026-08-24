@@ -448,18 +448,110 @@ def snapshot_path(home: pathlib.Path) -> pathlib.Path:
     return home / ".config/openhtpc/runtime/capabilities.json"
 
 
+PROFILE_CODEC_MAP = {
+    "mpeg2": ("mpeg2",),
+    "h264": ("h264_8bit",),
+    "hevc": ("hevc_main",),
+    "hevc_main10": ("hevc_main10",),
+    "vp9": ("vp9_profile0", "vp9_10bit"),
+    "av1": ("av1_main",),
+}
+
+
+def profile_codec_observation(snapshot: dict[str, Any]) -> dict[str, bool]:
+    codecs = snapshot.get("video_decode", {}).get("codecs", {})
+    result = {}
+    for profile_name, canonical_names in PROFILE_CODEC_MAP.items():
+        statuses = [codecs.get(name, {}).get("hardware_decode", {}).get("status") for name in canonical_names]
+        if any(status not in {"SUPPORTED", "UNSUPPORTED"} for status in statuses):
+            raise ValueError("CAPABILITY_CODEC_OBSERVATION_INCOMPLETE")
+        result[profile_name] = any(status == "SUPPORTED" for status in statuses)
+    return result
+
+
+def synchronize_profile_capabilities(profile: dict[str, Any], observation: dict[str, bool], observed_at: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Make media_stack current and synchronize existing topology mirrors."""
+    media = profile.get("media_stack") if isinstance(profile.get("media_stack"), dict) else {}
+    previous_observed = media.get("observed_capabilities") if isinstance(media.get("observed_capabilities"), dict) else {}
+    previous = previous_observed.get("vaapi_decode") if isinstance(previous_observed.get("vaapi_decode"), dict) else None
+    changes = []
+    if previous is not None:
+        for codec, after in observation.items():
+            before = bool(previous.get(codec, False))
+            if before != after:
+                changes.append({"capability": f"vaapi_decode.{codec}", "before": before, "after": after,
+                                "change": "GAIN" if after else "LOSS"})
+    observed = dict(previous_observed)
+    observed["vaapi_decode"] = observation.copy()
+    media["observed_capabilities"] = observed
+    if changes:
+        history = media.get("capability_change_history") if isinstance(media.get("capability_change_history"), list) else []
+        history.append({"observed_at": observed_at, "changes": changes})
+        media["capability_change_history"] = history[-20:]
+    profile["media_stack"] = media
+
+    def sync_mirrors(value: Any) -> None:
+        if isinstance(value, dict):
+            if isinstance(value.get("vaapi_decode"), dict):
+                value["vaapi_decode"] = observation.copy()
+            for child in value.values():
+                sync_mirrors(child)
+        elif isinstance(value, list):
+            for child in value:
+                sync_mirrors(child)
+
+    topology = profile.get("gpu_topology")
+    if isinstance(topology, dict):
+        sync_mirrors(topology)
+    return profile, changes
+
+
+def stage_json(path: pathlib.Path, value: dict[str, Any], mode: int) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(value, output, ensure_ascii=False, indent=2, sort_keys=True)
+            output.write("\n"); output.flush(); os.fsync(output.fileno())
+        os.chmod(temporary, mode)
+        json.loads(pathlib.Path(temporary).read_text(encoding="utf-8"))
+        return temporary
+    except BaseException:
+        if os.path.exists(temporary): os.unlink(temporary)
+        raise
+
+
 def refresh(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_runner, sys_root: pathlib.Path = pathlib.Path("/sys"), proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict[str, Any]:
     target=snapshot_path(home);target.parent.mkdir(parents=True,exist_ok=True);lock=target.with_suffix(".lock")
     with lock.open("w") as stream:
         fcntl.flock(stream,fcntl.LOCK_EX)
         value=generate(home,install,runner,sys_root,proc_root)
-        fd,temporary=tempfile.mkstemp(prefix="capabilities.",suffix=".tmp",dir=target.parent)
+        profile_path = home / ".config/openhtpc/profile.json"
+        profile = None
+        changes: list[dict[str, Any]] = []
+        if profile_path.exists():
+            try:
+                loaded = json.loads(profile_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise ValueError("CAPABILITY_PROFILE_INVALID") from error
+            if not isinstance(loaded, dict):
+                raise ValueError("CAPABILITY_PROFILE_INVALID")
+            profile, changes = synchronize_profile_capabilities(
+                loaded, profile_codec_observation(value), str(value.get("generated_at") or "UNKNOWN")
+            )
+        value.setdefault("confidence", {})["capability_changes"] = changes
+        validate_snapshot(value)
+        snapshot_temporary = stage_json(target, value, 0o600)
+        profile_temporary = None
         try:
-            with os.fdopen(fd,"w",encoding="utf-8") as output:
-                json.dump(value,output,ensure_ascii=False,indent=2,sort_keys=True);output.write("\n");output.flush();os.fsync(output.fileno())
-            os.chmod(temporary,0o600);json.loads(pathlib.Path(temporary).read_text());os.replace(temporary,target)
+            if profile is not None:
+                profile_temporary = stage_json(profile_path, profile, profile_path.stat().st_mode & 0o777)
+            os.replace(snapshot_temporary, target); snapshot_temporary = ""
+            if profile_temporary:
+                os.replace(profile_temporary, profile_path); profile_temporary = ""
         finally:
-            if os.path.exists(temporary):os.unlink(temporary)
+            for temporary in (snapshot_temporary, profile_temporary):
+                if temporary and os.path.exists(temporary): os.unlink(temporary)
     return value
 
 
@@ -479,6 +571,8 @@ def summary(value: dict[str, Any]) -> str:
     lines.extend([f"HDR actif : {(active.get('current_hdr_mode') or {}).get('status','UNKNOWN')}","","DÉCODAGE VIDÉO"])
     for key,item in value.get("video_decode",{}).get("codecs",{}).items():
         lines.append(f"{key:<16} logiciel {item['software_decode']['status']:<11} matériel {item['hardware_decode']['status']:<11} validation {item['validated_playback']['status']}")
+    for change in value.get("confidence", {}).get("capability_changes", []):
+        lines.append(f"CAPABILITY_CHANGE capability={change['capability']} before={str(change['before']).lower()} after={str(change['after']).lower()} change={change['change']}")
     lines.extend(["","AUDIO",f"{audio.get('backend','Inconnu')} / {audio.get('default_sink') or 'sortie inconnue'}",f"Canaux : {audio.get('channels') or 'inconnus'} / Passthrough : {audio.get('passthrough',{}).get('status','UNKNOWN')}","","TRAITEMENT VIDÉO",f"Benchmark : {processing.get('benchmark',{}).get('status','NOT_RUN')}",f"Profil adaptatif : {processing.get('recommendation_status','NOT_EVALUATED')}"])
     return "\n".join(lines)
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
+import subprocess
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -57,6 +60,14 @@ class CodecCapabilityAuditTests(unittest.TestCase):
         observed = MODULE.codec_views(value)["media_stack.observed_capabilities.vaapi_decode"]
         self.assertFalse(observed["mpeg2"])
         self.assertEqual(value["playback_validation"]["last_test"]["video"]["status"], "pending")
+
+    def test_boolean_cli_reports_consistent_true(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "profile.json"
+            path.write_text(json.dumps(profile(POST)), encoding="utf-8")
+            result = subprocess.run(["python3", str(PATH), str(path), "--boolean"], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "CONSISTENT = True")
 
 
 if __name__ == "__main__":

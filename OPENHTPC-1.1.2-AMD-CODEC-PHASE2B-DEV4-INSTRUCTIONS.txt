@@ -1,0 +1,28 @@
+OPENHTPC 1.1.2-dev4 — physical capability consistency validation
+
+Do not start media playback in this validation.
+
+1. Verify and extract the archive:
+
+sha256sum -c OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev4.tar.gz.sha256
+tar -xzf OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev4.tar.gz
+cd OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev4
+
+2. Install Dev4. Existing freeworld packages should require no new codec
+transaction:
+
+./install.sh
+
+3. Run only:
+
+openhtpc version
+openhtpc doctor
+openhtpc capabilities --refresh
+python3 ./tools/openhtpc-codec-capability-audit.py ~/.config/openhtpc/profile.json --boolean
+
+Expected final line:
+
+CONSISTENT = True
+
+Repeat the final two commands once. The second refresh must remain consistent
+and must not append duplicate capability gain/loss history.
