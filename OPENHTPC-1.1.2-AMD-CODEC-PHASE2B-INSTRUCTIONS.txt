@@ -1,0 +1,23 @@
+OPENHTPC 1.1.2-dev2 — AMD CODEC PHASE 2B
+
+This candidate performs a user-approved Fedora/RPM Fusion package transaction.
+Do not use update.sh for this validation. Leave OPENHTPC stopped.
+
+1. Verify the archive:
+   sha256sum -c OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev2.tar.gz.sha256
+
+2. Extract it and enter its directory.
+
+3. Run:
+   ./install.sh
+
+4. Read the exact proposed package list. Continue only if it contains:
+   mesa-va-drivers-freeworld libavcodec-freeworld
+   It must not contain intel-media-driver on this AMD validator.
+
+5. After completion, do not start media playback. Run:
+   openhtpc doctor
+   ./tools/openhtpc-amd-codec-forensic.sh
+
+Return the generated forensic text. Phase 2B playback requires a separate
+decision after the API results are reviewed.

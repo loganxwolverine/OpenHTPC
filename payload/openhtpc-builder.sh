@@ -91,8 +91,7 @@ command -v dnf5 >/dev/null 2>&1 && dnf_command=dnf5
 [[ -z $dnf_command ]] && command -v dnf >/dev/null 2>&1 && dnf_command=dnf
 if [[ -n $dnf_command ]]; then
     enabled_repos="$("$dnf_command" -q repolist --enabled 2>/dev/null || true)"
-    if awk '{print $1}' <<<"$enabled_repos" | grep -Fxq rpmfusion-free &&
-       awk '{print $1}' <<<"$enabled_repos" | grep -Fxq rpmfusion-nonfree; then
+    if awk '{print $1}' <<<"$enabled_repos" | grep -Eq '^rpmfusion-(free|nonfree)(-|$)'; then
         rpmfusion_enabled=true
     fi
 fi

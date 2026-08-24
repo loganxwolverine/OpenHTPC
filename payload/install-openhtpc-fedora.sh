@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.1.2-dev1"
+readonly OPENHTPC_VERSION="1.1.2-dev2"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -162,9 +162,66 @@ show_media_stack() {
     printf '%s\n' '------------------------------------------------------------'
 }
 
+refresh_profile_media_stack() {
+    local profile="${HOME}/.config/openhtpc/profile.json" rpmfusion_current=false vaapi_driver
+    [[ -f $profile ]] || return 0
+    "$DNF" -q repolist --enabled 2>/dev/null |
+        awk '{print $1}' | grep -Eq '^rpmfusion-(free|nonfree)(-|$)' && rpmfusion_current=true
+    vaapi_driver="$(grep -m1 'Driver version' "$MEDIA_FILE" | sed 's/^[[:space:]]*//' || true)"
+    python3 - "$profile" "$rpmfusion_current" "$vaapi_driver" \
+        "$FFMPEG_H264" "$FFMPEG_HEVC" "$FFMPEG_AV1" \
+        "$VA_MPEG2" "$VA_H264" "$VA_HEVC" "$VA_HEVC10" "$VA_VP9" "$VA_AV1" <<'PYMEDIA'
+import json, os, pathlib, sys, tempfile
+
+(raw_path, rpmfusion, driver, ff_h264, ff_hevc, ff_av1,
+ va_mpeg2, va_h264, va_hevc, va_hevc10, va_vp9, va_av1) = sys.argv[1:]
+path = pathlib.Path(raw_path)
+try:
+    profile = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit("Hardware Passport illisible; refresh media_stack refusé")
+if not isinstance(profile, dict):
+    raise SystemExit("Hardware Passport invalide; refresh media_stack refusé")
+truth = lambda value: value == "true"
+media = profile.get("media_stack") if isinstance(profile.get("media_stack"), dict) else {}
+media["rpmfusion_enabled"] = truth(rpmfusion)
+media["vaapi_driver"] = driver or None
+media["observed_capabilities"] = {
+    "vaapi_decode": dict(zip(("mpeg2", "h264", "hevc", "hevc_main10", "vp9", "av1"),
+                             map(truth, (va_mpeg2, va_h264, va_hevc, va_hevc10, va_vp9, va_av1)))),
+    "ffmpeg_decoders": {"h264": truth(ff_h264), "hevc": truth(ff_hevc), "av1": truth(ff_av1)},
+}
+profile["media_stack"] = media
+fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        json.dump(profile, stream, ensure_ascii=False, indent=2, sort_keys=True); stream.write("\n")
+        stream.flush(); os.fsync(stream.fileno())
+    os.chmod(temporary, path.stat().st_mode & 0o777)
+    os.replace(temporary, path)
+finally:
+    try: os.unlink(temporary)
+    except FileNotFoundError: pass
+PYMEDIA
+}
+
 install_multimedia_extension() {
     local fedora_release answer
-    local -a release_urls=() media_packages=()
+    local -a release_urls=() media_packages=() unavailable_packages=()
+
+    if $amd_gpu_present && { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10; } &&
+       ! rpm -q mesa-va-drivers-freeworld >/dev/null 2>&1; then
+        media_packages+=(mesa-va-drivers-freeworld)
+    fi
+    if $intel_gpu_present && { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10; } &&
+       ! rpm -q intel-media-driver >/dev/null 2>&1; then
+        media_packages+=(intel-media-driver)
+    fi
+    if { ! $FFMPEG_H264 || ! $FFMPEG_HEVC; } &&
+       ! rpm -q libavcodec-freeworld >/dev/null 2>&1; then
+        media_packages+=(libavcodec-freeworld)
+    fi
+    ((${#media_packages[@]})) || return 0
 
     printf '\n------------------------------------------------------------\n'
     printf 'Extension multimédia recommandée\n'
@@ -172,8 +229,11 @@ install_multimedia_extension() {
     printf "La pile actuelle n'expose pas certains formats importants pour un HTPC :\n\n"
     printf 'H.264 : %s\nHEVC : %s\nHEVC 10 bits : %s\n\n' \
         "$(mark "$VA_H264")" "$(mark "$VA_HEVC")" "$(mark "$VA_HEVC10")"
-    printf 'OPENHTPC peut activer RPM Fusion free et nonfree, puis installer\n'
-    printf 'les compléments multimédias disponibles pour ce matériel.\n'
+    printf 'Certains codecs multimedia matériels ne sont pas disponibles avec\n'
+    printf 'la pile Fedora actuellement installée.\n\n'
+    printf 'OPENHTPC peut installer les composants supplémentaires nécessaires\n'
+    printf 'depuis RPM Fusion Free après votre autorisation explicite.\n'
+    printf 'Transaction proposée : installation de %s\n\n' "${media_packages[*]}"
     printf 'Cela permettra de vérifier à nouveau les capacités réellement\n'
     printf 'exposées par VA-API et les codecs disponibles dans FFmpeg/MPV.\n\n'
     printf 'Aucune capacité ne peut être garantie avant cette nouvelle mesure.\n'
@@ -183,8 +243,8 @@ install_multimedia_extension() {
         return 0
     fi
 
-    read -r -p "Activer l'extension multimédia ? [O/n] " answer
-    case ${answer:-O} in
+    read -r -p "Continuer ? [o/N] " answer || answer=N
+    case ${answer:-N} in
         O|o|Y|y|oui|Oui|OUI|yes|Yes|YES) ;;
         *)
             log "Extension multimédia refusée. La pile Fedora est conservée."
@@ -196,9 +256,11 @@ install_multimedia_extension() {
     repo_enabled rpmfusion-free || release_urls+=(
         "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_release}.noarch.rpm"
     )
-    repo_enabled rpmfusion-nonfree || release_urls+=(
-        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm"
-    )
+    if [[ " ${media_packages[*]} " == *" intel-media-driver "* ]] && ! repo_enabled rpmfusion-nonfree; then
+        release_urls+=(
+            "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm"
+        )
+    fi
 
     if ((${#release_urls[@]})); then
         log "Activation explicite des dépôts RPM Fusion..."
@@ -206,16 +268,11 @@ install_multimedia_extension() {
             die "L'activation de RPM Fusion a échoué."
     fi
 
-    if { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10; } &&
-       "$DNF" -q repoquery --available intel-media-driver >/dev/null 2>&1; then
-        media_packages+=(intel-media-driver)
-    fi
-    if { ! $FFMPEG_H264 || ! $FFMPEG_HEVC; } &&
-       "$DNF" -q repoquery --available libavcodec-freeworld >/dev/null 2>&1; then
-        media_packages+=(libavcodec-freeworld)
-    fi
-
-    ((${#media_packages[@]})) || die "Aucun complément multimédia approprié n'est disponible."
+    for package in "${media_packages[@]}"; do
+        "$DNF" -q repoquery --available "$package" >/dev/null 2>&1 || unavailable_packages+=("$package")
+    done
+    ((${#unavailable_packages[@]} == 0)) ||
+        die "Complément multimédia indisponible pour Fedora ${fedora_release} : ${unavailable_packages[*]}"
     log "Compléments proposés par DNF : ${media_packages[*]}"
     sudo "$DNF" install --refresh "${media_packages[@]}" ||
         die "L'installation de l'extension multimédia a échoué."
@@ -223,6 +280,7 @@ install_multimedia_extension() {
     collect_media_stack "$MEDIA_FILE"
     read_media_capabilities "$MEDIA_FILE"
     show_media_stack "Media Stack observée après extension"
+    refresh_profile_media_stack || die "Le refresh ciblé du Hardware Passport a échoué."
     log "Toute capacité absente reste non validée."
 }
 
@@ -437,7 +495,7 @@ collect_media_stack "$MEDIA_FILE"
 read_media_capabilities "$MEDIA_FILE"
 show_media_stack "Media Stack actuellement observée"
 
-if [[ ${OPENHTPC_UPDATE_MODE:-0} != 1 ]] && $intel_gpu_present &&
+if [[ ${OPENHTPC_UPDATE_MODE:-0} != 1 ]] && { $intel_gpu_present || $amd_gpu_present; } &&
    { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10 || ! $FFMPEG_H264 || ! $FFMPEG_HEVC; }; then
     install_multimedia_extension
 fi
