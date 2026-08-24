@@ -1,5 +1,14 @@
 # Changelog
 
+## OPENHTPC AMD codec consistency candidate — 1.1.2-dev3
+
+- Keep the qualified Dev2 RPM Fusion Free remediation and accept MPEG-2
+  software fallback when the current freeworld VAAPI driver omits MPEG-2.
+- Make `media_stack.observed_capabilities` authoritative inside `profile.json`
+  and atomically synchronize all existing GPU-topology compatibility mirrors.
+- Record VAAPI capability gains and losses individually without fabricating
+  playback validation.
+
 ## OPENHTPC AMD Base validation candidate — 1.1.2-dev1
 
 - Remove the historical Intel-only runtime-generation veto.

@@ -51,6 +51,13 @@ class CodecCapabilityAuditTests(unittest.TestCase):
         self.assertEqual(result["lost"], ["mpeg2"])
         self.assertEqual(result["gained"], ["h264", "hevc", "hevc_main10"])
 
+    def test_mpeg2_hardware_absence_does_not_fabricate_playback_validation(self):
+        value = profile(POST)
+        value["playback_validation"] = {"last_test": {"video": {"status": "pending"}}}
+        observed = MODULE.codec_views(value)["media_stack.observed_capabilities.vaapi_decode"]
+        self.assertFalse(observed["mpeg2"])
+        self.assertEqual(value["playback_validation"]["last_test"]["video"]["status"], "pending")
+
 
 if __name__ == "__main__":
     unittest.main()

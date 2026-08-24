@@ -1,0 +1,24 @@
+OPENHTPC 1.1.2-dev3 — AMD codec physical validation
+
+1. Verify and extract the Dev3 archive, then run ./install.sh.
+2. Keep the existing Dev2 package decision. No new MPEG-2 package transaction
+   is expected. Finish with openhtpc doctor and leave OPENHTPC stopped.
+3. Copy the five test sources locally. Select every source explicitly; the
+   helper never guesses from filenames.
+
+From the extracted candidate directory, run each applicable command:
+
+./tools/openhtpc-amd-codec-playback-validation.sh MPEG2_DVD -- --dvd-device=/dev/sr0 dvd://
+./tools/openhtpc-amd-codec-playback-validation.sh H264_1080P -- /absolute/path/to/h264-file
+./tools/openhtpc-amd-codec-playback-validation.sh HEVC_MAIN8 -- /absolute/path/to/hevc-main8-file
+./tools/openhtpc-amd-codec-playback-validation.sh HEVC_MAIN10 -- /absolute/path/to/hevc-main10-file
+./tools/openhtpc-amd-codec-playback-validation.sh VP9 -- /absolute/path/to/vp9-file
+
+Press q after a representative observation period, then answer the visual
+fluidity question. Return every generated *.report.json and corresponding
+*.mpv.log file. Do not interpret PENDING_REVIEW as qualification.
+
+Expected MPEG-2 result: requested vaapi, observed software, fluid playback,
+no decoder errors and clean exit. This validates playback, not hardware decode.
+H.264/HEVC/Main10 hardware qualification requires observed=vaapi. Main10 also
+requires source bit_depth=10.

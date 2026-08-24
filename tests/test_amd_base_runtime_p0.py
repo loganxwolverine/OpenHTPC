@@ -104,5 +104,12 @@ class AmdBaseRuntimeP0(unittest.TestCase):
                        'display_path == "offload_pending"'):
             self.assertIn(marker, source)
 
+    def test_runtime_keeps_mpv_native_software_fallback_policy(self):
+        result, pure = execute(profile("amd"))
+        self.assertEqual(result["runtime"]["status"], "ready")
+        self.assertIn("hwdec=vaapi", pure)
+        self.assertNotIn("hwdec-codecs=", pure)
+        self.assertNotIn("hwdec-software-fallback=no", pure)
+
 
 if __name__ == "__main__": unittest.main()

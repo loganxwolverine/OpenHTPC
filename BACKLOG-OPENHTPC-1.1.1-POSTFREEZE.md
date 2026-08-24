@@ -27,6 +27,9 @@ run and an expected result for the corresponding PCM control run.
 
 ## Future independent work
 
+- `CAPABILITY_SINGLE_SOURCE_MIGRATION`: migrate all consumers to canonical
+  `runtime/capabilities.json`, then remove the compatibility codec mirrors from
+  `profile.json`.
 - Plugin Framework V1 P2 — independent of Audio P0.
 - Cinema Enhancement — not started by this release.
 - Controlled OPENHTPC tone mapping strategy; no tone-mapping implementation is

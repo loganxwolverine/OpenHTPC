@@ -171,7 +171,7 @@ refresh_profile_media_stack() {
     python3 - "$profile" "$rpmfusion_current" "$vaapi_driver" \
         "$FFMPEG_H264" "$FFMPEG_HEVC" "$FFMPEG_AV1" \
         "$VA_MPEG2" "$VA_H264" "$VA_HEVC" "$VA_HEVC10" "$VA_VP9" "$VA_AV1" <<'PYMEDIA'
-import json, os, pathlib, sys, tempfile
+import datetime, json, os, pathlib, sys, tempfile
 
 (raw_path, rpmfusion, driver, ff_h264, ff_hevc, ff_av1,
  va_mpeg2, va_h264, va_hevc, va_hevc10, va_vp9, va_av1) = sys.argv[1:]
@@ -184,14 +184,44 @@ if not isinstance(profile, dict):
     raise SystemExit("Hardware Passport invalide; refresh media_stack refusé")
 truth = lambda value: value == "true"
 media = profile.get("media_stack") if isinstance(profile.get("media_stack"), dict) else {}
+previous_observed = media.get("observed_capabilities") if isinstance(media.get("observed_capabilities"), dict) else {}
+previous_vaapi = previous_observed.get("vaapi_decode") if isinstance(previous_observed.get("vaapi_decode"), dict) else None
+codec_names = ("mpeg2", "h264", "hevc", "hevc_main10", "vp9", "av1")
+current_vaapi = dict(zip(codec_names, map(truth, (va_mpeg2, va_h264, va_hevc, va_hevc10, va_vp9, va_av1))))
+changes = []
+if previous_vaapi is not None:
+    for codec in codec_names:
+        before, after = bool(previous_vaapi.get(codec, False)), current_vaapi[codec]
+        if before != after:
+            changes.append({"capability": f"vaapi_decode.{codec}", "before": before, "after": after,
+                            "change": "GAIN" if after else "LOSS"})
 media["rpmfusion_enabled"] = truth(rpmfusion)
 media["vaapi_driver"] = driver or None
 media["observed_capabilities"] = {
-    "vaapi_decode": dict(zip(("mpeg2", "h264", "hevc", "hevc_main10", "vp9", "av1"),
-                             map(truth, (va_mpeg2, va_h264, va_hevc, va_hevc10, va_vp9, va_av1)))),
+    "vaapi_decode": current_vaapi,
     "ffmpeg_decoders": {"h264": truth(ff_h264), "hevc": truth(ff_hevc), "av1": truth(ff_av1)},
 }
+if changes:
+    history = media.get("capability_change_history") if isinstance(media.get("capability_change_history"), list) else []
+    history.append({"observed_at": datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(),
+                    "changes": changes})
+    media["capability_change_history"] = history[-20:]
 profile["media_stack"] = media
+
+def sync_vaapi_mirrors(value):
+    """Synchronize existing topology compatibility mirrors without probing."""
+    if isinstance(value, dict):
+        if isinstance(value.get("vaapi_decode"), dict):
+            value["vaapi_decode"] = current_vaapi.copy()
+        for child in value.values():
+            sync_vaapi_mirrors(child)
+    elif isinstance(value, list):
+        for child in value:
+            sync_vaapi_mirrors(child)
+
+topology = profile.get("gpu_topology")
+if isinstance(topology, dict):
+    sync_vaapi_mirrors(topology)
 fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
 try:
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -202,6 +232,9 @@ try:
 finally:
     try: os.unlink(temporary)
     except FileNotFoundError: pass
+for change in changes:
+    print("CAPABILITY_CHANGE " + " ".join(f"{key}={str(value).lower() if isinstance(value, bool) else value}"
+                                           for key, value in change.items()))
 PYMEDIA
 }
 
