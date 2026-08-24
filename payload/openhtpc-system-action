@@ -13,13 +13,13 @@ def atomic(target,value):
 def load(name,path):
  loader=importlib.machinery.SourceFileLoader(name,str(path));spec=importlib.util.spec_from_loader(name,loader);module=importlib.util.module_from_spec(spec);loader.exec_module(module);return module
 
-def render(home,install,playback_only=False):
+def render(home,install,playback_only=False,audio_only=False):
  ui=load("system_action_ui",install/"openhtpc-ui.py");font=install/"flex/assets/fonts/OpenSans-Regular.ttf";cache=home/".cache/openhtpc"
  if playback_only:
   policy=load("system_action_playback_policy",install/"openhtpc-playback-policy.py");model={"available":True,"playback_policy":policy.read_preferences(home)}
  else:
   system=load("system_action_page",install/"openhtpc-system-page");model=system.status_model(home,install)
- pages=(("system-playback.png","playback"),) if playback_only else (("system-dashboard.png","root"),("system-overview.png","overview"),("system-codecs.png","codecs"),("system-display.png","display"),("system-audio.png","audio"),("system-media_optical.png","media_optical"),("system-processing.png","processing"),("system-playback.png","playback"),("system-diagnostics.png","diagnostics"),("system-technical.png","technical"),("system-about.png","about"),("system-hardware.png","hardware"),("system-display-video.png","display_video"),("system-audio-media.png","audio_media"))
+ pages=(("system-playback.png","playback"),) if playback_only else (("system-audio.png","audio"),) if audio_only else (("system-dashboard.png","root"),("system-overview.png","overview"),("system-codecs.png","codecs"),("system-display.png","display"),("system-audio.png","audio"),("system-media_optical.png","media_optical"),("system-processing.png","processing"),("system-playback.png","playback"),("system-diagnostics.png","diagnostics"),("system-technical.png","technical"),("system-about.png","about"),("system-hardware.png","hardware"),("system-display-video.png","display_video"),("system-audio-media.png","audio_media"))
  for name,page in pages:
   target=cache/name
   if playback_only:
@@ -30,10 +30,13 @@ def render(home,install,playback_only=False):
   else:ui.system_page_png(model,target,font,page)
 
 def main():
- parser=argparse.ArgumentParser();parser.add_argument("action",choices=("refresh","support","playback"));args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument("action",choices=("refresh","support","playback","audio"));args=parser.parse_args()
  home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()));install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"));command=home/".local/bin/openhtpc";state=home/".local/state/openhtpc/system-action.json"
  if args.action=="playback":
   try:render(home,install,playback_only=True);return 0
+  except (OSError,ValueError,ImportError):return 1
+ if args.action=="audio":
+  try:render(home,install,audio_only=True);return 0
   except (OSError,ValueError,ImportError):return 1
  argv=[str(command),"capabilities","--refresh"] if args.action=="refresh" else [str(command),"support-bundle"]
  try:

@@ -1,5 +1,14 @@
 # Changelog
 
+## OPENHTPC 1.1 audio corrective — 1.1.1-rc2
+
+- Preserve the physically validated PCM/BITSTREAM MPV and PipeWire policy.
+- Refresh the AUDIO page and mode label synchronously after couch selection.
+- Capture isolated MPV runtime evidence for DVD and publish the same bounded
+  `AUDIO_POLICY_OBSERVED` state as local MEDIA playback.
+- Place the AUDIO mode selector in the qualified lower system-page dock.
+- Reuse existing lsdvd audio-format metadata when it identifies the DVD codec.
+
 ## OPENHTPC 1.1 maintenance candidate — 1.1.1-rc1
 
 - Add one persistent PCM/BITSTREAM output policy, with safe PCM migration and

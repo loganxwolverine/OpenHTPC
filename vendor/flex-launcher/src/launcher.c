@@ -457,6 +457,7 @@ static bool is_system_subpage(void)
             strcmp(name, "SYSTEM_CODECS") == 0 ||
             strcmp(name, "SYSTEM_DISPLAY") == 0 ||
             strcmp(name, "SYSTEM_AUDIO") == 0 ||
+            strcmp(name, "AUDIO_OUTPUT_MODE") == 0 ||
             strcmp(name, "SYSTEM_MEDIA_OPTICAL") == 0 ||
             strcmp(name, "SYSTEM_PROCESSING") == 0 ||
             strcmp(name, "SYSTEM_PLAYBACK") == 0 ||

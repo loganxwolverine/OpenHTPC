@@ -1,7 +1,7 @@
 # OPENHTPC 1.1.1 Audio Maintenance Candidate
 
-This bounded post-RC3 maintenance candidate is version `1.1.1-rc1`, build
-`post-rc3-audio-passthrough-p0-rc1`. It is derived directly from public RC3,
+This bounded post-RC3 maintenance candidate is version `1.1.1-rc2`, build
+`post-rc3-audio-passthrough-p0-rc2`. It is derived directly from public RC3,
 adds the binary PCM/BITSTREAM policy, and preserves the qualified RC3 video,
 DVD, subtitle and media behavior. It requires physical AVR validation.
 

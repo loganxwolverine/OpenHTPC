@@ -19,7 +19,6 @@ class AudioPassthroughP0(unittest.TestCase):
     def setUpClass(cls):
         cls.policy = load("audio_policy_p0", ROOT / "payload/openhtpc-playback-policy.py")
         cls.setup = load("audio_setup_p0", ROOT / "payload/openhtpc-initial-setup.py")
-        cls.player = load("audio_player_p0", ROOT / "payload/openhtpc-play")
 
     def test_fresh_and_legacy_config_are_safe_pcm(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -70,9 +69,9 @@ class AudioPassthroughP0(unittest.TestCase):
         decision = {"audio_output":{"requested":"BITSTREAM","source_codec":"AC3","reason":"passthrough_candidate","audio_spdif":"ac3,eac3,dts,dts-hd,truehd"}}
         with tempfile.TemporaryDirectory() as raw:
             home = pathlib.Path(raw)
-            inactive = self.player.record_audio_policy(home, decision, "AO: [pipewire] 48000Hz 5.1 6ch floatp")
+            inactive = self.policy.record_audio_observation(home, decision, "AO: [pipewire] 48000Hz 5.1 6ch floatp")
             self.assertEqual(inactive["passthrough"], "INACTIVE")
-            active = self.player.record_audio_policy(home, decision, "AO: [pipewire] 48000Hz stereo 2ch spdif-ac3")
+            active = self.policy.record_audio_observation(home, decision, "AO: [pipewire] 48000Hz stereo 2ch spdif-ac3")
             self.assertEqual(active["passthrough"], "ACTIVE")
 
     def test_support_bundle_contains_audio_policy_and_pipewire(self):

@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import datetime
 
 DEFAULTS = {
     "presentation_mode": "PURE",
@@ -156,6 +157,24 @@ def choose_audio_output(mode: str, audio_track: dict | None) -> dict:
     }
 
 
+def record_audio_observation(home: pathlib.Path, decision: dict, raw_log: str = "") -> dict:
+    output = decision.get("audio_output", {})
+    requested = output.get("requested", "PCM")
+    spdif_active = bool(re.search(r"AO:\s*\[[^]]+\].*\bspdif[-:]|\baudio format:\s*spdif", raw_log, re.I))
+    unavailable = bool(re.search(r"(?:spdif|passthrough).*(?:not supported|unsupported|failed|unavailable)", raw_log, re.I))
+    ao_match = re.search(r"AO:\s*\[([^]]+)\]", raw_log)
+    passthrough = "ACTIVE" if spdif_active else "UNAVAILABLE" if requested == "BITSTREAM" and unavailable else "INACTIVE" if ao_match else "UNKNOWN"
+    device_match = re.search(r"(?:audio-device|device)\s*[=:]\s*([^\s,]+)", raw_log, re.I)
+    value = {"schema": 1, "timestamp": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+             "requested": requested, "source_codec": output.get("source_codec", "UNKNOWN"),
+             "resolved": "BITSTREAM" if spdif_active else "PCM" if ao_match else "UNKNOWN", "reason": output.get("reason"),
+             "passthrough": passthrough, "audio_spdif": output.get("audio_spdif", "none"),
+             "ao": ao_match.group(1) if ao_match else "UNKNOWN",
+             "audio_device": device_match.group(1) if device_match else "DEFAULT"}
+    _atomic_json(home / ".local/state/openhtpc/audio-policy-last.json", value)
+    return value
+
+
 def choose_subtitle(policy: str, probe: dict | None) -> dict:
     tracks = _typed_streams(probe or {}, "subtitle")
     if policy == "AUTO":
@@ -211,7 +230,14 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
     presentation = {"requested": requested, "resolved": "PURE", "reason": "requested_pure" if requested == "PURE" else "no_qualified_local_auto_scope"}
     audio = choose_audio(prefs["audio_language_policy"], probe)
     source_audio_tracks = _typed_streams(probe or {}, "audio")
-    effective_audio_track = audio.get("track") or next((track for track in source_audio_tracks if _flag(track, "default")), None) or (source_audio_tracks[0] if source_audio_tracks else None)
+    if not source_audio_tracks and kind == "dvd" and isinstance(optical_state, dict):
+        physical = optical_state.get("physical_edition", {})
+        dvd_tracks = physical.get("audio", []) if isinstance(physical, dict) else []
+        for index, track in enumerate(dvd_tracks if isinstance(dvd_tracks, list) else [], 1):
+            if isinstance(track, dict) and track.get("format"):
+                source_audio_tracks.append({**track, "codec_name": str(track["format"]).casefold(), "mpv_id": index})
+    dvd_language_track = next((track for track in source_audio_tracks if audio.get("requested") == "FR" and str(track.get("langcode", "")).casefold() in FR_LANGS), None)
+    effective_audio_track = audio.get("track") or dvd_language_track or next((track for track in source_audio_tracks if _flag(track, "default")), None) or (source_audio_tracks[0] if source_audio_tracks else None)
     audio_output = choose_audio_output(prefs["audio_output_mode"], effective_audio_track)
     subtitle = (choose_dvd_subtitle(prefs["subtitle_policy"], optical_state)
                 if kind == "dvd" else choose_subtitle(prefs["subtitle_policy"], probe))

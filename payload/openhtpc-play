@@ -30,31 +30,6 @@ def timestamp() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def record_audio_policy(home: pathlib.Path, decision: dict, raw_log: str = "") -> dict:
-    output = decision.get("audio_output", {})
-    requested = output.get("requested", "PCM")
-    spdif_active = bool(re.search(r"AO:\s*\[[^]]+\].*\bspdif[-:]|\baudio format:\s*spdif", raw_log, re.I))
-    unavailable = bool(re.search(r"(?:spdif|passthrough).*(?:not supported|unsupported|failed|unavailable)", raw_log, re.I))
-    passthrough = "ACTIVE" if spdif_active else "UNAVAILABLE" if requested == "BITSTREAM" and unavailable else "INACTIVE"
-    ao_match = re.search(r"AO:\s*\[([^]]+)\]", raw_log)
-    device_match = re.search(r"(?:audio-device|device)\s*[=:]\s*([^\s,]+)", raw_log, re.I)
-    value = {"schema": 1, "timestamp": timestamp(), "requested": requested,
-             "source_codec": output.get("source_codec", "UNKNOWN"), "resolved": "BITSTREAM" if spdif_active else "PCM",
-             "reason": output.get("reason"), "passthrough": passthrough,
-             "audio_spdif": output.get("audio_spdif", "none"), "ao": ao_match.group(1) if ao_match else "UNKNOWN",
-             "audio_device": device_match.group(1) if device_match else "DEFAULT"}
-    target = home / ".local/state/openhtpc/audio-policy-last.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, sort_keys=True); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
-        os.chmod(temporary, 0o600); os.replace(temporary, target)
-    finally:
-        if os.path.exists(temporary): os.unlink(temporary)
-    return value
-
-
 def configured_roots(home: pathlib.Path) -> list[pathlib.Path]:
     data = json.loads((home / ".config/openhtpc/user-config.json").read_text(encoding="utf-8"))
     values = data.get("local_media_sources")
@@ -338,8 +313,12 @@ def main(argv: list[str] | None = None) -> int:
     opened = any(marker in raw for marker in OPEN_MARKERS)
     error_class = "NONE" if opened and rc == 0 else "MPV_EXIT_ERROR" if rc != 0 else "MEDIA_NOT_OPENED"
     diagnostics = sanitize_output(raw, home, media)
-    observed_audio = record_audio_policy(home, decision, raw)
+    observed_audio = policy.record_audio_observation(home, decision, raw)
     runtime_event(home,install,"AUDIO_POLICY_OBSERVED",requested=observed_audio["requested"],source_codec=observed_audio["source_codec"],resolved=observed_audio["resolved"],passthrough=observed_audio["passthrough"],ao=observed_audio["ao"],audio_device=observed_audio["audio_device"])
+    audio_refresh = install / "openhtpc-system-action"
+    if audio_refresh.is_file():
+        try: subprocess.run([str(audio_refresh), "audio"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired): pass
     append_event(log, **common, event="PROCESS_EXITED", process_started=True, media_opened=opened, exit_code=rc, elapsed=elapsed, error_class=error_class, diagnostic_lines=diagnostics)
     private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)

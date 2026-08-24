@@ -55,6 +55,28 @@ def refresh_dvd_mode_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+def refresh_audio_mode_label(home: pathlib.Path, value: str) -> None:
+    """Synchronize the AUDIO parent label before Flex reloads it."""
+    target = home / ".config/openhtpc/flex-v1.ini"
+    try: lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError: return
+    section = ""; changed = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"): section = stripped[1:-1]
+        elif section == "SYSTEM_AUDIO" and stripped.startswith("Entry") and "=MODE AUDIO : " in line:
+            prefix, rest = line.split("=", 1); _old, separator, suffix = rest.partition(";")
+            if separator: lines[index] = f"{prefix}=MODE AUDIO : {value};{suffix}"; changed = True
+    if not changed: return
+    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.writelines(lines); stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600); os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         return 2
@@ -64,9 +86,11 @@ def main() -> int:
     policy.write_preference(home, sys.argv[1], sys.argv[2])
     if sys.argv[1] == "presentation_mode":
         refresh_dvd_mode_label(home, sys.argv[2])
+    if sys.argv[1] == "audio_output_mode":
+        refresh_audio_mode_label(home, sys.argv[2])
     refresh = install / "openhtpc-system-action"
     if refresh.is_file():
-        subprocess.run([str(refresh), "playback"], check=False, timeout=15)
+        subprocess.run([str(refresh), "audio" if sys.argv[1] == "audio_output_mode" else "playback"], check=False, timeout=15)
     return 0
 
 

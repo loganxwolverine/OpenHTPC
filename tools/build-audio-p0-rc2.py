@@ -11,7 +11,7 @@ import tarfile
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NAME = "OpenHTPC-1.1.1-RC1-Audio-P0"
+NAME = "OpenHTPC-1.1.1-RC2-Audio-P0"
 ARTIFACTS = ROOT / "artifacts"
 EXCLUDED_PARTS = {".git", "artifacts", "__pycache__"}
 
@@ -51,7 +51,7 @@ def build() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
         os.replace(temporary, archive)
     finally: temporary.unlink(missing_ok=True)
     sha = digest(archive); checksum.write_text(f"{sha}  {archive.name}\n", encoding="utf-8")
-    report.write_text(json.dumps({"schema":1,"product":"OPENHTPC","version":"1.1.1-rc1","build_id":"post-rc3-audio-passthrough-p0-rc1",
+    report.write_text(json.dumps({"schema":1,"product":"OPENHTPC","version":"1.1.1-rc2","build_id":"post-rc3-audio-passthrough-p0-rc2",
         "artifact":archive.name,"sha256":sha,"baseline_version":"1.1.0-rc3","baseline_commit":"62992ac15e352b70a61f2fb92a4271c7ccf261fa",
         "status":"AUDIO_P0_SOFTWARE_TESTS_PASS_PHYSICAL_VALIDATION_REQUIRED","published":False}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return archive, checksum, report

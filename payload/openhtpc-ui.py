@@ -621,7 +621,7 @@ def system_page_png(
         txt((90, 590), "ACTIONS", 20, "#22c7ff", True)
         txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
     elif page == "about":
-        version = model.get("technical", {}).get("version", "1.1.1-rc1")
+        version = model.get("technical", {}).get("version", "1.1.1-rc2")
         card((70, 170, 1780, 680), "À PROPOS", [
             ("Projet", "OPENHTPC", "#22c7ff"),
             ("Version", version, None),
