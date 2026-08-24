@@ -1,0 +1,20 @@
+OPENHTPC 1.1.2-dev5 — physical metadata validation via SSH/PuTTY
+
+No media playback is required.
+
+sha256sum -c OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev5.tar.gz.sha256
+tar -xzf OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev5.tar.gz
+cd OpenHTPC-1.1.2-AMD-Codec-Phase2B-Dev5
+./install.sh
+openhtpc version
+openhtpc doctor
+openhtpc capabilities --refresh
+python3 ./tools/openhtpc-codec-capability-audit.py ~/.config/openhtpc/profile.json --boolean
+
+Required:
+
+openhtpc version: 1.1.2-dev5
+Doctor Version: 1.1.2-dev5
+Doctor Build: amd-codec-release-metadata-consistency-dev5
+Doctor Overall: READY
+CONSISTENT = True

@@ -1,5 +1,13 @@
 # Changelog
 
+## OPENHTPC AMD release metadata consistency — 1.1.2-dev5
+
+- Propagate the root `VERSION` deterministically to payload metadata and the
+  installer log version before candidate construction.
+- Reject source trees and extracted archives whose version or build metadata
+  disagree.
+- Preserve Dev4 capability behavior without functional changes.
+
 ## OPENHTPC AMD canonical capability refresh — 1.1.2-dev4
 
 - Synchronize current `profile.json` codec mirrors from the same observation
