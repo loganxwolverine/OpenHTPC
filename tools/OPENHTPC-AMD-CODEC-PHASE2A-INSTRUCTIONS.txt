@@ -1,0 +1,13 @@
+OPENHTPC AMD MEDIA CODEC FORENSIC — PHASE 2A
+
+This collector is read-only. It does not use sudo, install packages, enable
+repositories, change OPENHTPC, probe the graphical session, or play media.
+It writes only the timestamped report in the current directory.
+
+Run on openhtpcryzen:
+
+  chmod +x openhtpc-amd-codec-forensic.sh
+  ./openhtpc-amd-codec-forensic.sh
+
+The final lines print the exact report path and its SHA256. Return that text
+report unchanged. Do not begin media playback; it belongs to Phase 2B.
