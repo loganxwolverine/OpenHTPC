@@ -1,5 +1,17 @@
 # Changelog
 
+## OPENHTPC Optical Media Core O1 Dev2 — 1.1.3-dev2
+
+- Makes `canonical_state` authoritative for every optical media label, icon,
+  provider message and fallback poster.
+- Presents bounded `BLURAY_FAMILY` as `BLU-RAY / UHD` without selecting either
+  playback plugin, even when labels or titles contain UHD/4K text.
+- Replaces the hardcoded DVD generic poster with canonical media-aware DVD,
+  Blu-ray, UHD, Blu-ray/UHD-family and unknown-optical fallbacks.
+- Keeps TMDb as enrichment only: pending/no-result retains the correct fallback;
+  a committed poster may replace it without changing optical identity.
+- Does not change O1 detection evidence or any playback path.
+
 ## OPENHTPC Optical Media Core O1 — 1.1.3-dev1
 
 - Separates canonical physical-medium detection from playback-provider

@@ -16,6 +16,9 @@ import importlib.machinery
 import re
 import shlex
 
+_optical_spec = importlib.util.spec_from_file_location("openhtpc_optical_presentation", pathlib.Path(__file__).with_name("openhtpc-optical.py"))
+_optical_model = importlib.util.module_from_spec(_optical_spec); _optical_spec.loader.exec_module(_optical_model)
+
 
 def load_theme(install: pathlib.Path):
     import importlib.util
@@ -137,7 +140,7 @@ def optical_home_label(optical: dict) -> str:
         optical.get("tmdb_title") or optical.get("disc_title") or
         optical.get("normalized_volume_label") or optical.get("volume_label")
     )
-    prefix = {"DVD": "DVD", "BLURAY": "Blu-ray", "UHD": "UHD Blu-ray"}.get(optical.get("state"), "Disque")
+    prefix = _optical_model.presentation(optical)["home_prefix"]
     # Flex receives the complete title. It can use the available item width;
     # the disc sheet remains the authoritative full-title presentation.
     return f"{prefix} - {title}"
@@ -341,10 +344,10 @@ def bounded_flex_entry(index: int, label: str, icon: pathlib.Path, command: str,
 
 
 def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path], home: pathlib.Path | None = None) -> str:
-    state = optical.get("state"); entries = []
+    state = _optical_model.canonical_state(optical); media = _optical_model.presentation(optical); entries = []
     play_icon, tmdb_icon, eject_icon, back_icon = icons
     dvd_icon = install / "assets/ui/optical-dvd.png"
-    media_play_icon = dvd_icon if (state == "DVD" and dvd_icon.is_file()) else play_icon
+    media_play_icon = dvd_icon if (state == "DVD_VIDEO" and dvd_icon.is_file()) else play_icon
 
     has_token = bool(home and (home / ".config/openhtpc/secrets/tmdb-token").is_file())
     cached_meta = {}
@@ -387,20 +390,21 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
                     cand_icon = pf
             entries.append((label, cand_icon, cmd))
         # Non-candidate dock actions
-        if state == "DVD":
+        if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
         else:
             entries.append(("AUCUN DISQUE DÉTECTÉ", media_play_icon, ":fork true"))
     else:
-        if state == "DVD":
+        if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
-        elif state == "INITIALIZING": entries.append(("INITIALISATION DU DISQUE…", media_play_icon, ":fork true"))
-        elif state == "BLURAY": entries.append(("BLU-RAY DÉTECTÉ · Plugin Blu-ray requis", media_play_icon, ":fork true"))
-        elif state == "UHD": entries.append(("ULTRA HD BLU-RAY DÉTECTÉ · Plugin UHD requis", media_play_icon, ":fork true"))
+        elif optical.get("state") == "INITIALIZING": entries.append(("INITIALISATION DU DISQUE…", media_play_icon, ":fork true"))
+        elif state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+            message=media["message"] + (" · " + media["provider_message"] if media.get("provider_message") else "")
+            entries.append((message, media_play_icon, ":fork true"))
         else: entries.append(("AUCUN DISQUE DÉTECTÉ", media_play_icon, ":fork true"))
 
         if not has_token or meta_status == "NOT_CONFIGURED":
@@ -408,7 +412,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         elif meta_status in {"UNAVAILABLE", "AUTH_ERROR", "AUTH_FAILED"}:
             entries.append(("RECONNECTER TMDb", tmdb_icon, f":fork {install/'openhtpc-configure-tmdb'}"))
 
-    if state == "DVD":
+    if state == "DVD_VIDEO":
         presentation = "PURE"
         try:
             policy_path = install / "openhtpc-playback-policy.py"
@@ -429,11 +433,11 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
 
 
 def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Path) -> pathlib.Path:
-    state = optical.get("state")
+    state = optical.get("state"); canonical = _optical_model.canonical_state(optical)
     labels = {"NO_DRIVE":"LECTEUR · AUCUN LECTEUR", "EMPTY":"LECTEUR · Aucun disque",
               "INITIALIZING":"LECTEUR · Initialisation du disque…", "UNKNOWN_DISC":"LECTEUR · DISQUE INCONNU",
               "UNSUPPORTED_IN_V1":"LECTEUR · MÉDIA NON PRIS EN CHARGE"}
-    label = optical_home_label(optical) if state in {"DVD","BLURAY","UHD"} else labels.get(state, "LECTEUR · ÉTAT INCONNU")
+    label = optical_home_label(optical) if canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"} else labels.get(state, "LECTEUR · ÉTAT INCONNU")
     target = home / ".local/state/openhtpc/flex-optical-state"
     target.parent.mkdir(parents=True, exist_ok=True)
     auto_open = 0
@@ -617,24 +621,19 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     logo = theme.assets(install)["logo"]
     scale = flex_scale(observed_display_size())
     optical = load_optional_object(home / ".local/state/openhtpc/optical-current.json")
-    if optical.get("state") == "DVD" and optical.get("disc_id") and not optical.get("tmdb_title"):
+    if _optical_model.canonical_state(optical) == "DVD_VIDEO" and optical.get("disc_id") and not optical.get("tmdb_title"):
         cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json"
         cached_meta = load_optional_object(cache_target)
         if cached_meta.get("status") == "PASS" and cached_meta.get("title"):
             optical["tmdb_title"] = cached_meta.get("title")
-    disc_state = {
-        "NO_DRIVE": "AUCUN LECTEUR",
-        "EMPTY": "Aucun disque",
-        "DVD": optical_home_label(optical),
-        "BLURAY": optical_home_label(optical),
-        "UHD": optical_home_label(optical),
-        "INITIALIZING": "Initialisation du disque…",
-        "UNKNOWN_DISC": "DISQUE INCONNU",
-        "UNSUPPORTED_IN_V1": "MÉDIA NON PRIS EN CHARGE",
-    }.get(optical.get("state"), "ÉTAT INCONNU")
-    optical_icon = {"DVD": dvd_icon, "BLURAY": bluray_icon, "UHD": uhd_icon}.get(optical.get("state"), optical_empty_icon)
+    canonical = _optical_model.canonical_state(optical); media = _optical_model.presentation(optical)
+    disc_state = optical_home_label(optical) if canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"} else {
+        "NO_OPTICAL_DRIVE": "AUCUN LECTEUR", "DRIVE_PRESENT_NO_MEDIA": "Aucun disque",
+        "DETECTION_INDETERMINATE": "ÉTAT INCONNU",
+    }.get(canonical, "ÉTAT INCONNU")
+    optical_icon = icon_dir / media["icon"]
     live_optical_state = write_live_optical_state(home, optical, optical_icon)
-    ready = optical.get("state") in {"DVD", "BLURAY", "UHD"}
+    ready = canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"}
     entries = [
         f"Entry1={ini_value(str(disc_state)) if ready else 'LECTEUR · ' + ini_value(str(disc_state))};{optical_icon};:submenu DISQUE",
         f"Entry2=ÉJECTER;{eject_icon};:fork env OPENHTPC_STAY_IN_FLEX=1 {eject}",

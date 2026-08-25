@@ -7,6 +7,26 @@ use ``canonical_state``.
 """
 import argparse, fcntl, hashlib, importlib.util, json, os, pathlib, re, subprocess, tempfile
 
+PRESENTATION = {
+    "DVD_VIDEO": {"media_label":"DVD","home_prefix":"DVD","poster_label":"DVD","icon":"optical-dvd.png","fallback_artwork":"dvd-media.png","message":"DVD DÉTECTÉ","provider_message":None},
+    "BLURAY_VIDEO": {"media_label":"BLU-RAY","home_prefix":"Blu-ray","poster_label":"BLU-RAY","icon":"optical-bluray.png","fallback_artwork":"bluray-media.png","message":"BLU-RAY DÉTECTÉ","provider_message":"Plugin Blu-ray requis"},
+    "UHD_BLURAY_VIDEO": {"media_label":"ULTRA HD BLU-RAY","home_prefix":"UHD Blu-ray","poster_label":"ULTRA HD BLU-RAY","icon":"optical-uhd.png","fallback_artwork":"uhd-bluray-media.png","message":"ULTRA HD BLU-RAY DÉTECTÉ","provider_message":"Plugin UHD requis"},
+    "BLURAY_FAMILY": {"media_label":"BLU-RAY / UHD","home_prefix":"Blu-ray / UHD","poster_label":"BLU-RAY / UHD","icon":"optical-empty.png","fallback_artwork":"optical-empty.png","message":"DISQUE BLU-RAY DÉTECTÉ","provider_message":"Type exact Blu-ray / UHD non déterminé"},
+    "UNKNOWN_OPTICAL_MEDIA": {"media_label":"MÉDIA OPTIQUE","home_prefix":"Disque optique","poster_label":"MÉDIA OPTIQUE","icon":"optical-empty.png","fallback_artwork":"optical-empty.png","message":"MÉDIA OPTIQUE DÉTECTÉ","provider_message":"Format non déterminé"},
+}
+
+def canonical_state(value):
+    """Return canonical identity; legacy is consulted only when none exists."""
+    canonical=value.get("canonical_state") if isinstance(value,dict) else None
+    if canonical: return canonical
+    return {"DVD":"DVD_VIDEO","BLURAY":"BLURAY_VIDEO","UHD":"UHD_BLURAY_VIDEO",
+            "EMPTY":"DRIVE_PRESENT_NO_MEDIA","NO_DRIVE":"NO_OPTICAL_DRIVE",
+            "UNKNOWN_DISC":"UNKNOWN_OPTICAL_MEDIA"}.get(value.get("state") if isinstance(value,dict) else None,"DETECTION_INDETERMINATE")
+
+def presentation(value):
+    canonical=canonical_state(value)
+    return {"canonical_state":canonical,**PRESENTATION.get(canonical,{"media_label":"MÉDIA OPTIQUE","home_prefix":"Disque optique","poster_label":"MÉDIA OPTIQUE","icon":"optical-empty.png","fallback_artwork":"optical-empty.png","message":"ÉTAT OPTIQUE INDÉTERMINÉ","provider_message":None})}
+
 def run(command):
     try: return subprocess.run(command,text=True,capture_output=True,timeout=8)
     except (OSError,subprocess.TimeoutExpired): return subprocess.CompletedProcess(command,127,"","")

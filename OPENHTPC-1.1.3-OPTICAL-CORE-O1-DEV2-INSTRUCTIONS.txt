@@ -1,0 +1,34 @@
+OPENHTPC 1.1.3-dev2 — O1 canonical UI truth physical validation
+
+No TTY Linux session, playback, sudo, mount, rip or decryption is required.
+
+PuTTY / SSH
+-----------
+cd /path/containing/downloaded/artifact
+sha256sum -c OpenHTPC-1.1.3-Optical-Core-O1-Dev2.tar.gz.sha256
+tar -xzf OpenHTPC-1.1.3-Optical-Core-O1-Dev2.tar.gz
+cd OpenHTPC-1.1.3-Optical-Core-O1-Dev2
+./update.sh
+openhtpc stop
+openhtpc version
+openhtpc doctor
+tools/openhtpc-optical-forensic.py | tee optical-dev2-empty.json
+
+Repeat only the collector command after each insert/eject, changing the output
+filename for DVD, Blu-ray, UHD and each empty state.
+
+Local KDE / OPENHTPC
+--------------------
+Run `openhtpc start` locally, then validate in order:
+1. Empty drive: no stale media artwork.
+2. DVD: DVD fallback poster when TMDb poster is absent; qualified DVD UI intact.
+3. Eject: empty state, no stale DVD identity/artwork.
+4. Physical Blu-ray: BLU-RAY / UHD fallback for BLURAY_FAMILY; exact type not
+   determined; no Blu-ray- or UHD-plugin-specific claim.
+5. Eject: empty state, no stale artwork.
+6. Physical UHD: the same bounded BLU-RAY / UHD presentation when canonical
+   state remains BLURAY_FAMILY; never an UHD-specific claim.
+7. Eject: empty state, no stale artwork.
+
+If canonical BLURAY_VIDEO or UHD_BLURAY_VIDEO is ever produced, verify its exact
+media fallback and matching plugin requirement. Finish with QUITTER OPENHTPC.

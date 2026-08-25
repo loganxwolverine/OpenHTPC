@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 VERSION="cinematic-v2"
 def load(path,name):
  spec=importlib.util.spec_from_file_location(name,path); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+optical_model=load(pathlib.Path(__file__).with_name("openhtpc-optical.py"),"disc_view_optical_presentation")
 def safe_text(value,default=""):
  return str(value).replace("\x00","").strip() if value not in (None,"",[],{}) else default
 def duration_text(value):
@@ -39,13 +40,17 @@ def cache_identity(state,metadata):
  value={"renderer":VERSION,"disc":state.get("disc_id") or state.get("ui_state_hash") or state.get("generation"),"metadata":metadata}
  return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()[:20]
 def placeholder(size,font_path,title="DVD"):
- image=Image.new("RGB",size,"#071426"); d=ImageDraw.Draw(image); f=ImageFont.truetype(str(font_path),54)
+ image=Image.new("RGB",size,"#071426"); d=ImageDraw.Draw(image); font_size=54
+ f=ImageFont.truetype(str(font_path),font_size)
  d.rounded_rectangle((4,4,size[0]-5,size[1]-5),radius=28,outline="#20c8ff",width=5)
  d.ellipse((size[0]//2-82,size[1]//2-125,size[0]//2+82,size[1]//2+39),outline="#8ee7ff",width=8)
  d.polygon(((size[0]//2-18,size[1]//2-88),(size[0]//2+53,size[1]//2-43),(size[0]//2-18,size[1]//2+2)),fill="#ff9f1c")
- box=d.textbbox((0,0),title,font=f); d.text(((size[0]-box[2])/2,size[1]-115),title,font=f,fill="#f4f8ff")
+ box=d.textbbox((0,0),title,font=f)
+ while box[2]-box[0]>size[0]-44 and font_size>26:
+  font_size-=2; f=ImageFont.truetype(str(font_path),font_size); box=d.textbbox((0,0),title,font=f)
+ d.text(((size[0]-(box[2]-box[0]))/2,size[1]-115),title,font=f,fill="#f4f8ff")
  return image
-def poster_image(path,size,font_path,allowed_roots=()):
+def poster_image(path,size,font_path,allowed_roots=(),fallback_title="MÉDIA OPTIQUE"):
  try:
   if not path: raise ValueError
   candidate=pathlib.Path(path).resolve()
@@ -54,14 +59,18 @@ def poster_image(path,size,font_path,allowed_roots=()):
    image.load()
    if image.width<50 or image.height<80: raise ValueError
    return ImageOps.fit(image.convert("RGB"),size,method=Image.Resampling.LANCZOS,centering=(.5,.5))
- except (OSError,ValueError,TypeError): return placeholder(size,font_path)
+ except (OSError,ValueError,TypeError): return placeholder(size,font_path,fallback_title)
+def committed_poster(metadata):
+ return metadata.get("poster_file") if metadata.get("status")=="PASS" else None
 
 # Media-type profiles — logo key: physical-media logo asset for poster overlay.
 # None = fall back to textual pill badge. Future Blu-ray/UHD logos drop in here.
 MEDIA_PROFILES = {
-    "DVD":    {"badge": "DVD VIDÉO",      "icon": "assets/ui/optical-dvd.png",    "logo": "assets/ui/dvd-media-badge.png",        "label": "DVD"},
-    "BLURAY": {"badge": "BLU-RAY",        "icon": "assets/ui/optical-bluray.png", "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray"},
-    "UHD":    {"badge": "4K UHD BLU-RAY", "icon": "assets/ui/optical-uhd.png",    "logo": "assets/ui/uhd-bluray-media-badge.png", "label": "UHD Blu-ray"},
+    "DVD_VIDEO":         {"badge": "DVD VIDÉO",         "icon": "assets/ui/optical-dvd.png",    "logo": "assets/ui/dvd-media-badge.png",        "label": "DVD"},
+    "BLURAY_VIDEO":      {"badge": "BLU-RAY",           "icon": "assets/ui/optical-bluray.png", "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray"},
+    "UHD_BLURAY_VIDEO":  {"badge": "ULTRA HD BLU-RAY",  "icon": "assets/ui/optical-uhd.png",    "logo": "assets/ui/uhd-bluray-media-badge.png", "label": "UHD Blu-ray"},
+    "BLURAY_FAMILY":     {"badge": "BLU-RAY / UHD",     "icon": "assets/ui/optical-empty.png",  "logo": None,                                  "label": "Blu-ray / UHD"},
+    "UNKNOWN_OPTICAL_MEDIA":{"badge":"MÉDIA OPTIQUE",  "icon": "assets/ui/optical-empty.png",  "logo": None,                                  "label": "Média optique"},
 }
 
 # ─── Task A: Physical-media logo overlay — top-right corner of poster ────────
@@ -197,16 +206,16 @@ def render(home,install,state,metadata,target):
  shade=Image.new("RGBA",base.size,(0,5,14,178)); base=Image.alpha_composite(base.convert("RGBA"),shade); d=ImageDraw.Draw(base,"RGBA")
  status=metadata.get("status")
  is_committed=(status=="PASS")
+ media_type=optical_model.canonical_state(state); media=optical_model.presentation(state)
+ media_prof=MEDIA_PROFILES.get(media_type,MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"])
  if status=="AMBIGUOUS":
-  title=safe_text(state.get("disc_title") or state.get("volume_label") or metadata.get("query"),"DVD identifié")
+  title=safe_text(state.get("disc_title") or state.get("volume_label") or metadata.get("query"),media["media_label"])
  else:
-  title=safe_text(metadata.get("title") or state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label") or metadata.get("query"),"DVD identifié")
+  title=safe_text(metadata.get("title") or state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label") or metadata.get("query"),media["media_label"])
  # Poster: (90,185) 430×645; frame outline. Never show uncommitted candidate poster.
- poster_path=metadata.get("poster_file") if is_committed else None
- poster=poster_image(poster_path,(430,645),font_path,(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache"))
+ poster_path=committed_poster(metadata)
+ poster=poster_image(poster_path,(430,645),font_path,(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache"),media["poster_label"])
  base.paste(poster,(90,185)); d.rounded_rectangle((84,179,526,836),radius=22,outline="#22c7ff",width=4)
- media_type = state.get("state","DVD")
- media_prof = MEDIA_PROFILES.get(media_type, MEDIA_PROFILES["DVD"])
  # Physical-media logo overlay — top-right corner of poster
  result=_draw_logo_overlay(base,install,media_prof)
  logo_drawn=False
@@ -244,6 +253,7 @@ def render(home,install,state,metadata,target):
  if tagline: d.text((585,y),tagline,font=font(26),fill="#ffba69"); y+=54
  overview=safe_text(metadata.get("overview")) if is_committed else ""
  has_token=(home/".config/openhtpc/secrets/tmdb-token").is_file()
+ playback_note=("La lecture locale reste disponible." if state.get("playable") is True else "La lecture de ce disque n’est pas disponible.")
  if overview:
   section="SYNOPSIS"
  elif status=="AMBIGUOUS":
@@ -251,20 +261,20 @@ def render(home,install,state,metadata,target):
   overview="Plusieurs films correspondent à ce titre. Choisissez votre version avec ▲ ▼ et confirmez avec Entrée :"
  elif status=="PENDING":
   section="RECHERCHE TMDb"
-  overview="Recherche des métadonnées TMDb en cours… La lecture locale reste disponible."
+  overview="Recherche des métadonnées TMDb en cours… "+playback_note
  elif status=="AUTH_FAILED":
   section="SERVICE TMDb"
-  overview="Authentification TMDb refusée. Vérifiez votre clé ou jeton TMDb dans les paramètres. La lecture locale reste disponible."
+  overview="Authentification TMDb refusée. Vérifiez votre clé ou jeton TMDb dans les paramètres. "+playback_note
  elif status in {"NETWORK_FAILED","QUERY_FAILED","UNAVAILABLE"}:
   section="SERVICE TMDb"
-  overview="Service TMDb momentanément indisponible. La lecture locale reste disponible."
+  overview="Service TMDb momentanément indisponible. "+playback_note
  elif status in {"NO_RESULT","NO_CONFIDENT_MATCH"}:
   section="INFORMATIONS TMDb"
-  overview="Aucun résultat trouvé sur TMDb pour ce titre. La lecture locale reste disponible."
+  overview="Aucun résultat trouvé sur TMDb pour ce titre. "+playback_note
  else:
   section="ENRICHIR CETTE FICHE"
-  overview=("Connectez OPENHTPC à TMDb pour récupérer automatiquement l’affiche, le synopsis, l’année, les genres et les principaux acteurs. TMDb est facultatif : vous pouvez lire vos DVD sans ce service." if not has_token else
-            "Recherche des métadonnées TMDb en cours… La lecture locale reste disponible.")
+  overview=("Connectez OPENHTPC à TMDb pour récupérer automatiquement l’affiche, le synopsis, l’année, les genres et les principaux acteurs. TMDb est facultatif. "+playback_note if not has_token else
+            "Recherche des métadonnées TMDb en cours… "+playback_note)
  d.text((585,y),section,font=font(24),fill="#22c7ff"); y+=36
  if status=="AMBIGUOUS":
   d.text((585,y),overview,font=font(20),fill="#dceaf5"); y+=32
@@ -282,7 +292,7 @@ def render(home,install,state,metadata,target):
  target.parent.mkdir(parents=True,exist_ok=True); temp=target.with_suffix(".tmp.png"); base.convert("RGB").save(temp,"PNG",optimize=True); os.chmod(temp,0o600); os.replace(temp,target)
  return {"title":title,"cache_identity":cache_identity(state,metadata),"target":str(target),"metadata_status":metadata.get("status","NOT_CONFIGURED")}
 def metadata_for(home,install,state,enrich=False):
- title=safe_text(state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label"),"DVD")
+ title=safe_text(state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label"),optical_model.presentation(state)["media_label"])
  tmdb=load(install/"openhtpc-tmdb.py","disc_tmdb")
  data=tmdb.disc_metadata(home,state,title,enrich=enrich); poster=tmdb.poster(home,data) if data.get("status")=="PASS" else None
  if poster: data["poster_file"]=str(poster)

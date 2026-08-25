@@ -7,6 +7,7 @@ def load_theme(install):
  path=install/"openhtpc-theme.py"
  if not path.is_file(): path=pathlib.Path(__file__).with_name("openhtpc-theme.py")
  return load("disc_theme",path)
+optical_model=load("disc_optical_presentation",pathlib.Path(__file__).with_name("openhtpc-optical.py"))
 def duration(device,runner=subprocess.run):
  try:
   p=runner(["lsdvd","-Ox",device],text=True,capture_output=True,timeout=10)
@@ -22,24 +23,25 @@ def identity(state):
  if raw:
   import re
   return re.sub(r"(?i)(?:[ _.-]+)(?:DVD|DISC|DISK)\s*[12]\s*$","",str(raw)).strip() or "Disque identifié"
- return {"DVD":"DVD","BLURAY":"Blu-ray","UHD":"UHD Blu-ray","INITIALIZING":"Initialisation du disque…"}.get(state.get("state"),"Aucun disque détecté")
+ return optical_model.presentation(state)["media_label"] if optical_model.canonical_state(state) not in {"NO_OPTICAL_DRIVE","DRIVE_PRESENT_NO_MEDIA","DETECTION_INDETERMINATE"} else "Aucun disque détecté"
 def model(home,install,state):
- title=identity(state); metadata={"status":"NOT_CONFIGURED"}; artwork={"DVD":"dvd-media.png","BLURAY":"bluray-media.png","UHD":"uhd-bluray-media.png"}.get(state.get("state"),"optical-empty.png"); artwork=install/"assets/ui"/artwork
- if state.get("state")=="DVD" and (install/"openhtpc-tmdb.py").is_file():
+ canonical=optical_model.canonical_state(state); presentation=optical_model.presentation(state)
+ title=identity(state); metadata={"status":"NOT_CONFIGURED"}; artwork=install/"assets/ui"/presentation["fallback_artwork"]
+ if canonical=="DVD_VIDEO" and (install/"openhtpc-tmdb.py").is_file():
   tmdb=load("tmdb",install/"openhtpc-tmdb.py"); metadata=tmdb.lookup(home,title); poster=tmdb.poster(home,metadata)
   if metadata.get("status")=="PASS": title=metadata.get("title") or title
   if poster: artwork=poster
- return {"state":state,"title":title,"metadata":metadata,"artwork":artwork,"duration":duration(state["device"]) if state.get("state")=="DVD" else None}
+ return {"state":state,"title":title,"metadata":metadata,"artwork":artwork,"duration":duration(state["device"]) if canonical=="DVD_VIDEO" else None}
 def write_menu(home,install,data):
- state=data["state"]; icon=data["artwork"]; font=install/"flex/assets/fonts/OpenSans-Regular.ttf"; theme=load_theme(install); entries=[]
- if state.get("state")=="DVD":
+ state=data["state"]; canonical=optical_model.canonical_state(state); media=optical_model.presentation(state); icon=data["artwork"]; font=install/"flex/assets/fonts/OpenSans-Regular.ttf"; theme=load_theme(install); entries=[]
+ if canonical=="DVD_VIDEO":
   meta=data["metadata"]; year=(meta.get("release_date") or "")[:4]
   title=f"{data['title']}{' ('+year+')' if year else ''}"; dev=shlex.quote(state["device"])
   entries.append(("LIRE · "+title,f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {dev}"))
   if meta.get("status")!="PASS": entries.append(("CONFIGURER TMDb",f":replace {install/'openhtpc-configure-tmdb'}"))
   entries.append(("ÉJECTER",f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {dev}"))
- elif state.get("state")=="BLURAY": entries.append(("BLU-RAY DÉTECTÉ — Lecture Blu-ray non disponible. Plugin Blu-ray requis.",":fork true"))
- elif state.get("state")=="UHD": entries.append(("ULTRA HD BLU-RAY DÉTECTÉ — Lecture UHD non disponible. Plugin UHD requis.",":fork true"))
+ elif canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+  entries.append((media["message"]+" — "+media["provider_message"]+".",":fork true"))
  elif state.get("state")=="INITIALIZING": entries.append(("INITIALISATION DU DISQUE…",":fork true"))
  else: entries.append(("AUCUN DISQUE DÉTECTÉ — Insérez un DVD, Blu-ray ou UHD compatible.",":fork true"))
  entries.append(("RETOUR",f":replace {install/'openhtpc-session-start'}"))
