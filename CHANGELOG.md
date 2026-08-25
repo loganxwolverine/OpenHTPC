@@ -1,5 +1,17 @@
 # Changelog
 
+## OPENHTPC Optical Media Core O1 Dev3 — 1.1.3-dev3
+
+- Removes unbounded published `INITIALIZING`: stable canonical detection is now
+  published directly, and MMC-confirmed BD media never enters the DVD probe.
+- Makes eject a hard presentation invalidation boundary and requires generated
+  disc-sheet provenance to match canonical state, optical generation and UI hash.
+- Stages render results and rejects late TMDb/render commits from stale optical
+  generations, with bounded JSONL lifecycle tracing.
+- Adds the user-owned `~/OPENHTPC-VALIDATOR` lab with manifest-driven
+  `apply-latest`, pre-change `capture`, and objective `observe optical` failure
+  detection. No graphical start, playback, purge, root or stored credential.
+
 ## OPENHTPC Optical Media Core O1 Dev2 — 1.1.3-dev2
 
 - Makes `canonical_state` authoritative for every optical media label, icon,

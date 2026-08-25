@@ -698,10 +698,15 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         audio_mode = "PCM"
     if audio_mode not in {"PCM", "BITSTREAM"}: audio_mode = "PCM"
     disc_sheet = home / ".cache/openhtpc/disc-sheet.png"
+    if not disc_sheet_is_current(home,optical):
+        for stale in (disc_sheet,home/".local/state/openhtpc/disc-sheet-state.json"):
+            try: stale.unlink()
+            except OSError: pass
+        _optical_model.trace_event(home,"PRESENTATION_INVALIDATED",optical_generation=optical_generation,canonical_state=canonical,presentation_state="INVALIDATED",event_reason="GENERATION_PROVENANCE_MISMATCH")
     if disc_view.is_file():
-        subprocess.run([str(disc_view), "--home", str(home)], timeout=12, check=False,
+        subprocess.run([str(disc_view), "--home", str(home), "--generation", str(optical_generation)], timeout=12, check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not disc_sheet.is_file(): disc_sheet = theme.assets(install)["wallpaper"]
+    if not disc_sheet_is_current(home,optical): disc_sheet = theme.assets(install)["wallpaper"]
     counter_path = home / ".local/state/openhtpc/menu-generation"
     counter_path.parent.mkdir(parents=True, exist_ok=True)
     with open(counter_path, "a+", encoding="utf-8") as counter:
@@ -925,6 +930,13 @@ def load_optional_object(path: pathlib.Path) -> dict:
         return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+def disc_sheet_is_current(home: pathlib.Path, optical: dict) -> bool:
+    provenance=load_optional_object(home/".local/state/openhtpc/disc-sheet-state.json")
+    return (int(provenance.get("optical_generation",-1) or -1)==int(optical.get("generation",0) or 0) and
+            provenance.get("canonical_state")==_optical_model.canonical_state(optical) and
+            provenance.get("ui_state_hash")==optical.get("ui_state_hash") and
+            (home/".cache/openhtpc/disc-sheet.png").is_file())
 
 
 def plugin_menu_entries(home: pathlib.Path, install: pathlib.Path) -> list[dict[str, str]]:

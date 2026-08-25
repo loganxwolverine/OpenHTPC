@@ -1,0 +1,24 @@
+OPENHTPC 1.1.3-dev3 — ONE-COMMAND physical validation
+
+The candidate is delivered to ~/OPENHTPC-VALIDATOR/inbox on the Ryzen validator.
+From PuTTY/SSH run exactly:
+
+~/OPENHTPC-VALIDATOR/openhtpc-validator apply-latest
+
+The command verifies SHA and metadata, stops OPENHTPC, applies update.sh, runs
+version/Doctor/empty optical forensic checks, starts the read-only observer and
+leaves OPENHTPC stopped. It never starts the graphical UI.
+
+Then locally at KDE run:
+
+openhtpc start
+
+Test EMPTY, DVD, EJECT, BLU-RAY, EJECT, SECOND BLU-RAY, EJECT, UHD, EJECT,
+HOME reentry, and QUITTER. No playback.
+
+If any visual issue occurs, capture current frozen state before stopping:
+
+openhtpc-validator capture
+
+Upload only the resulting single archive printed by the command. The observer
+automatically captures objectively stale lifecycle failures when detectable.

@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""User-owned OPENHTPC physical-validation lab automation."""
+from __future__ import annotations
+import argparse,datetime,hashlib,json,os,pathlib,re,shutil,subprocess,tarfile,tempfile,time
+
+HOME=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()))
+ROOT=pathlib.Path(os.environ.get("OPENHTPC_VALIDATOR_ROOT",HOME/"OPENHTPC-VALIDATOR"))
+DIRS={name:ROOT/name for name in ("inbox","releases","current","logs","outbox","state")}
+SECRET=re.compile(r"(?i)(authorization|api[_-]?key|password|secret|token|keydb)\s*[:=].*")
+REQUIRED_MANIFEST={"version","build","commit","artifact","sha256","intended_validator_phase","installation_method","required_pre_checks","required_post_checks","playback_allowed","local_kde_observation_required"}
+
+def ensure_lab():
+ for path in DIRS.values(): path.mkdir(parents=True,exist_ok=True)
+def run(argv,timeout=60,cwd=None):
+ try: return subprocess.run(argv,text=True,capture_output=True,timeout=timeout,cwd=cwd)
+ except (OSError,subprocess.TimeoutExpired) as exc: return subprocess.CompletedProcess(argv,127,"",f"{type(exc).__name__}: {exc}\n")
+def sha256(path):
+ value=hashlib.sha256()
+ with path.open("rb") as stream:
+  for chunk in iter(lambda:stream.read(1024*1024),b""): value.update(chunk)
+ return value.hexdigest()
+def sanitize(text):
+ text=text.replace(str(HOME),"~")
+ text=re.sub(r"(?i)(--(?:password|token|api[_-]?key|secret)\s+)\S+",r"\1[REDACTED]",text)
+ try:
+  value=json.loads(text)
+  def clean(item):
+   if isinstance(item,dict):return {key:("[REDACTED]" if re.search(r"(?i)(authorization|api[_-]?key|password|secret|token|keydb)",key) else clean(val)) for key,val in item.items()}
+   if isinstance(item,list):return [clean(value) for value in item]
+   return item
+  return json.dumps(clean(value),ensure_ascii=False,indent=2,sort_keys=True)+"\n"
+ except json.JSONDecodeError:pass
+ return "\n".join("[REDACTED]" if SECRET.search(line) else line for line in text.splitlines())+"\n"
+def atomic_json(path,value):
+ path.parent.mkdir(parents=True,exist_ok=True)
+ with tempfile.NamedTemporaryFile("w",encoding="utf-8",dir=path.parent,prefix=path.name+".",delete=False) as stream:
+  json.dump(value,stream,ensure_ascii=False,indent=2,sort_keys=True);stream.write("\n");temp=pathlib.Path(stream.name)
+ os.chmod(temp,0o600);os.replace(temp,path)
+def manifests():
+ ensure_lab(); valid=[]
+ for path in DIRS["inbox"].glob("*.validation.json"):
+  try: data=json.loads(path.read_text(encoding="utf-8"))
+  except (OSError,json.JSONDecodeError): continue
+  if REQUIRED_MANIFEST.issubset(data) and (DIRS["inbox"]/str(data["artifact"])).is_file(): valid.append((path.stat().st_mtime,path,data))
+ return sorted(valid,key=lambda item:(item[0],item[1].name),reverse=True)
+def latest():
+ items=manifests()
+ if not items: raise RuntimeError("NO_COMPLETE_VALIDATION_MANIFEST")
+ return items[0][1],items[0][2]
+def safe_extract(archive,destination):
+ with tarfile.open(archive,"r:gz") as source:
+  base=destination.resolve()
+  for member in source.getmembers():
+   target=(destination/member.name).resolve()
+   if not target.is_relative_to(base) or member.issym() or member.islnk(): raise RuntimeError("UNSAFE_ARCHIVE_MEMBER")
+  source.extractall(destination,filter="data")
+def archive_metadata(archive):
+ with tarfile.open(archive,"r:gz") as source:
+  files={member.name:member for member in source.getmembers() if member.isfile()}; roots={name.split("/",1)[0] for name in files if "/" in name}
+  if len(roots)!=1: raise RuntimeError("ARCHIVE_LAYOUT_INVALID")
+  root=next(iter(roots)); values={}
+  for relative in ("VERSION","payload/VERSION","payload/version.json"):
+   member=files.get(f"{root}/{relative}");stream=source.extractfile(member) if member else None
+   if stream is None: raise RuntimeError("ARCHIVE_METADATA_MISSING")
+   values[relative]=stream.read().decode("utf-8")
+  meta=json.loads(values["payload/version.json"])
+  if values["VERSION"].strip()!=values["payload/VERSION"].strip() or meta.get("version")!=values["VERSION"].strip(): raise RuntimeError("ARCHIVE_VERSION_MISMATCH")
+  return root,meta
+def log_run(stream,label,argv,timeout=120,cwd=None):
+ stream.write(f"\n[{label}] {' '.join(map(str,argv))}\n");stream.flush();result=run([str(x) for x in argv],timeout,cwd)
+ stream.write(result.stdout);stream.write(result.stderr);stream.write(f"exit={result.returncode}\n");stream.flush();return result
+def expand_command(command,source):
+ return [str(value).replace("{HOME}",str(HOME)).replace("{SOURCE}",str(source)).replace("{VALIDATOR_ROOT}",str(ROOT)) for value in command]
+def start_observer(scope):
+ pid_path=DIRS["state"]/"observer.pid"
+ try:
+  pid=int(pid_path.read_text().strip());os.kill(pid,0);return pid
+ except (OSError,ValueError):pass
+ command=HOME/".local/bin/openhtpc-validator"
+ if not command.is_file():command=pathlib.Path(__file__)
+ log=(DIRS["logs"]/"observer.log").open("a",encoding="utf-8")
+ process=subprocess.Popen([str(command),"observe",scope],stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+ pid_path.write_text(str(process.pid)+"\n",encoding="utf-8");return process.pid
+def apply_latest():
+ ensure_lab();manifest_path,manifest=latest();archive=DIRS["inbox"]/manifest["artifact"]
+ if sha256(archive)!=manifest["sha256"]: raise RuntimeError("ARCHIVE_SHA256_MISMATCH")
+ root_name,metadata=archive_metadata(archive)
+ if metadata.get("version")!=manifest["version"] or metadata.get("build_id")!=manifest["build"]: raise RuntimeError("CANDIDATE_METADATA_MISMATCH")
+ if manifest["installation_method"] not in {"install.sh","update.sh"}: raise RuntimeError("INSTALLATION_METHOD_REFUSED")
+ release=DIRS["releases"]/f"{manifest['version']}-{manifest['build']}"
+ if not release.exists(): release.mkdir();safe_extract(archive,release)
+ source=release/root_name
+ if not source.is_dir(): raise RuntimeError("RELEASE_EXTRACTION_INCOMPLETE")
+ stamp=datetime.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S");log=DIRS["logs"]/f"apply-{stamp}.log"
+ ok=True
+ with log.open("w",encoding="utf-8") as stream:
+  stream.write(json.dumps(manifest,ensure_ascii=False,sort_keys=True)+"\n")
+  for check in manifest["required_pre_checks"]:
+   result=log_run(stream,"PRE",expand_command(check,source),60);ok &= result.returncode==0
+  if not ok: raise RuntimeError(f"PRE_CHECK_FAILED log={log}")
+  if manifest.get("stop_openhtpc",True): ok &= log_run(stream,"STOP",[str(HOME/".local/bin/openhtpc"),"stop"],60).returncode==0
+  method=source/manifest["installation_method"]
+  ok &= log_run(stream,"APPLY",[str(method)],600,source).returncode==0
+  for check in manifest["required_post_checks"]:
+   ok &= log_run(stream,"POST",expand_command(check,source),120,source).returncode==0
+ if not ok: raise RuntimeError(f"APPLY_FAILED log={log}")
+ atomic_json(DIRS["state"]/"applied.json",{"manifest":str(manifest_path),"version":manifest["version"],"build":manifest["build"],"commit":manifest["commit"],"applied_at":datetime.datetime.now().astimezone().isoformat(),"log":str(log)})
+ current=DIRS["current"]/"candidate.json";atomic_json(current,{"release":str(source),**manifest})
+ observer_pid=start_observer(manifest["observer"]) if manifest.get("observer") in {"optical"} else None
+ print(f"VALIDATOR_APPLY PASS\nversion={manifest['version']}\nbuild={manifest['build']}\nlog={log}\nobserver_pid={observer_pid or 'not_requested'}\nOPENHTPC remains stopped; local KDE observation required.")
+def add_text(root,name,text):
+ target=root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(sanitize(text),encoding="utf-8")
+def capture(reason="MANUAL"):
+ ensure_lab();stamp=datetime.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S");work=DIRS["outbox"]/f"capture-{stamp}";work.mkdir()
+ install=HOME/".local/lib/openhtpc";state=HOME/".local/state/openhtpc"
+ commands={"version.txt":[str(HOME/".local/bin/openhtpc"),"version"],"doctor.txt":[str(HOME/".local/bin/openhtpc"),"doctor"],"processes.txt":["ps","-u",str(os.getuid()),"-o","pid,ppid,etimes,stat,args"],"lsblk.txt":["lsblk","-o","NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS,VENDOR,MODEL,REV,RM,HOTPLUG"],"blkid.txt":["blkid"],"journal.txt":["journalctl","--user","--since=-2 hours","--no-pager","-n","600","-g","OPENHTPC|flex-launcher|optical-monitor"]}
+ for name,argv in commands.items():
+  result=run(argv,30);add_text(work,name,result.stdout+result.stderr)
+ udev=[]
+ try:
+  devices=[entry for entry in pathlib.Path("/sys/class/block").iterdir() if (entry/"device/type").read_text().strip()=="5"]
+ except OSError:devices=[]
+ for device in sorted(devices,key=lambda item:item.name):
+  result=run(["udevadm","info","--query=property","--name",f"/dev/{device.name}"],15);udev.append(f"[{device.name}]\n"+result.stdout+result.stderr)
+ add_text(work,"udev-optical.txt","\n".join(udev) if udev else "no optical udev device available\n")
+ forensic=install/"openhtpc-optical-forensic.py"
+ if not forensic.is_file(): forensic=DIRS["current"]/"openhtpc-optical-forensic.py"
+ if forensic.is_file():
+  result=run([str(forensic)],30);add_text(work,"optical-forensic.json",result.stdout+result.stderr)
+ for source,name in ((install/"version.json","installed-version.json"),(state/"optical-current.json","optical-current.json"),(state/"optical-generation","optical-generation.txt"),(state/"optical-lifecycle.jsonl","optical-lifecycle.jsonl"),(state/"disc-sheet-state.json","disc-sheet-state.json"),(state/"flex-optical-state","flex-optical-state.txt"),(HOME/".config/openhtpc/flex-v1.ini","flex-v1.ini"),(state/"runtime.log","runtime.log"),(state/"runtime-session.json","runtime-session.json"),(state/"optical-monitor.pid","optical-monitor.pid")):
+  try:add_text(work,name,source.read_text(encoding="utf-8",errors="replace"))
+  except OSError:add_text(work,name,"source unavailable\n")
+ image=HOME/".cache/openhtpc/disc-sheet.png"
+ if image.is_file(): shutil.copy2(image,work/"disc-sheet.png")
+ support=run([str(HOME/".local/bin/openhtpc"),"support-bundle"],120)
+ add_text(work,"support-command.txt",support.stdout+support.stderr)
+ match=re.search(r"(/[^\n]+\.tar\.gz)",support.stdout)
+ if match:
+  candidate=pathlib.Path(match.group(1))
+  if candidate.is_file(): shutil.copy2(candidate,work/"openhtpc-support.tar.gz")
+ add_text(work,"SUMMARY.txt",f"reason={reason}\ncaptured={datetime.datetime.now().astimezone().isoformat()}\nread_only_capture=true\nmedia_contents_collected=false\n")
+ archive=DIRS["outbox"]/f"openhtpc-validator-failure-{stamp}.tar.gz"
+ with tarfile.open(archive,"w:gz") as output: output.add(work,arcname=work.name)
+ checksum=archive.with_suffix(archive.suffix+".sha256");checksum.write_text(f"{sha256(archive)}  {archive.name}\n",encoding="utf-8")
+ upload="DIAGNOSTIC_UPLOAD_BLOCKED"
+ if os.environ.get("OPENHTPC_VALIDATOR_DISABLE_UPLOAD")!="1" and shutil.which("smbclient"):
+  remote=f"put {archive} {archive.name}; put {checksum} {checksum.name}"
+  result=run(["smbclient","//192.168.1.10/Tools","-N","-c",f"cd openhtpc; mkdir validator-logs; cd validator-logs; {remote}"],120)
+  if result.returncode==0: upload="DIAGNOSTIC_UPLOAD PASS"
+ print(f"VALIDATOR_CAPTURE PASS\narchive={archive}\nsha256={sha256(archive)}\n{upload}")
+ return archive
+def read_json(path):
+ try:return json.loads(path.read_text(encoding="utf-8"))
+ except (OSError,json.JSONDecodeError):return {}
+def observe_optical(once=False,timeout=15):
+ ensure_lab();state_path=HOME/".local/state/openhtpc/optical-current.json";presentation_path=HOME/".local/state/openhtpc/disc-sheet-state.json";runtime_path=HOME/".local/state/openhtpc/runtime-session.json";initial_since=None;mismatch_since=None;last_generation=-1;last_render=-1
+ while True:
+  state=read_json(state_path);presentation=read_json(presentation_path);runtime=read_json(runtime_path);generation=int(state.get("generation",0) or 0);canonical=state.get("canonical_state");render_generation=int(presentation.get("optical_generation",-1) or -1)
+  failure=None
+  if state.get("state")=="INITIALIZING": initial_since=initial_since or time.monotonic();failure="INITIALIZING_TIMEOUT" if time.monotonic()-initial_since>timeout else None
+  else: initial_since=None
+  if generation<last_generation: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
+  if render_generation>=0 and render_generation<last_render: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
+  if canonical=="DRIVE_PRESENT_NO_MEDIA" and presentation and int(presentation.get("optical_generation",-1))!=generation: failure="STALE_PRESENTATION_AFTER_EJECT"
+  if runtime.get("state")=="RUNNING" and render_generation!=generation:
+   mismatch_since=mismatch_since or time.monotonic();failure="PRESENTATION_GENERATION_STALLED" if time.monotonic()-mismatch_since>timeout else failure
+  else:mismatch_since=None
+  monitor=run(["pgrep","-fc","openhtpc-optical-monitor"],5)
+  try:count=int(monitor.stdout.strip())
+  except ValueError:count=0
+  if count>1: failure="DUPLICATE_OPTICAL_MONITOR"
+  if runtime.get("state")=="RUNNING" and count==0: failure="OPTICAL_MONITOR_CRASH"
+  if failure: capture(failure);print(f"VALIDATOR_OBSERVER FAIL {failure}");return 1
+  last_generation=max(last_generation,generation);last_render=max(last_render,render_generation)
+  if once: print("VALIDATOR_OBSERVER PASS");return 0
+  time.sleep(2)
+def main():
+ parser=argparse.ArgumentParser();sub=parser.add_subparsers(dest="command",required=True)
+ sub.add_parser("apply-latest");capture_parser=sub.add_parser("capture");capture_parser.add_argument("--reason",default="MANUAL")
+ observe=sub.add_parser("observe");observe.add_argument("scope",choices=["optical"]);observe.add_argument("--once",action="store_true");observe.add_argument("--timeout",type=int,default=15)
+ args=parser.parse_args()
+ try:
+  if args.command=="apply-latest":apply_latest()
+  elif args.command=="capture":capture(args.reason)
+  else:return observe_optical(args.once,args.timeout)
+  return 0
+ except Exception as exc: print(f"VALIDATOR_{args.command.upper().replace('-','_')} FAIL\n{exc}");return 1
+if __name__=="__main__":raise SystemExit(main())

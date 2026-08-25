@@ -291,10 +291,19 @@ def render(home,install,state,metadata,target):
  d.text((90,858),"ENTRÉE : sélectionner   •   ÉCHAP / RETOUR ARRIÈRE : accueil",font=font(19),fill="#9fb6c8")
  target.parent.mkdir(parents=True,exist_ok=True); temp=target.with_suffix(".tmp.png"); base.convert("RGB").save(temp,"PNG",optimize=True); os.chmod(temp,0o600); os.replace(temp,target)
  return {"title":title,"cache_identity":cache_identity(state,metadata),"target":str(target),"metadata_status":metadata.get("status","NOT_CONFIGURED")}
-def metadata_for(home,install,state,enrich=False):
+def generation_is_current(home,generation):
+ try: current=json.loads((home/".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
+ except (OSError,json.JSONDecodeError): return False
+ return int(current.get("generation",0) or 0)==int(generation or 0)
+def metadata_for(home,install,state,enrich=False,generation=None):
  title=safe_text(state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label"),optical_model.presentation(state)["media_label"])
  tmdb=load(install/"openhtpc-tmdb.py","disc_tmdb")
- data=tmdb.disc_metadata(home,state,title,enrich=enrich); poster=tmdb.poster(home,data) if data.get("status")=="PASS" else None
+ guard=(lambda:generation_is_current(home,generation)) if generation is not None else None
+ data=tmdb.disc_metadata(home,state,title,enrich=enrich,commit_guard=guard)
+ if data.get("stale_discarded"):
+  optical_model.trace_event(home,"TMDB_RESULT_DISCARDED_STALE_GENERATION",optical_generation=generation,canonical_state=optical_model.canonical_state(state),metadata_job_state="DISCARDED",event_reason="GENERATION_MISMATCH")
+  return data
+ poster=tmdb.poster(home,data) if data.get("status")=="PASS" and (guard is None or guard()) else None
  if poster: data["poster_file"]=str(poster)
  return data
 def main():
@@ -317,7 +326,11 @@ def main():
     if a.generation is not None and int(state.get("generation", 0) or 0) != a.generation:
         return 0
 
-    meta = metadata_for(home, install, state, a.enrich)
+    generation=int(state.get("generation",0) or 0)
+    if a.enrich: optical_model.trace_event(home,"TMDB_LOOKUP_STARTED",optical_generation=generation,canonical_state=optical_model.canonical_state(state),metadata_job_state="STARTED")
+    meta = metadata_for(home, install, state, a.enrich, generation if a.enrich else None)
+    if meta.get("stale_discarded"): return 0
+    if a.enrich: optical_model.trace_event(home,"TMDB_LOOKUP_RESULT",optical_generation=generation,canonical_state=optical_model.canonical_state(state),metadata_job_state=meta.get("status","UNKNOWN"))
 
     # Re-verify latest optical state hasn't changed before writing disc-sheet.png
     try:
@@ -329,8 +342,19 @@ def main():
     except (OSError, json.JSONDecodeError):
         pass
 
-    target = home / ".cache/openhtpc/disc-sheet.png"
-    print(json.dumps(render(home, install, state, meta, target), ensure_ascii=False))
+    target = home / ".cache/openhtpc/disc-sheet.png"; staged=target.with_name(f"disc-sheet.{generation}.staged.png")
+    rendered=render(home, install, state, meta, staged)
+    if not generation_is_current(home,generation):
+        try: staged.unlink()
+        except OSError: pass
+        optical_model.trace_event(home,"PRESENTATION_RESULT_DISCARDED_STALE_GENERATION",optical_generation=generation,canonical_state=optical_model.canonical_state(state),presentation_state="DISCARDED",event_reason="GENERATION_MISMATCH_AFTER_RENDER")
+        return 0
+    os.replace(staged,target); rendered["target"]=str(target)
+    provenance={"schema":1,"optical_generation":generation,"canonical_state":optical_model.canonical_state(state),"ui_state_hash":state.get("ui_state_hash"),"render_identity":rendered["cache_identity"],"metadata_status":meta.get("status","NOT_CONFIGURED")}
+    optical_model.atomic_json(home/".local/state/openhtpc/disc-sheet-state.json",provenance)
+    optical_model.trace_event(home,"PRESENTATION_READY",optical_generation=generation,canonical_state=provenance["canonical_state"],presentation_state="READY",render_generation=generation,metadata_job_state=provenance["metadata_status"])
+    optical_model.trace_event(home,"DISC_SHEET_REGENERATED",optical_generation=generation,canonical_state=provenance["canonical_state"],presentation_state="READY",render_generation=generation,metadata_job_state=provenance["metadata_status"])
+    print(json.dumps(rendered, ensure_ascii=False))
     return 0
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ TOOL = ROOT / "tools/openhtpc_release_metadata.py"
 SPEC = importlib.util.spec_from_file_location("release_metadata", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC); assert SPEC.loader; SPEC.loader.exec_module(MODULE)
 BUILD_ID = "amd-codec-release-metadata-consistency-dev5"
-CURRENT_BUILD_ID = "optical-media-ui-truth-dev2"
+CURRENT_BUILD_ID = "optical-state-lifecycle-validator-dev3"
 
 
 def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
@@ -65,7 +65,7 @@ class ReleaseMetadataConsistency(unittest.TestCase):
 
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
-        self.assertEqual(values["top_version"], "1.1.3-dev2")
+        self.assertEqual(values["top_version"], "1.1.3-dev3")
 
 
 if __name__ == "__main__":

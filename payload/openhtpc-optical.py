@@ -5,7 +5,7 @@ Detection is deliberately independent from playback and decryption.  The
 legacy ``state`` field remains for qualified DVD/UI consumers; new code must
 use ``canonical_state``.
 """
-import argparse, fcntl, hashlib, importlib.util, json, os, pathlib, re, subprocess, tempfile
+import argparse, datetime, fcntl, hashlib, importlib.util, json, os, pathlib, re, subprocess, tempfile
 
 PRESENTATION = {
     "DVD_VIDEO": {"media_label":"DVD","home_prefix":"DVD","poster_label":"DVD","icon":"optical-dvd.png","fallback_artwork":"dvd-media.png","message":"DVD DÉTECTÉ","provider_message":None},
@@ -26,6 +26,16 @@ def canonical_state(value):
 def presentation(value):
     canonical=canonical_state(value)
     return {"canonical_state":canonical,**PRESENTATION.get(canonical,{"media_label":"MÉDIA OPTIQUE","home_prefix":"Disque optique","poster_label":"MÉDIA OPTIQUE","icon":"optical-empty.png","fallback_artwork":"optical-empty.png","message":"ÉTAT OPTIQUE INDÉTERMINÉ","provider_message":None})}
+
+def trace_event(home,event,**fields):
+    """Append a sanitized, bounded optical lifecycle event."""
+    target=home/".local/state/openhtpc/optical-lifecycle.jsonl"; target.parent.mkdir(parents=True,exist_ok=True)
+    allowed={"optical_generation","canonical_state","presentation_state","render_generation","metadata_job_state","event_reason","device"}
+    row={"timestamp":datetime.datetime.now().astimezone().isoformat(),"event":event,
+         **{key:value for key,value in fields.items() if key in allowed and value is not None}}
+    try: previous=target.read_text(encoding="utf-8",errors="replace").splitlines()[-511:]
+    except OSError: previous=[]
+    atomic_text(target,"\n".join([*previous,json.dumps(row,ensure_ascii=False,sort_keys=True)])+"\n")
 
 def run(command):
     try: return subprocess.run(command,text=True,capture_output=True,timeout=8)
@@ -211,9 +221,9 @@ def probe_device(device,runner=run,header_reader=_bdmv_header):
     media_present=props.get("ID_CDROM_MEDIA")=="1" or bool(fstype)
     if not media_present:
         return _state("DRIVE_PRESENT_NO_MEDIA",device,"EMPTY",detection_reason="NO_MEDIA_EVIDENCE")
-    info=runner(["lsdvd","-x","-Ox",str(device)]); text=info.stdout if info.returncode==0 else ""
-    dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
     bd_medium=any(props.get(key)=="1" for key in ("ID_CDROM_MEDIA_BD","ID_CDROM_MEDIA_BD_R","ID_CDROM_MEDIA_BD_RE"))
+    info=(subprocess.CompletedProcess([],1,"","") if bd_medium else runner(["lsdvd","-x","-Ox",str(device)])); text=info.stdout if info.returncode==0 else ""
+    dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
     header,header_path=header_reader(block)
     evidence=[]
     if bd_medium: evidence.append("UDEV_MMC_BD_MEDIA")
@@ -286,6 +296,14 @@ def atomic_json(target,data):
     finally:
         if os.path.exists(name): os.unlink(name)
 
+def atomic_text(target,text):
+    target.parent.mkdir(parents=True,exist_ok=True); fd,name=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as stream: stream.write(text); stream.flush(); os.fsync(stream.fileno())
+        os.chmod(name,0o600); os.replace(name,target)
+    finally:
+        if os.path.exists(name): os.unlink(name)
+
 def cached_state(home):
     try:
         value=json.loads((home/".local/state/openhtpc/optical-current.json").read_text())
@@ -326,6 +344,12 @@ def publish(home,state,generation=None):
     generation=next_generation(home) if generation is None else generation
     value=candidate; value["generation"]=generation; value["ui_state_hash"]=ui_state_hash(value)
     atomic_json(home/".local/state/openhtpc/optical-current.json",value)
+    old_canonical=canonical_state(previous); new_canonical=canonical_state(value)
+    event=("MEDIA_EJECTED" if new_canonical in {"DRIVE_PRESENT_NO_MEDIA","NO_OPTICAL_DRIVE"} and old_canonical not in {"DRIVE_PRESENT_NO_MEDIA","NO_OPTICAL_DRIVE","DETECTION_INDETERMINATE"}
+           else "MEDIA_INSERTED" if new_canonical not in {"DRIVE_PRESENT_NO_MEDIA","NO_OPTICAL_DRIVE","DETECTION_INDETERMINATE"} and old_canonical in {"DRIVE_PRESENT_NO_MEDIA","NO_OPTICAL_DRIVE","DETECTION_INDETERMINATE"}
+           else "CANONICAL_STATE_CHANGED")
+    trace_event(home,event,optical_generation=generation,canonical_state=new_canonical,device=value.get("device"),event_reason=f"{old_canonical}->{new_canonical}")
+    if event=="MEDIA_EJECTED": trace_event(home,"PRESENTATION_INVALIDATED",optical_generation=generation,canonical_state=new_canonical,event_reason="EJECT_HARD_BOUNDARY")
     runtime=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",pathlib.Path(__file__).parent))/"openhtpc-runtime.py"
     if runtime.is_file():
         try:
@@ -338,8 +362,6 @@ def refresh_state(home,runner=run,sys_block=pathlib.Path("/sys/class/block")):
     lock_path=home/".local/state/openhtpc/optical-refresh.lock"; lock_path.parent.mkdir(parents=True,exist_ok=True)
     with open(lock_path,"w") as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
-        pending=initializing_state(home,runner,sys_block)
-        if pending: return publish(home,pending)
         return publish(home,current_state(runner,sys_block,home))
 
 def main():

@@ -306,7 +306,7 @@ def commit_binding(home: pathlib.Path, state: dict, tmdb_id: int, opener=urllib.
     except Exception:
         return {"status": "UNAVAILABLE"}
 
-def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=False, opener=urllib.request.urlopen) -> dict:
+def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=False, opener=urllib.request.urlopen, commit_guard=None) -> dict:
     has_token = (home / ".config/openhtpc/secrets/tmdb-token").is_file()
     disc_id = str(state.get("disc_id") or "").strip()
     if not disc_id:
@@ -353,6 +353,8 @@ def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=Fals
 
     data = lookup(home, title, opener, duration_seconds=dur_sec)
     data["query"] = title
+    if commit_guard is not None and not commit_guard():
+        return {"status":"STALE_GENERATION","query":title,"stale_discarded":True}
     if data.get("status") in {"PASS", "AMBIGUOUS", "NO_RESULT", "AUTH_FAILED", "UNAVAILABLE"}:
         if data.get("status") == "PASS":
             poster(home, data, opener)
@@ -361,6 +363,8 @@ def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=Fals
                 if cand.get("poster_path"):
                     p_file = poster(home, {"status": "PASS", "poster_path": cand["poster_path"]}, opener)
                     if p_file: cand["poster_file"] = str(p_file)
+        if commit_guard is not None and not commit_guard():
+            return {"status":"STALE_GENERATION","query":title,"stale_discarded":True}
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")

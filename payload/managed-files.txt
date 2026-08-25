@@ -110,6 +110,7 @@ flex/assets/icons/drive-empty.png
 flex/assets/icons/dvd.png
 flex/bin/flex-launcher
 openhtpc
+openhtpc-validator
 openhtpc-appliance-mode
 openhtpc-benchmark.py
 openhtpc-bind-disc
