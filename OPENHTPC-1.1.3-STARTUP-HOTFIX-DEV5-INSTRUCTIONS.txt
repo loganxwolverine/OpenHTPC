@@ -1,0 +1,13 @@
+OPENHTPC 1.1.3-dev5 — P0 STARTUP HOTFIX
+
+PuTTY / SSH — exactly one apply command:
+  ~/OPENHTPC-VALIDATOR/openhtpc-validator apply-latest
+
+Physical validation is startup-only:
+  1. Local KDE: openhtpc start; verify OPENHTPC appears.
+  2. QUITTER to KDE.
+  3. Run openhtpc start again; verify OPENHTPC appears.
+  4. QUITTER to KDE.
+  5. Reboot Ryzen; after KDE login verify OPENHTPC autostarts.
+
+Do not test Blu-ray, TMDb or playback in this emergency session.

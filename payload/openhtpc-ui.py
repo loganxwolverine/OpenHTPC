@@ -54,6 +54,9 @@ def validate_config_text(content: str) -> dict:
         if len(entries) != len(set(entries)):
             raise ValueError(f"UI_DUPLICATE_ENTRY:{section}")
         for label in labels:
+            if section == "OPENHTPC" and label == "LECTEUR":
+                if any(value.split(";", 2)[-1].strip() == ":submenu DISQUE" for key, value in parser[section].items() if key.startswith("Entry")):
+                    continue
             aliases = (label, "DVD -", "Blu-ray -", "UHD Blu-ray -") if label == "LECTEUR" else (label,)
             if not any(entry == alias or entry.startswith(alias + " ·") or entry.startswith(alias) for entry in entries for alias in aliases):
                 raise ValueError(f"UI_ACTION_MISSING:{section}:{label}")

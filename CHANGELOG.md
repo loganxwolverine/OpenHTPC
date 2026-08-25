@@ -1,5 +1,15 @@
 # Changelog
 
+## OPENHTPC emergency startup hotfix — 1.1.3-dev5
+
+- Validates the mandatory HOME optical action by its authoritative
+  `:submenu DISQUE` destination instead of a finite list of media-dependent
+  display-label prefixes.
+- Restores startup with EMPTY, DVD_VIDEO and BLURAY_FAMILY while retaining the
+  action gate: a matching label without the real optical action is rejected.
+- Records `DOCTOR_AUTOSTART_RUNTIME_SEMANTICS` as backlog only; Doctor behavior
+  is deliberately unchanged.
+
 ## OPENHTPC Optical Media Core O1 Dev4 — 1.1.3-dev4
 
 - Makes optical generation part of the HOME refresh identity and moves
