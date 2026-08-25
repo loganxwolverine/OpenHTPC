@@ -33,7 +33,7 @@ SYSTEM_PAGES = (
 
 
 def generation_id(optical: dict) -> str:
-    visible = {key: optical.get(key) for key in ("state", "disc_title", "volume_label", "device", "fingerprint")}
+    visible = {key: optical.get(key) for key in ("state", "canonical_state", "disc_title", "volume_label", "device", "fingerprint", "playable", "playback_status", "uhd_status")}
     return "ui-" + hashlib.sha256(json.dumps(visible, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 
 

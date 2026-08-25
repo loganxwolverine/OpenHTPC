@@ -399,7 +399,8 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             entries.append(("LIRE LE DVD", media_play_icon,
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
         elif state == "INITIALIZING": entries.append(("INITIALISATION DU DISQUE…", media_play_icon, ":fork true"))
-        elif state in {"BLURAY", "UHD"}: entries.append((optical_home_label(optical) + " · Module optionnel", media_play_icon, ":fork true"))
+        elif state == "BLURAY": entries.append(("BLU-RAY DÉTECTÉ · Plugin Blu-ray requis", media_play_icon, ":fork true"))
+        elif state == "UHD": entries.append(("ULTRA HD BLU-RAY DÉTECTÉ · Plugin UHD requis", media_play_icon, ":fork true"))
         else: entries.append(("AUCUN DISQUE DÉTECTÉ", media_play_icon, ":fork true"))
 
         if not has_token or meta_status == "NOT_CONFIGURED":

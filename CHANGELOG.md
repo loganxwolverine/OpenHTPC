@@ -1,5 +1,17 @@
 # Changelog
 
+## OPENHTPC Optical Media Core O1 — 1.1.3-dev1
+
+- Separates canonical physical-medium detection from playback-provider
+  availability while preserving the qualified DVD path.
+- Adds deterministic drive-empty, DVD-Video, Blu-ray Video, UHD Blu-ray Video,
+  ambiguous Blu-ray-family, unknown-media and indeterminate states.
+- Requires MMC/udev BD-media evidence plus the unencrypted `INDX0300`
+  `BDMV/index.bdmv` header before identifying UHD; labels, capacity, BDXL and
+  drive capability are never used as UHD proof.
+- Adds a bounded, read-only, title-free optical forensic collector and truthful
+  plugin-required couch UI wording. No Blu-ray/UHD playback was added.
+
 ## OPENHTPC AMD release metadata consistency — 1.1.2-dev5
 
 - Propagate the root `VERSION` deterministically to payload metadata and the

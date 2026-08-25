@@ -1,0 +1,38 @@
+OPENHTPC 1.1.3-dev1 — Optical Media Core O1 physical validation
+
+No TTY Linux session is required. Do not use sudo. Do not play or rip a disc.
+
+PuTTY / SSH — installation and read-only evidence
+-------------------------------------------------
+cd /path/containing/downloaded/artifact
+sha256sum -c OpenHTPC-1.1.3-Optical-Core-O1-Dev1.tar.gz.sha256
+tar -xzf OpenHTPC-1.1.3-Optical-Core-O1-Dev1.tar.gz
+cd OpenHTPC-1.1.3-Optical-Core-O1-Dev1
+./update.sh
+openhtpc stop
+openhtpc version
+openhtpc doctor
+tools/openhtpc-optical-forensic.py | tee optical-pass1-drive.json
+
+Repeat only the collector command after each physical transition, choosing a
+new local output name: optical-pass2-dvd.json, optical-pass3-bluray.json,
+optical-pass4-uhd.json, optical-ejected.json, optical-disconnected.json.
+
+Expected canonical states:
+  no drive                 NO_OPTICAL_DRIVE
+  drive, no medium         DRIVE_PRESENT_NO_MEDIA
+  DVD-Video                DVD_VIDEO
+  Blu-ray Video            BLURAY_VIDEO
+  UHD with INDX0300 proof  UHD_BLURAY_VIDEO
+  BD family, no UHD proof  BLURAY_FAMILY / uhd_status UNKNOWN
+
+Local KDE / OPENHTPC — Steve's visual checks
+---------------------------------------------
+Run `openhtpc start` locally. Validate HOME after insert/eject/removal:
+  DVD: existing DVD card and actions are unchanged.
+  Blu-ray: BLU-RAY DÉTECTÉ; Lecture Blu-ray non disponible; plugin required.
+  UHD (only if confidently detected): ULTRA HD BLU-RAY DÉTECTÉ; playback not
+  available; plugin required.
+  Eject/removal: no stale card or prior disc identity remains.
+
+No playback is part of O1. Finish with QUITTER OPENHTPC and confirm KDE returns.

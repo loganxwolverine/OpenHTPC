@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Minimal read-only optical state and local DVD identity."""
+"""Canonical, read-only physical optical-media detection.
+
+Detection is deliberately independent from playback and decryption.  The
+legacy ``state`` field remains for qualified DVD/UI consumers; new code must
+use ``canonical_state``.
+"""
 import argparse, fcntl, hashlib, importlib.util, json, os, pathlib, re, subprocess, tempfile
 
 def run(command):
@@ -137,20 +142,79 @@ def parse_lsdvd_xml(text):
 
     return result
 
-def probe_device(device,runner=run):
-    result=runner(["lsblk","-J","-o","NAME,TYPE,FSTYPE,LABEL",str(device)])
-    if result.returncode!=0: return {"state":"EMPTY","device":str(device),"identity_status":"UNAVAILABLE"}
+def _properties(text):
+    return {key:value for line in text.splitlines() if "=" in line for key,value in [line.split("=",1)]}
+
+def _mountpoints(block):
+    values=block.get("mountpoints")
+    if not isinstance(values,list): values=[block.get("mountpoint")]
+    return [pathlib.Path(value) for value in values if isinstance(value,str) and value]
+
+def _bdmv_header(block):
+    """Read only the unencrypted BDMV index signature from a mounted disc."""
+    for root in _mountpoints(block):
+        for relative in ("BDMV/index.bdmv","BDMV/INDEX.BDMV","bdmv/index.bdmv"):
+            try:
+                header=(root/relative).open("rb").read(8)
+                if len(header)==8: return header.decode("ascii","replace"),relative
+            except OSError: pass
+    return None,None
+
+def _playback_fields(canonical):
+    if canonical=="DVD_VIDEO":
+        return {"detected":True,"playback_provider":"core","playable":True,"playback_status":"AVAILABLE"}
+    if canonical=="BLURAY_VIDEO":
+        return {"detected":True,"playback_provider":"plugin:bluray","playable":False,"playback_status":"PLUGIN_REQUIRED"}
+    if canonical=="UHD_BLURAY_VIDEO":
+        return {"detected":True,"playback_provider":"plugin:uhd","playable":False,"playback_status":"PLUGIN_REQUIRED"}
+    if canonical=="BLURAY_FAMILY":
+        return {"detected":True,"playback_provider":None,"playable":False,"playback_status":"MEDIA_TYPE_INDETERMINATE"}
+    return {"detected":False,"playback_provider":None,"playable":False,"playback_status":"UNAVAILABLE"}
+
+def _state(canonical,device,legacy,**fields):
+    value={"state":legacy,"canonical_state":canonical,"device":str(device) if device else None,
+           "identity_status":"UNAVAILABLE"}
+    value.update(_playback_fields(canonical)); value.update(fields); return value
+
+def probe_device(device,runner=run,header_reader=_bdmv_header):
+    result=runner(["lsblk","-J","-o","NAME,TYPE,FSTYPE,LABEL,MOUNTPOINTS",str(device)])
+    if result.returncode!=0:
+        return _state("DETECTION_INDETERMINATE",device,"UNKNOWN_DISC",detection_reason="LSBLK_FAILED")
     try: block=json.loads(result.stdout)["blockdevices"][0]
-    except (json.JSONDecodeError,KeyError,IndexError,TypeError): return {"state":"UNKNOWN_DISC","device":str(device),"identity_status":"UNAVAILABLE"}
+    except (json.JSONDecodeError,KeyError,IndexError,TypeError):
+        return _state("DETECTION_INDETERMINATE",device,"UNKNOWN_DISC",detection_reason="LSBLK_INVALID")
+    udev=runner(["udevadm","info","--query=property","--name",str(device)])
+    props=_properties(udev.stdout) if udev.returncode==0 else {}
     fstype=(block.get("fstype") or "").lower(); label=block.get("label") or None
-    if not fstype: return {"state":"EMPTY","device":str(device),"identity_status":"UNAVAILABLE"}
-    if fstype not in {"iso9660","udf"}: return {"state":"UNKNOWN_DISC","device":str(device),"volume_label":label,"identity_status":"UNAVAILABLE"}
-    info=runner(["lsdvd","-x","-Ox",str(device)]); text=info.stdout if info.returncode==0 else ""; upper=(text+" "+(label or "")).upper()
-    if any(word in upper for word in ("ULTRA HD","ULTRA_HD","UHD","4K UHD","BDXL")): state="UHD"
-    elif any(word in upper for word in ("BLU-RAY","BLURAY","BDMV")): state="BLURAY"
-    elif info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower()): state="DVD"
-    else: state="UNKNOWN_DISC"
-    value={"state":state,"device":str(device),"volume_label":label,"disc_title":None,"identity_status":"UNAVAILABLE"}
+    if udev.returncode!=0 and not fstype:
+        return _state("DETECTION_INDETERMINATE",device,"UNKNOWN_DISC",detection_reason="MEDIA_PRESENCE_UNAVAILABLE")
+    media_present=props.get("ID_CDROM_MEDIA")=="1" or bool(fstype)
+    if not media_present:
+        return _state("DRIVE_PRESENT_NO_MEDIA",device,"EMPTY",detection_reason="NO_MEDIA_EVIDENCE")
+    info=runner(["lsdvd","-x","-Ox",str(device)]); text=info.stdout if info.returncode==0 else ""
+    dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
+    bd_medium=any(props.get(key)=="1" for key in ("ID_CDROM_MEDIA_BD","ID_CDROM_MEDIA_BD_R","ID_CDROM_MEDIA_BD_RE"))
+    header,header_path=header_reader(block)
+    evidence=[]
+    if bd_medium: evidence.append("UDEV_MMC_BD_MEDIA")
+    if header and header.startswith("INDX"): evidence.append("BDMV_INDEX_HEADER")
+    if dvd_video:
+        canonical,legacy,uhd_status="DVD_VIDEO","DVD","NOT_APPLICABLE"
+        evidence.append("LSDVD_DVD_VIDEO")
+    elif bd_medium and header=="INDX0300": canonical,legacy,uhd_status="UHD_BLURAY_VIDEO","UHD","CONFIRMED"
+    elif bd_medium and header in {"INDX0100","INDX0200"}: canonical,legacy,uhd_status="BLURAY_VIDEO","BLURAY","NOT_UHD"
+    elif bd_medium and header and header.startswith("INDX"):
+        canonical,legacy,uhd_status="BLURAY_FAMILY","BLURAY","UNKNOWN"
+    elif bd_medium:
+        canonical,legacy,uhd_status="BLURAY_FAMILY","BLURAY","UNKNOWN"
+    elif fstype not in {"iso9660","udf"}:
+        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","NOT_APPLICABLE"
+    else:
+        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","UNKNOWN"
+    value=_state(canonical,device,legacy,volume_label=label,disc_title=None,
+                 uhd_status=uhd_status,detection_evidence=evidence)
+    if header: value["bdmv_index_version"]=header[4:] if header.startswith("INDX") else "UNRECOGNIZED"
+    if header_path: value["bdmv_index_path"]=header_path
     if info.returncode==0 and text.strip():
         value.update(disc_id=hashlib.sha256(text.encode()).hexdigest(),identity_status="FINGERPRINT")
         # Parse physical-edition data from the same lsdvd output (no extra disc access needed)
@@ -171,7 +235,7 @@ def write_eject_guard(home,data): atomic_json(home/".local/state/openhtpc/optica
 
 def current_state(runner=run,sys_block=pathlib.Path("/sys/class/block"),home=None):
     drives=optical_devices(sys_block)
-    if not drives: return {"state":"NO_DRIVE","device":None,"identity_status":"UNAVAILABLE","drives":[]}
+    if not drives: return _state("NO_OPTICAL_DRIVE",None,"NO_DRIVE",drives=[])
     guard=eject_guard(home) if home else None; states=[]
     for device in drives:
         if not guard or str(device)!=guard.get("device"):
@@ -182,9 +246,9 @@ def current_state(runner=run,sys_block=pathlib.Path("/sys/class/block"),home=Non
         if not fstype:
             if not guard.get("empty_observed"):
                 guard["empty_observed"]=True; write_eject_guard(home,guard)
-            states.append({"state":"EMPTY","device":str(device),"identity_status":"UNAVAILABLE"}); continue
+            states.append(_state("DRIVE_PRESENT_NO_MEDIA",device,"EMPTY")); continue
         if not guard.get("empty_observed"):
-            states.append({"state":"EMPTY","device":str(device),"identity_status":"EJECTING"}); continue
+            states.append(_state("DRIVE_PRESENT_NO_MEDIA",device,"EMPTY",identity_status="EJECTING")); continue
         try: (home/".local/state/openhtpc/optical-ejecting.json").unlink()
         except OSError: pass
         states.append(probe_device(device,runner))
@@ -210,7 +274,8 @@ def cached_state(home):
 
 def ui_state(value):
     """Return only fields whose change is meaningful to the couch UI."""
-    return {key:value.get(key) for key in ("state","device","volume_label","disc_title","disc_id") if value.get(key) is not None}
+    keys=("state","canonical_state","device","volume_label","disc_title","disc_id","playable","playback_status","uhd_status")
+    return {key:value.get(key) for key in keys if value.get(key) is not None}
 
 def ui_state_hash(value):
     return hashlib.sha256(json.dumps(ui_state(value),ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
@@ -223,7 +288,8 @@ def initializing_state(home,runner=run,sys_block=pathlib.Path("/sys/class/block"
         try:
             block=json.loads(result.stdout)["blockdevices"][0]; fstype=(block.get("fstype") or "").lower()
         except (json.JSONDecodeError,KeyError,IndexError,TypeError): continue
-        if fstype: return {"state":"INITIALIZING","device":str(device),"volume_label":block.get("label") or None,"identity_status":"PENDING","drives":[str(item) for item in drives]}
+        if fstype: return {**_state("DETECTION_INDETERMINATE",device,"INITIALIZING",identity_status="PENDING"),
+                           "volume_label":block.get("label") or None,"drives":[str(item) for item in drives]}
     return None
 
 def next_generation(home):
