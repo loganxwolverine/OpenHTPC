@@ -41,11 +41,21 @@ def is_generic_query(query: str) -> bool:
 
 AUTHORITATIVE_CONFIDENCE = {"USER_CONFIRMED_MATCH", "AUTOMATIC_CONFIDENT_MATCH"}
 
-def _cache_path(home: pathlib.Path, state: dict) -> pathlib.Path | None:
+def cache_path(home: pathlib.Path, state: dict, title: str = "") -> pathlib.Path | None:
     disc_id = str(state.get("disc_id") or "").strip()
-    if not disc_id:
+    if disc_id:
+        return home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(disc_id.encode()).hexdigest() / "metadata.json"
+    generation = int(state.get("generation", 0) or 0)
+    canonical = str(state.get("canonical_state") or "")
+    cleaned = clean_disc_title(title or state.get("disc_title") or state.get("volume_label") or "")
+    if generation <= 0 or canonical not in {"BLURAY_FAMILY", "BLURAY_VIDEO", "UHD_BLURAY_VIDEO"} or is_generic_query(cleaned):
         return None
-    return home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(disc_id.encode()).hexdigest() / "metadata.json"
+    identity = f"{generation}:{canonical}:{_normalize_title(cleaned)}"
+    return home / ".local/share/openhtpc/media-cache/optical" / hashlib.sha256(identity.encode()).hexdigest() / "metadata.json"
+
+def _cache_path(home: pathlib.Path, state: dict) -> pathlib.Path | None:
+    """Backward-compatible DVD cache helper used by existing callers."""
+    return cache_path(home, state)
 
 def _score_candidate(candidate: dict, norm_query: str, duration_seconds: float | None = None, year: int | None = None, is_single: bool = False) -> float:
     score = 0.0
@@ -308,13 +318,9 @@ def commit_binding(home: pathlib.Path, state: dict, tmdb_id: int, opener=urllib.
 
 def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=False, opener=urllib.request.urlopen, commit_guard=None) -> dict:
     has_token = (home / ".config/openhtpc/secrets/tmdb-token").is_file()
-    disc_id = str(state.get("disc_id") or "").strip()
-    if not disc_id:
-        return {"status": "NOT_CONFIGURED" if not has_token else "PENDING", "query": ""}
-
-    target = _cache_path(home, state)
+    target = cache_path(home, state, title)
     if target is None:
-        return {"status": "NOT_CONFIGURED" if not has_token else "PENDING", "query": ""}
+        return {"status": "NOT_CONFIGURED" if not has_token else "NO_QUERY", "query": title}
 
     cached = None
     try:
@@ -340,10 +346,10 @@ def disc_metadata(home: pathlib.Path, state: dict, title: str, enrich: bool=Fals
                 return cached
             if status in {"AMBIGUOUS", "NO_RESULT", "AUTH_FAILED", "UNAVAILABLE"}:
                 return cached
-            return {"status": "NOT_CONFIGURED" if not has_token else "PENDING", "query": title}
+            return {"status": "NOT_CONFIGURED" if not has_token else "READY", "query": title}
 
     if not enrich:
-        return {"status": "NOT_CONFIGURED" if not has_token else "PENDING", "query": title}
+        return {"status": "NOT_CONFIGURED" if not has_token else "READY", "query": title}
 
     dur = state.get("duration") or state.get("physical_edition", {}).get("duration")
     dur_sec = None

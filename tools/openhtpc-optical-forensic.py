@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded O1 optical forensic collector: read-only, keyless and title-free."""
 from __future__ import annotations
-import argparse, importlib.util, json, pathlib, subprocess
+import argparse, importlib.util, json, os, pathlib, subprocess
 
 SAFE_UDEV_PREFIXES=("ID_CDROM",)
 SAFE_UDEV_KEYS={"ID_BUS","ID_TYPE","ID_MODEL","ID_MODEL_ID","ID_REVISION","ID_VENDOR","ID_VENDOR_ID","DEVNAME","DEVTYPE"}
@@ -26,8 +26,12 @@ def sanitized(state):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engine",type=pathlib.Path,default=pathlib.Path(__file__).resolve().parents[1]/"payload/openhtpc-optical.py")
+    home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()))
+    installed=home/".local/lib/openhtpc/openhtpc-optical.py"
+    source=pathlib.Path(__file__).resolve().parents[1]/"payload/openhtpc-optical.py"
+    parser.add_argument("--engine",type=pathlib.Path,default=installed if installed.is_file() else source)
     args=parser.parse_args()
+    args.engine=args.engine.expanduser().resolve()
     spec=importlib.util.spec_from_file_location("openhtpc_o1_optical",args.engine)
     optical=importlib.util.module_from_spec(spec); spec.loader.exec_module(optical)
     devices=optical.optical_devices(); rows=[]

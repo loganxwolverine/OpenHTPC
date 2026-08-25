@@ -74,7 +74,13 @@ def expand_command(command,source):
 def start_observer(scope):
  pid_path=DIRS["state"]/"observer.pid"
  try:
-  pid=int(pid_path.read_text().strip());os.kill(pid,0);return pid
+  pid=int(pid_path.read_text().strip());os.kill(pid,0)
+  cmdline=(pathlib.Path("/proc")/str(pid)/"cmdline").read_bytes().replace(b"\0",b" ").decode(errors="replace")
+  if "openhtpc-validator" in cmdline and "observe optical" in cmdline:
+   os.kill(pid,15)
+   for _ in range(20):
+    try:os.kill(pid,0);time.sleep(0.05)
+    except OSError:break
  except (OSError,ValueError):pass
  command=HOME/".local/bin/openhtpc-validator"
  if not command.is_file():command=pathlib.Path(__file__)
@@ -110,35 +116,68 @@ def apply_latest():
  print(f"VALIDATOR_APPLY PASS\nversion={manifest['version']}\nbuild={manifest['build']}\nlog={log}\nobserver_pid={observer_pid or 'not_requested'}\nOPENHTPC remains stopped; local KDE observation required.")
 def add_text(root,name,text):
  target=root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(sanitize(text),encoding="utf-8")
+def optical_devices(state):
+ found=[]
+ candidate=state.get("device")
+ if isinstance(candidate,str) and candidate.startswith("/dev/"):found.append(candidate)
+ try:
+  for entry in pathlib.Path("/sys/class/block").iterdir():
+   try:
+    if (entry/"device/type").read_text().strip()=="5":found.append(f"/dev/{entry.name}")
+   except OSError:pass
+ except OSError:pass
+ result=run(["lsblk","-J","-o","PATH,TYPE"],15)
+ try:
+  for item in json.loads(result.stdout).get("blockdevices",[]):
+   if item.get("type")=="rom" and item.get("path"):found.append(item["path"])
+ except (json.JSONDecodeError,AttributeError):pass
+ return sorted(set(found))
+def file_evidence(path):
+ try:
+  stat=path.stat();return {"path":str(path),"available":True,"size":stat.st_size,"mtime_ns":stat.st_mtime_ns,"sha256":sha256(path)}
+ except OSError:return {"path":str(path),"available":False}
 def capture(reason="MANUAL"):
  ensure_lab();stamp=datetime.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S");work=DIRS["outbox"]/f"capture-{stamp}";work.mkdir()
  install=HOME/".local/lib/openhtpc";state=HOME/".local/state/openhtpc"
- commands={"version.txt":[str(HOME/".local/bin/openhtpc"),"version"],"doctor.txt":[str(HOME/".local/bin/openhtpc"),"doctor"],"processes.txt":["ps","-u",str(os.getuid()),"-o","pid,ppid,etimes,stat,args"],"lsblk.txt":["lsblk","-o","NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS,VENDOR,MODEL,REV,RM,HOTPLUG"],"blkid.txt":["blkid"],"journal.txt":["journalctl","--user","--since=-2 hours","--no-pager","-n","600","-g","OPENHTPC|flex-launcher|optical-monitor"]}
+ commands={"version.txt":[str(HOME/".local/bin/openhtpc"),"version"],"doctor.txt":[str(HOME/".local/bin/openhtpc"),"doctor"],"processes.txt":["ps","-u",str(os.getuid()),"-o","pid,ppid,etimes,stat,args"],"lsblk.txt":["lsblk","-o","NAME,PATH,TYPE,FSTYPE,MOUNTPOINTS,VENDOR,MODEL,REV,RM,HOTPLUG"],"blkid.txt":["blkid"],"journal-user.txt":["journalctl","--user","--since=-2 hours","--no-pager","-n","800"]}
+ unavailable=[]
  for name,argv in commands.items():
-  result=run(argv,30);add_text(work,name,result.stdout+result.stderr)
+  result=run(argv,30);content=result.stdout+result.stderr;add_text(work,name,content or "no entries available\n")
+  if not content.strip():unavailable.append(name)
+ user_journal=(work/"journal-user.txt").read_text(encoding="utf-8",errors="replace")
+ related="\n".join(line for line in user_journal.splitlines() if re.search(r"(?i)openhtpc|flex|optical",line))
+ add_text(work,"journal-openhtpc.txt",related or "no OPENHTPC-related entries available\n")
  udev=[]
- try:
-  devices=[entry for entry in pathlib.Path("/sys/class/block").iterdir() if (entry/"device/type").read_text().strip()=="5"]
- except OSError:devices=[]
- for device in sorted(devices,key=lambda item:item.name):
-  result=run(["udevadm","info","--query=property","--name",f"/dev/{device.name}"],15);udev.append(f"[{device.name}]\n"+result.stdout+result.stderr)
+ current=read_json(state/"optical-current.json")
+ for device in optical_devices(current):
+  result=run(["udevadm","info","--query=property","--name",device],15);udev.append(f"[{device}]\n"+result.stdout+result.stderr)
  add_text(work,"udev-optical.txt","\n".join(udev) if udev else "no optical udev device available\n")
  forensic=install/"openhtpc-optical-forensic.py"
+ candidate=read_json(DIRS["current"]/"candidate.json");release=pathlib.Path(str(candidate.get("release") or ""))
+ if not forensic.is_file() and release.is_absolute():forensic=release/"tools/openhtpc-optical-forensic.py"
  if not forensic.is_file(): forensic=DIRS["current"]/"openhtpc-optical-forensic.py"
  if forensic.is_file():
-  result=run([str(forensic)],30);add_text(work,"optical-forensic.json",result.stdout+result.stderr)
+  engine=install/"openhtpc-optical.py";argv=[str(forensic),"--engine",str(engine.resolve())] if engine.is_file() else [str(forensic)]
+  result=run(argv,30);add_text(work,"optical-forensic.json",result.stdout+result.stderr)
+  if result.returncode!=0:unavailable.append("optical-forensic.json")
  for source,name in ((install/"version.json","installed-version.json"),(state/"optical-current.json","optical-current.json"),(state/"optical-generation","optical-generation.txt"),(state/"optical-lifecycle.jsonl","optical-lifecycle.jsonl"),(state/"disc-sheet-state.json","disc-sheet-state.json"),(state/"flex-optical-state","flex-optical-state.txt"),(HOME/".config/openhtpc/flex-v1.ini","flex-v1.ini"),(state/"runtime.log","runtime.log"),(state/"runtime-session.json","runtime-session.json"),(state/"optical-monitor.pid","optical-monitor.pid")):
   try:add_text(work,name,source.read_text(encoding="utf-8",errors="replace"))
   except OSError:add_text(work,name,"source unavailable\n")
  image=HOME/".cache/openhtpc/disc-sheet.png"
  if image.is_file(): shutil.copy2(image,work/"disc-sheet.png")
+ evidence=[image,state/"disc-sheet-state.json",state/"flex-optical-state",HOME/".config/openhtpc/flex-v1.ini"]
+ atomic_json(work/"presentation-files.json",[file_evidence(path) for path in evidence])
+ observer_status=DIRS["state"]/"observer-status.json"
+ if observer_status.is_file():add_text(work,"observer-status.json",observer_status.read_text(encoding="utf-8",errors="replace"))
+ observer_log=DIRS["logs"]/"observer.log"
+ if observer_log.is_file():add_text(work,"observer.log",observer_log.read_text(encoding="utf-8",errors="replace")[-100000:])
  support=run([str(HOME/".local/bin/openhtpc"),"support-bundle"],120)
  add_text(work,"support-command.txt",support.stdout+support.stderr)
  match=re.search(r"(/[^\n]+\.tar\.gz)",support.stdout)
  if match:
   candidate=pathlib.Path(match.group(1))
   if candidate.is_file(): shutil.copy2(candidate,work/"openhtpc-support.tar.gz")
- add_text(work,"SUMMARY.txt",f"reason={reason}\ncaptured={datetime.datetime.now().astimezone().isoformat()}\nread_only_capture=true\nmedia_contents_collected=false\n")
+ add_text(work,"SUMMARY.txt",f"reason={reason}\ncaptured={datetime.datetime.now().astimezone().isoformat()}\nread_only_capture=true\nmedia_contents_collected=false\nunavailable_sources={','.join(unavailable) if unavailable else 'none'}\n")
  archive=DIRS["outbox"]/f"openhtpc-validator-failure-{stamp}.tar.gz"
  with tarfile.open(archive,"w:gz") as output: output.add(work,arcname=work.name)
  checksum=archive.with_suffix(archive.suffix+".sha256");checksum.write_text(f"{sha256(archive)}  {archive.name}\n",encoding="utf-8")
@@ -152,32 +191,44 @@ def capture(reason="MANUAL"):
 def read_json(path):
  try:return json.loads(path.read_text(encoding="utf-8"))
  except (OSError,json.JSONDecodeError):return {}
-def observe_optical(once=False,timeout=15):
- ensure_lab();state_path=HOME/".local/state/openhtpc/optical-current.json";presentation_path=HOME/".local/state/openhtpc/disc-sheet-state.json";runtime_path=HOME/".local/state/openhtpc/runtime-session.json";initial_since=None;mismatch_since=None;last_generation=-1;last_render=-1
- while True:
-  state=read_json(state_path);presentation=read_json(presentation_path);runtime=read_json(runtime_path);generation=int(state.get("generation",0) or 0);canonical=state.get("canonical_state");render_generation=int(presentation.get("optical_generation",-1) or -1)
-  failure=None
-  if state.get("state")=="INITIALIZING": initial_since=initial_since or time.monotonic();failure="INITIALIZING_TIMEOUT" if time.monotonic()-initial_since>timeout else None
-  else: initial_since=None
-  if generation<last_generation: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
-  if render_generation>=0 and render_generation<last_render: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
-  if canonical=="DRIVE_PRESENT_NO_MEDIA" and presentation and int(presentation.get("optical_generation",-1))!=generation: failure="STALE_PRESENTATION_AFTER_EJECT"
-  if runtime.get("state")=="RUNNING" and render_generation!=generation:
-   mismatch_since=mismatch_since or time.monotonic();failure="PRESENTATION_GENERATION_STALLED" if time.monotonic()-mismatch_since>timeout else failure
-  else:mismatch_since=None
-  monitor=run(["pgrep","-fc","openhtpc-optical-monitor"],5)
-  try:count=int(monitor.stdout.strip())
-  except ValueError:count=0
-  if count>1: failure="DUPLICATE_OPTICAL_MONITOR"
-  if runtime.get("state")=="RUNNING" and count==0: failure="OPTICAL_MONITOR_CRASH"
-  if failure: capture(failure);print(f"VALIDATOR_OBSERVER FAIL {failure}");return 1
-  last_generation=max(last_generation,generation);last_render=max(last_render,render_generation)
-  if once: print("VALIDATOR_OBSERVER PASS");return 0
-  time.sleep(2)
+def live_generation(path):
+ try:
+  lines=path.read_text(encoding="utf-8",errors="replace").splitlines();return int(lines[5]),lines[2] if len(lines)>2 else None
+ except (OSError,ValueError,IndexError):return -1,None
+def observe_optical(once=False,timeout=5):
+ ensure_lab();state_path=HOME/".local/state/openhtpc/optical-current.json";presentation_path=HOME/".local/state/openhtpc/disc-sheet-state.json";live_path=HOME/".local/state/openhtpc/flex-optical-state";runtime_path=HOME/".local/state/openhtpc/runtime-session.json";initial_since=None;mismatch_since=None;last_generation=-1;last_render=-1
+ status_path=DIRS["state"]/"observer-status.json";started=datetime.datetime.now().astimezone().isoformat();polls=0
+ try:
+  while True:
+   polls+=1
+   state=read_json(state_path);presentation=read_json(presentation_path);runtime=read_json(runtime_path);generation=int(state.get("generation",0) or 0);canonical=state.get("canonical_state");render_generation=int(presentation.get("optical_generation",-1) or -1);flex_generation,flex_state=live_generation(live_path)
+   failure=None
+   if state.get("state")=="INITIALIZING": initial_since=initial_since or time.monotonic();failure="INITIALIZING_TIMEOUT" if time.monotonic()-initial_since>timeout else None
+   else: initial_since=None
+   if generation<last_generation: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
+   if render_generation>=0 and render_generation<last_render: failure="PRESENTATION_GENERATION_MOVED_BACKWARD"
+   mismatch=(render_generation!=generation or flex_generation!=generation or (presentation and presentation.get("canonical_state")!=canonical))
+   if mismatch:
+    mismatch_since=mismatch_since or time.monotonic()
+    if failure is None and (once or time.monotonic()-mismatch_since>=timeout):failure="PRESENTATION_GENERATION_STALE"
+   else:mismatch_since=None
+   monitor=run(["pgrep","-fc","openhtpc-optical-monitor"],5)
+   try:count=int(monitor.stdout.strip())
+   except ValueError:count=0
+   if count>1: failure="DUPLICATE_OPTICAL_MONITOR"
+   if runtime.get("state")=="RUNNING" and count==0: failure="OPTICAL_MONITOR_CRASH"
+   decision=failure or ("WAITING_FOR_CONVERGENCE" if mismatch else "CONVERGED")
+   atomic_json(status_path,{"schema":1,"pid":os.getpid(),"started_at":started,"last_poll_at":datetime.datetime.now().astimezone().isoformat(),"poll_count":polls,"last_canonical_generation":generation,"last_presentation_generation":render_generation,"last_flex_generation":flex_generation,"last_canonical_state":canonical,"last_flex_state":flex_state,"decision":decision,"running":True})
+   if failure: capture(failure);print(f"VALIDATOR_OBSERVER FAIL {failure}");return 1
+   last_generation=max(last_generation,generation);last_render=max(last_render,render_generation)
+   if once: print("VALIDATOR_OBSERVER PASS");return 0
+   time.sleep(1)
+ finally:
+  final=read_json(status_path);final.update(running=False,exit_at=datetime.datetime.now().astimezone().isoformat(),exit_reason=final.get("decision","UNKNOWN"));atomic_json(status_path,final)
 def main():
  parser=argparse.ArgumentParser();sub=parser.add_subparsers(dest="command",required=True)
  sub.add_parser("apply-latest");capture_parser=sub.add_parser("capture");capture_parser.add_argument("--reason",default="MANUAL")
- observe=sub.add_parser("observe");observe.add_argument("scope",choices=["optical"]);observe.add_argument("--once",action="store_true");observe.add_argument("--timeout",type=int,default=15)
+ observe=sub.add_parser("observe");observe.add_argument("scope",choices=["optical"]);observe.add_argument("--once",action="store_true");observe.add_argument("--timeout",type=int,default=5)
  args=parser.parse_args()
  try:
   if args.command=="apply-latest":apply_latest()

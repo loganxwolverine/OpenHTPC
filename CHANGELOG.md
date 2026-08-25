@@ -1,5 +1,19 @@
 # Changelog
 
+## OPENHTPC Optical Media Core O1 Dev4 — 1.1.3-dev4
+
+- Makes optical generation part of the HOME refresh identity and moves
+  post-start menu regeneration into a bounded, generation-guarded worker.
+- Publishes current live optical identity immediately, cancels obsolete work,
+  rejects stale menu publication and emits a same-generation fallback after a
+  five-second worker timeout.
+- Enables generation-scoped TMDb enrichment for titled `BLURAY_FAMILY` media;
+  only a real started lookup may present a searching state, and late results
+  remain generation-guarded.
+- Cross-checks canonical, disc-sheet and Flex generations in the validator,
+  persists observer status, fixes absolute forensic paths and empty-drive udev
+  discovery, and records journals plus file hashes/mtimes in captures.
+
 ## OPENHTPC Optical Media Core O1 Dev3 — 1.1.3-dev3
 
 - Removes unbounded published `INITIALIZING`: stable canonical detection is now

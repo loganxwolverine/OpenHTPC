@@ -598,7 +598,7 @@ def canonical_flex_config_path(home: pathlib.Path | None = None) -> pathlib.Path
     return home / ".config/openhtpc/flex-v1.ini"
 
 
-def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None) -> None:
+def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None) -> bool:
     install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
     icon_dir = install / "assets/ui"
@@ -621,6 +621,8 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     logo = theme.assets(install)["logo"]
     scale = flex_scale(observed_display_size())
     optical = load_optional_object(home / ".local/state/openhtpc/optical-current.json")
+    if expected_optical_generation is not None and int(optical.get("generation", 0) or 0) != expected_optical_generation:
+        return False
     if _optical_model.canonical_state(optical) == "DVD_VIDEO" and optical.get("disc_id") and not optical.get("tmdb_title"):
         cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json"
         cached_meta = load_optional_object(cache_target)
@@ -890,6 +892,9 @@ Entry2=LECTEUR DVD / BLU-RAY / UHD;{dvd_icon};{dvd_ui}
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(content)
             stream.flush(); os.fsync(stream.fileno())
+        latest = load_optional_object(home / ".local/state/openhtpc/optical-current.json")
+        if expected_optical_generation is not None and int(latest.get("generation", 0) or 0) != expected_optical_generation:
+            return False
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
         directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -898,6 +903,7 @@ Entry2=LECTEUR DVD / BLU-RAY / UHD;{dvd_icon};{dvd_ui}
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+    return True
 
 
 def menu_identity(path: pathlib.Path) -> int:
@@ -937,6 +943,26 @@ def disc_sheet_is_current(home: pathlib.Path, optical: dict) -> bool:
             provenance.get("canonical_state")==_optical_model.canonical_state(optical) and
             provenance.get("ui_state_hash")==optical.get("ui_state_hash") and
             (home/".cache/openhtpc/disc-sheet.png").is_file())
+
+def publish_generation_fallback(home: pathlib.Path, install: pathlib.Path, optical: dict, reason: str) -> None:
+    """Publish a truthful, generation-matching fallback after bounded worker failure."""
+    generation = int(optical.get("generation", 0) or 0)
+    target = home/".cache/openhtpc/disc-sheet.png"; target.parent.mkdir(parents=True,exist_ok=True)
+    source = load_theme(install).assets(install)["wallpaper"]
+    fd, temporary = tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"wb") as stream:
+            stream.write(source.read_bytes());stream.flush();os.fsync(stream.fileno())
+        os.chmod(temporary,0o600);os.replace(temporary,target)
+    finally:
+        if os.path.exists(temporary):os.unlink(temporary)
+    provenance={"schema":1,"optical_generation":generation,"canonical_state":_optical_model.canonical_state(optical),
+                "ui_state_hash":optical.get("ui_state_hash"),"render_identity":f"fallback-{generation}",
+                "metadata_status":"FALLBACK","presentation_state":"FALLBACK","error_reason":reason}
+    _optical_model.atomic_json(home/".local/state/openhtpc/disc-sheet-state.json",provenance)
+    _optical_model.trace_event(home,"PRESENTATION_FALLBACK",optical_generation=generation,
+                               canonical_state=provenance["canonical_state"],presentation_state="FALLBACK",
+                               render_generation=generation,metadata_job_state="FALLBACK",event_reason=reason)
 
 
 def plugin_menu_entries(home: pathlib.Path, install: pathlib.Path) -> list[dict[str, str]]:

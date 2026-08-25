@@ -259,7 +259,7 @@ def render(home,install,state,metadata,target):
  elif status=="AMBIGUOUS":
   section="PLUSIEURS FILMS CORRESPONDENT"
   overview="Plusieurs films correspondent à ce titre. Choisissez votre version avec ▲ ▼ et confirmez avec Entrée :"
- elif status=="PENDING":
+ elif status in {"PENDING","STARTED"}:
   section="RECHERCHE TMDb"
   overview="Recherche des métadonnées TMDb en cours… "+playback_note
  elif status=="AUTH_FAILED":
@@ -274,7 +274,7 @@ def render(home,install,state,metadata,target):
  else:
   section="ENRICHIR CETTE FICHE"
   overview=("Connectez OPENHTPC à TMDb pour récupérer automatiquement l’affiche, le synopsis, l’année, les genres et les principaux acteurs. TMDb est facultatif. "+playback_note if not has_token else
-            "Recherche des métadonnées TMDb en cours… "+playback_note)
+            "La fiche optique est prête. L’enrichissement TMDb reste facultatif. "+playback_note)
  d.text((585,y),section,font=font(24),fill="#22c7ff"); y+=36
  if status=="AMBIGUOUS":
   d.text((585,y),overview,font=font(20),fill="#dceaf5"); y+=32

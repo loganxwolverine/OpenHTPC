@@ -1,0 +1,19 @@
+OPENHTPC 1.1.3-dev4 — ONE-COMMAND physical validation
+
+PuTTY / SSH:
+  ~/OPENHTPC-VALIDATOR/openhtpc-validator apply-latest
+
+The validator verifies the archive and manifest, stops OPENHTPC, applies the
+declared update.sh, runs version/Doctor/optical forensic checks, and starts the
+objective optical observer. It does not start graphical OPENHTPC.
+
+Local KDE / OPENHTPC:
+  Run OPENHTPC locally and test EMPTY, DVD, EJECT, BLURAY_FAMILY A, EJECT,
+  BLURAY_FAMILY B, EJECT, physical UHD (bounded BLURAY_FAMILY), EJECT, HOME
+  re-entry, then QUITTER. No playback is required.
+
+If a visual problem occurs, before quitting or restarting run exactly:
+  ~/OPENHTPC-VALIDATOR/openhtpc-validator capture
+
+Upload the single resulting failure archive from
+~/OPENHTPC-VALIDATOR/outbox/ if automatic NAS upload was unavailable.

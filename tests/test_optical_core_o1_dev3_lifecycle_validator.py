@@ -82,7 +82,7 @@ class Validator(unittest.TestCase):
    (state/"disc-sheet-state.json").write_text(json.dumps({"optical_generation":10,"canonical_state":"BLURAY_FAMILY"}))
    lab=home/"lab";env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
    result=subprocess.run([str(PAYLOAD/"openhtpc-validator"),"observe","optical","--once"],env=env,text=True,capture_output=True,timeout=30)
-   self.assertEqual(result.returncode,1);self.assertIn("STALE_PRESENTATION_AFTER_EJECT",result.stdout)
+   self.assertEqual(result.returncode,1);self.assertIn("PRESENTATION_GENERATION_STALE",result.stdout)
    self.assertEqual(len(list((lab/"outbox").glob("openhtpc-validator-failure-*.tar.gz"))),1)
  def test_observer_bounds_initializing_and_captures_before_changes(self):
   with tempfile.TemporaryDirectory() as raw:
