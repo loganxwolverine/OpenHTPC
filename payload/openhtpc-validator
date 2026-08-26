@@ -21,6 +21,8 @@ def sha256(path):
  return value.hexdigest()
 def sanitize(text):
  text=text.replace(str(HOME),"~")
+ text=re.sub(r"(?i)([?&]api_key=)[^&\s\"']+",r"\1[REDACTED]",text)
+ text=re.sub(r"(?i)(authorization\s*:\s*bearer\s+)\S+",r"\1[REDACTED]",text)
  text=re.sub(r"(?i)(--(?:password|token|api[_-]?key|secret)\s+)\S+",r"\1[REDACTED]",text)
  try:
   value=json.loads(text)

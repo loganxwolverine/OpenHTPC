@@ -29,6 +29,8 @@ SYSTEM_PAGES = (
     "hardware",
     "display_video",
     "audio_media",
+    "metadata",
+    "tmdb",
 )
 
 
@@ -255,6 +257,8 @@ PAGE_TITLES = {
     "hardware": "MATÉRIEL & GRAPHIQUES",
     "display_video": "AFFICHAGE & VIDÉO",
     "audio_media": "AUDIO & MÉDIAS",
+    "metadata": "MÉTADONNÉES",
+    "tmdb": "TMDb",
 }
 
 
@@ -462,6 +466,26 @@ def system_page_png(
                 ("Gestionnaire de flux", "PipeWire / WirePlumber", None),
             ],
         )
+    elif page == "metadata":
+        card(
+            (70, 170, 1780, 680),
+            "MÉTADONNÉES",
+            [
+                ("TMDb", model.get("tmdb_management", {}).get("label", "NON CONFIGURÉ"), None),
+                ("Rôle", "Enrichissement facultatif des fiches de films", None),
+                ("Lecture", "Indépendante de TMDb", None),
+            ],
+        )
+    elif page == "tmdb":
+        tmdb = model.get("tmdb_management", {})
+        rows = [("État", tmdb.get("label", "NON CONFIGURÉ"), "#78d9ae" if tmdb.get("state") == "VALID" else None)]
+        if tmdb.get("masked"):
+            rows.append(("Identifiant", tmdb["masked"], None))
+            rows.append(("Dernier test", tmdb.get("detail", "Identifiant enregistré, non testé"), None))
+        else:
+            rows.extend((("Service", "TMDb permet d’afficher affiches et informations des films", None),
+                         ("Lecture", "TMDb est facultatif", None)))
+        card((70, 170, 1780, 680), "GESTION TMDb", rows)
     elif page == "media_optical":
         m = model.get("media_optical") or model.get("audio_media", {})
         card(

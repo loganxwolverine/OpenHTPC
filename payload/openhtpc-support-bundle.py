@@ -6,6 +6,8 @@ POLICY="openhtpc-support-v3-capabilities-redacted"
 SECRET=re.compile(r"(?i)(authorization|api[_-]?key|password|secret|token)\s*[:=].*")
 def sanitize(text:str,home:pathlib.Path)->str:
  text=text.replace(str(home),"~")
+ text=re.sub(r"(?i)([?&]api_key=)[^&\s\"']+",r"\1[REDACTED]",text)
+ text=re.sub(r"(?i)(authorization\s*:\s*bearer\s+)\S+",r"\1[REDACTED]",text)
  try:
   value=json.loads(text)
   def clean(item):

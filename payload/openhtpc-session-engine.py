@@ -664,7 +664,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     ui = importlib.util.module_from_spec(ui_spec); ui_spec.loader.exec_module(ui)
     state_hash = hashlib.sha256(json.dumps(optical, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
     ui_generation_id = ui.generation_id(optical)
-    system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "processing", "playback", "diagnostics", "technical", "about")
+    system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "metadata", "tmdb", "processing", "playback", "diagnostics", "technical", "about")
     system_pages = {name: home / f".cache/openhtpc/system-{name}.png" for name in system_page_keys}
     dashboard = home / ".cache/openhtpc/system-dashboard.png"
     system_page = install / "openhtpc-system-page"
@@ -674,6 +674,12 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         system_live = importlib.util.module_from_spec(spec)
         loader.exec_module(system_live)
         system_model = system_live.status_model(home, install)
+        management_path = install / "openhtpc-tmdb-management.py"
+        if management_path.is_file():
+            loader = importlib.machinery.SourceFileLoader("openhtpc_tmdb_management_ui", str(management_path))
+            management_spec = importlib.util.spec_from_loader("openhtpc_tmdb_management_ui", loader)
+            management = importlib.util.module_from_spec(management_spec); loader.exec_module(management)
+            system_model["tmdb_management"] = management.status(home)
         ui.system_page_png(system_model, dashboard, font, "root")
         for key in system_page_keys:
             ui.system_page_png(system_model, system_pages[key], font, key)
@@ -694,6 +700,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     icon_optical = resolve_sys_icon("system-media-optical.png", resolve_sys_icon("media_optique.png", media_icon))
     icon_processing = resolve_sys_icon("system-processing.png", resolve_sys_icon("traitement_video.png", logo))
     icon_diagnostic = resolve_sys_icon("system-diagnostics.png", resolve_sys_icon("diagnostic.png", logo))
+    icon_metadata = resolve_sys_icon("system-media-optical.png", resolve_sys_icon("media_optique.png", media_icon))
     icon_back = resolve_sys_icon("system-back.png", resolve_sys_icon("retour.png", logo))
     playback_icons = {
         "video": resolve_sys_icon("playback-video.png", icon_codecs),
@@ -805,9 +812,10 @@ Entry3=AFFICHAGE;{icon_display};:submenu SYSTEM_DISPLAY
 Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK
 Entry5=AUDIO;{icon_audio};:submenu SYSTEM_AUDIO
 Entry6=MÉDIAS & OPTIQUE;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
-Entry7=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
-Entry8=À PROPOS;{logo};:submenu SYSTEM_ABOUT
-Entry9=RETOUR;{icon_back};:back
+Entry7=MÉTADONNÉES;{icon_metadata};:submenu SYSTEM_METADATA
+Entry8=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
+Entry9=À PROPOS;{logo};:submenu SYSTEM_ABOUT
+Entry10=RETOUR;{icon_back};:back
 
 [SYSTEM_OVERVIEW]
 BackgroundImage={system_pages['overview']}
@@ -835,6 +843,15 @@ Entry3=RETOUR;{icon_back};:back
 [SYSTEM_MEDIA_OPTICAL]
 BackgroundImage={system_pages['media_optical']}
 Entry1=RETOUR;{local_icon};:back
+
+[SYSTEM_METADATA]
+BackgroundImage={system_pages['metadata']}
+Entry1=TMDb;{icon_metadata};:submenu SYSTEM_TMDB
+Entry2=RETOUR;{icon_back};:back
+
+[SYSTEM_TMDB]
+BackgroundImage={system_pages['tmdb']}
+{(f"Entry1=CONFIGURER;{icon_metadata};:fork {install/'openhtpc-tmdb-management.py'} configure\nEntry2=RETOUR;{icon_back};:back" if not system_model.get('tmdb_management',{}).get('masked') else f"Entry1=TESTER;{icon_metadata};:fork {install/'openhtpc-tmdb-management.py'} test\nEntry2=MODIFIER;{icon_metadata};:fork {install/'openhtpc-tmdb-management.py'} modify\nEntry3=SUPPRIMER;{icon_metadata};:fork {install/'openhtpc-tmdb-management.py'} delete\nEntry4=RETOUR;{icon_back};:back")}
 
 [SYSTEM_PROCESSING]
 BackgroundImage={system_pages['processing']}

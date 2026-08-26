@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.1.3-dev7"
+readonly OPENHTPC_VERSION="1.1.3-dev8"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ readonly SOURCE_OPTICAL="${SCRIPT_DIR}/openhtpc-optical.py"
 readonly SOURCE_DVD_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-dvd-dependencies.py"
 readonly SOURCE_FEDORA_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-fedora-dependencies.py"
 readonly SOURCE_DNF_TRANSACTION="${SCRIPT_DIR}/openhtpc-dnf-transaction.py"
-readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-capabilities.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
+readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-capabilities.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
 
 
 readonly SOURCE_FLEX="${SCRIPT_DIR}/flex"
