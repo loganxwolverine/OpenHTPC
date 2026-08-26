@@ -14,6 +14,7 @@ engine = load("session_engine", install / "openhtpc-session-engine.py")
 target = pathlib.Path(sys.argv[1]) if len(sys.argv) == 2 else engine.canonical_flex_config_path(home)
 runtime = load("runtime", install / "openhtpc-runtime.py") if (install / "openhtpc-runtime.py").is_file() else None
 optical = load("optical", install / "openhtpc-optical.py")
+tmdb = load("home_tmdb", install / "openhtpc-tmdb.py") if (install / "openhtpc-tmdb.py").is_file() else None
 
 def optical_state():
     try: return json.loads((home / ".local/state/openhtpc/optical-current.json").read_text())
@@ -24,23 +25,26 @@ def optical_key():
 
 def disc_presentation_signature():
     st = optical_state()
-    disc_id = st.get("disc_id")
-    if not disc_id:
+    if tmdb is None:
         return ""
-    cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(disc_id).encode()).hexdigest() / "metadata.json"
+    title = st.get("tmdb_title") or st.get("disc_title") or st.get("volume_label") or ""
+    cache_target = tmdb.cache_path(home, st, str(title))
+    if cache_target is None:
+        return ""
+    identity = str(st.get("disc_id") or f"{int(st.get('generation', 0) or 0)}:{optical.canonical_state(st)}")
     if not cache_target.is_file():
-        return f"{disc_id}:NO_CACHE"
+        return f"{identity}:NO_CACHE"
     try:
         data = json.loads(cache_target.read_text(encoding="utf-8"))
         status = data.get("status", "")
         if status == "PASS":
-            return f"{disc_id}:PASS:{data.get('tmdb_id')}:{data.get('confidence')}"
+            return f"{identity}:PASS:{data.get('tmdb_id')}:{data.get('confidence')}"
         elif status == "AMBIGUOUS":
             c_ids = ",".join(str(c.get("tmdb_id") or c.get("id")) for c in data.get("candidates", []))
-            return f"{disc_id}:AMBIGUOUS:{c_ids}"
-        return f"{disc_id}:{status}"
+            return f"{identity}:AMBIGUOUS:{c_ids}"
+        return f"{identity}:{status}"
     except Exception:
-        return f"{disc_id}:ERR"
+        return f"{identity}:ERR"
 
 def full_state_key():
     st = optical_state()

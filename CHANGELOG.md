@@ -1,5 +1,13 @@
 # Changelog
 
+## OPENHTPC TMDb picker close and media logo — 1.1.3-dev7
+
+- Extends the existing presentation signature to generation-scoped optical
+  metadata, so a successful ambiguous-result commit regenerates the active
+  disc menu and removes its candidate entries immediately.
+- Restores the official derived Blu-ray media logo for `BLURAY_FAMILY` while
+  retaining separate `BLU-RAY / UHD` exact-type-unknown informational truth.
+
 ## OPENHTPC optical TMDb selection UI — 1.1.3-dev6
 
 - Presents cached ambiguous TMDb results as couch-readable selectable entries
