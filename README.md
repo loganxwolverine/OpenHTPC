@@ -1,3 +1,4 @@
+<img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/696bd719-3e75-4512-bc53-e0f5527436f1" />
 # OPENHTPC 1.1 RC3 Development Candidate
 
 This bounded final RC3 corrective package is version `1.1.0-dev38`, build
@@ -134,3 +135,4 @@ This package preserves the qualified dev27 Media Sources behavior while adding
 public packaging, managed-update hygiene and provenance-safe UI polish. The
 RC2 candidate completed physical validation and is frozen. This status does
 not constitute a final `1.1.0` release announcement.
+<img width="1920" height="1080" alt="Screenshot 2026-08-15 16-13-14" src="https://github.com/user-attachments/assets/29450bb7-adb5-4600-8474-eb80627c63bf" />
