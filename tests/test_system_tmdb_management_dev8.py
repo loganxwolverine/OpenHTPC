@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused Dev8 secure TMDb management and frozen-path contracts."""
 import importlib.util,io,json,pathlib,socket,tempfile,unittest,urllib.error
+import subprocess
 from unittest import mock
 ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload"
 def load(name,path):
@@ -70,15 +71,31 @@ class Integration(unittest.TestCase):
   source=(PAYLOAD/"openhtpc-session-engine.py").read_text();self.assertIn("openhtpc-bind-disc",source);self.assertIn('cached_meta.get("candidates", [])[:3]',source)
  def test_24_startup_contract_retained(self):
   source=(PAYLOAD/"openhtpc-session-start").read_text();self.assertIn("write_flex_config",source);self.assertNotIn("openhtpc-tmdb-management",source)
- def test_25_tmdb_actions_use_qualified_lower_dock(self):
-  screen_height=1080;content_bottom=170+680;action_top=screen_height*88//100
-  self.assertGreater(action_top,content_bottom)
-  source=(ROOT/"vendor/flex-launcher/src/launcher.c").read_text()
-  self.assertIn('strcmp(name, "SYSTEM_TMDB") == 0',source)
+ @staticmethod
+ def lower_dock_geometry(width,height,buttons):
+  gap=width*15//1000;max_width=width*(36 if buttons<=2 else 28 if buttons<=3 else 22)//100
+  available=width*88//100;button_width=min((available-(buttons-1)*gap)//buttons,max_width)
+  total=buttons*button_width+(buttons-1)*gap;start=(width-total)//2
+  return [(start+i*(button_width+gap),height*88//100,button_width,height*8//100) for i in range(buttons)]
+ def test_25_parent_and_tmdb_use_shipped_lower_dock_geometry(self):
+  source=(ROOT/"vendor/flex-launcher/src/launcher.c").read_text();binary=ROOT/"payload/flex/bin/flex-launcher"
+  symbols=subprocess.run(["strings",str(binary)],text=True,capture_output=True,check=True).stdout
+  for menu in ("SYSTEM_METADATA","SYSTEM_TMDB"):
+   self.assertIn(f'strcmp(name, "{menu}") == 0',source);self.assertIn(menu,symbols)
   self.assertIn("entry->icon_rect.y = (geo.screen_height * 88) / 100",source)
-  self.assertIn("int safety_margin = (geo.screen_height * 1) / 100",source)
- def test_26_tmdb_action_order_is_deterministic(self):
+ def test_26_parent_and_tmdb_content_never_intersects_actions(self):
+  for width,height in ((1280,720),(1920,1080),(3840,2160)):
+   content=(width*70//1920,height*170//1080,width*1780//1920,height*680//1080)
+   content_bottom=content[1]+content[3]
+   for count in (2,4):
+    boxes=self.lower_dock_geometry(width,height,count)
+    self.assertTrue(all(y>content_bottom and y+h<height for _,y,_,h in boxes))
+    self.assertTrue(all(boxes[i][0]+boxes[i][2]<boxes[i+1][0] for i in range(len(boxes)-1)))
+    self.assertTrue(all(y>height*3//4 for _,y,_,_ in boxes))
+ def test_27_metadata_and_tmdb_action_order_is_deterministic(self):
   source=(PAYLOAD/"openhtpc-session-engine.py").read_text()
+  parent=source[source.index("[SYSTEM_METADATA]"):source.index("[SYSTEM_TMDB]")]
+  self.assertLess(parent.index("Entry1=TMDb;"),parent.index("Entry2=RETOUR;"))
   ordered=("Entry1=TESTER;","Entry2=MODIFIER;","Entry3=SUPPRIMER;","Entry4=RETOUR;")
   positions=[source.index(marker,source.index("[SYSTEM_TMDB]")) for marker in ordered]
   self.assertEqual(positions,sorted(positions))
