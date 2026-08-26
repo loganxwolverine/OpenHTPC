@@ -351,13 +351,24 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
 
     has_token = bool(home and (home / ".config/openhtpc/secrets/tmdb-token").is_file())
     cached_meta = {}
-    if home and optical.get("disc_id"):
-        cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json"
-        cached_meta = load_optional_object(cache_target)
+    if home:
+        tmdb_path = install / "openhtpc-tmdb.py"
+        if tmdb_path.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_menu_tmdb", tmdb_path)
+                tmdb_model = importlib.util.module_from_spec(spec); spec.loader.exec_module(tmdb_model)
+                query = normalized_disc_title(optical.get("tmdb_title") or optical.get("disc_title") or optical.get("volume_label"))
+                cache_target = tmdb_model.cache_path(home, optical, query)
+                if cache_target is not None: cached_meta = load_optional_object(cache_target)
+            except (OSError, AttributeError, ImportError, ValueError):
+                cached_meta = {}
 
     meta_status = cached_meta.get("status")
     if meta_status == "AMBIGUOUS":
-        disc_id = shlex.quote(str(optical.get("disc_id") or ""))
+        disc_id = str(optical.get("disc_id") or "")
+        generation = int(optical.get("generation", 0) or 0)
+        canonical = state
+        query = normalized_disc_title(optical.get("tmdb_title") or optical.get("disc_title") or optical.get("volume_label"))
         bind_script = install / "openhtpc-bind-disc"
         for cand in cached_meta.get("candidates", [])[:3]:
             cid = int(cand.get("tmdb_id") or cand.get("id", 0))
@@ -378,7 +389,9 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             if cdur: meta_bits.append(cdur)
             meta_str = " • ".join(meta_bits)
             label = f"{ctitle}  ·  {meta_str}" if meta_str else ctitle
-            cmd = f":fork {bind_script} --disc-id {disc_id} --tmdb-id {cid}"
+            identity_args = (f"--disc-id {shlex.quote(disc_id)}" if disc_id else
+                             f"--generation {generation} --canonical-state {shlex.quote(canonical)} --title {shlex.quote(query)}")
+            cmd = f":fork {bind_script} {identity_args} --tmdb-id {cid}"
             cand_icon = tmdb_icon
             p_file = cand.get("poster_file")
             if p_file and pathlib.Path(p_file).is_file():
@@ -394,8 +407,6 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
-        else:
-            entries.append(("AUCUN DISQUE DÉTECTÉ", media_play_icon, ":fork true"))
     else:
         if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
@@ -403,8 +414,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
         elif optical.get("state") == "INITIALIZING": entries.append(("INITIALISATION DU DISQUE…", media_play_icon, ":fork true"))
         elif state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
-            message=media["message"] + (" · " + media["provider_message"] if media.get("provider_message") else "")
-            entries.append((message, media_play_icon, ":fork true"))
+            pass
         else: entries.append(("AUCUN DISQUE DÉTECTÉ", media_play_icon, ":fork true"))
 
         if not has_token or meta_status == "NOT_CONFIGURED":

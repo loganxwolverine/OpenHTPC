@@ -18,7 +18,10 @@ def physical_family(**extra):
 class CanonicalPresentationTruth(unittest.TestCase):
     def test_physical_family_never_claims_specific_provider(self):
         menu=session.disc_menu_entries(physical_family(),PAYLOAD,tuple(pathlib.Path(f"i{x}") for x in range(4)))
-        self.assertIn("DISQUE BLU-RAY DÉTECTÉ",menu); self.assertIn("Type exact Blu-ray / UHD non déterminé",menu)
+        presentation=(PAYLOAD/"openhtpc-disc-view.py").read_text(encoding="utf-8")
+        self.assertIn('"BLU-RAY / UHD DÉTECTÉ"',presentation); self.assertIn('"Type exact non déterminé"',presentation)
+        self.assertNotIn("DISQUE BLU-RAY DÉTECTÉ",menu); self.assertNotIn("Type exact",menu)
+        self.assertIn("ÉJECTER",menu); self.assertIn("RETOUR",menu)
         self.assertNotIn("Plugin Blu-ray requis",menu); self.assertNotIn("Plugin UHD requis",menu)
 
     def test_uhd_and_4k_title_cannot_upgrade_family_identity(self):

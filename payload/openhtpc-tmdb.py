@@ -271,8 +271,8 @@ def lookup(home: pathlib.Path, query: str, opener=urllib.request.urlopen, durati
     except Exception:
         return {"status": "UNAVAILABLE"}
 
-def commit_binding(home: pathlib.Path, state: dict, tmdb_id: int, opener=urllib.request.urlopen) -> dict:
-    target = _cache_path(home, state)
+def commit_binding(home: pathlib.Path, state: dict, tmdb_id: int, opener=urllib.request.urlopen, title: str = "", commit_guard=None) -> dict:
+    target = cache_path(home, state, title)
     if target is None:
         return {"status": "NOT_CONFIGURED"}
     token_path = home / ".config/openhtpc/secrets/tmdb-token"
@@ -302,11 +302,17 @@ def commit_binding(home: pathlib.Path, state: dict, tmdb_id: int, opener=urllib.
             "writers": [p.get("name") for p in crew if p.get("job") in {"Writer", "Screenplay"} and p.get("name")][:3],
             "cast": [p.get("name") for p in cast if p.get("name")][:5]
         }
+        if commit_guard is not None and not commit_guard():
+            return {"status":"STALE_GENERATION","stale_discarded":True}
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
         os.chmod(tmp, 0o600)
         os.replace(tmp, target)
+        if commit_guard is not None and not commit_guard():
+            try: target.unlink()
+            except OSError: pass
+            return {"status":"STALE_GENERATION","stale_discarded":True}
         poster(home, result, opener)
         return result
     except urllib.error.HTTPError as exc:

@@ -122,6 +122,20 @@ def _draw_logo_overlay(base, install, media_prof):
     except Exception:
         return False
 
+def _draw_text_badge_overlay(base, media_prof, font):
+    """Attach a canonical text badge to the poster without a misleading icon."""
+    text = media_prof["badge"]
+    badge_font = font(18)
+    draw = ImageDraw.Draw(base, "RGBA")
+    box = draw.textbbox((0, 0), text, font=badge_font)
+    width = box[2] - box[0] + 30
+    x = 520 - width + 18
+    y = 175
+    draw.rounded_rectangle((x, y, x + width, y + 42), radius=10,
+                           fill=(2, 12, 28, 235), outline="#22c7ff", width=2)
+    draw.text((x + 15, y + 9), text, font=badge_font, fill="#dff7ff")
+    return base
+
 # ─── Task B: Physical edition block helpers ───────────────────────────────────
 
 def _render_physical_edition(d, phys, font, y_start, x=585, max_y=858):
@@ -226,19 +240,9 @@ def render(home,install,state,metadata,target):
  title_lines=wrapped(title,34 if title_size>55 else 44,2)
  for i,line in enumerate(title_lines): d.text((585,150+i*(title_size+5)),line,font=font(title_size),fill="#ffffff")
  y=150+len(title_lines)*(title_size+5)+12
- # Textual fallback badge (only when logo asset is unavailable)
+ # Textual fallback badge remains attached to the poster when no logo exists.
  if not logo_drawn:
-  badge_text=media_prof["badge"]; badge_font=font(20); bbox=d.textbbox((0,0),badge_text,font=badge_font)
-  text_w=bbox[2]-bbox[0]; badge_w=40+text_w+16
-  d.rounded_rectangle((585,y,585+badge_w,y+36),radius=8,fill=(1,18,38,220),outline="#22c7ff",width=2)
-  badge_ico=install/media_prof["icon"]
-  if badge_ico.is_file():
-   try:
-    with Image.open(badge_ico) as bi:
-     bir=ImageOps.fit(bi.convert("RGBA"),(24,24),method=Image.Resampling.LANCZOS)
-     base.paste(bir,(593,y+6),bir)
-   except Exception: pass
-  d.text((625,y+6),badge_text,font=badge_font,fill="#82dfff")
+  base=_draw_text_badge_overlay(base,media_prof,font); d=ImageDraw.Draw(base,"RGBA")
  # Year • Duration row
  bits=[]
  year=safe_text(metadata.get("year") or safe_text(metadata.get("release_date"))[:4]) if is_committed else ""
@@ -254,6 +258,9 @@ def render(home,install,state,metadata,target):
  overview=safe_text(metadata.get("overview")) if is_committed else ""
  has_token=(home/".config/openhtpc/secrets/tmdb-token").is_file()
  playback_note=("La lecture locale reste disponible." if state.get("playable") is True else "La lecture de ce disque n’est pas disponible.")
+ if media_type=="BLURAY_FAMILY":
+  d.text((585,y),"BLU-RAY / UHD DÉTECTÉ",font=font(24),fill="#22c7ff"); y+=34
+  d.text((585,y),"Type exact non déterminé",font=font(22),fill="#dceaf5"); y+=48
  if overview:
   section="SYNOPSIS"
  elif status=="AMBIGUOUS":

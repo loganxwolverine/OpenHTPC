@@ -17,7 +17,10 @@ def load(path, name):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--disc-id", required=True)
+    p.add_argument("--disc-id")
+    p.add_argument("--generation", type=int)
+    p.add_argument("--canonical-state")
+    p.add_argument("--title", default="")
     p.add_argument("--tmdb-id", type=int, required=True)
     p.add_argument("--home", type=pathlib.Path)
     a = p.parse_args()
@@ -26,8 +29,21 @@ def main():
     install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
 
     tmdb = load(install / "openhtpc-tmdb.py", "openhtpc_tmdb")
-    state = {"state": "DVD", "disc_id": a.disc_id}
-    res = tmdb.commit_binding(home, state, a.tmdb_id)
+    try:
+        current = json.loads((home / ".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 1
+    if a.disc_id and str(current.get("disc_id") or "") != a.disc_id:
+        return 1
+    if a.generation is not None and int(current.get("generation", 0) or 0) != a.generation:
+        return 1
+    if a.canonical_state and str(current.get("canonical_state") or "") != a.canonical_state:
+        return 1
+    guard = lambda: (
+        json.loads((home / ".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8")).get("generation")
+        == current.get("generation")
+    )
+    res = tmdb.commit_binding(home, current, a.tmdb_id, title=a.title, commit_guard=guard)
 
     disc_view = install / "openhtpc-disc-view.py"
     if disc_view.is_file():

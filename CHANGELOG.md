@@ -1,5 +1,14 @@
 # Changelog
 
+## OPENHTPC optical TMDb selection UI — 1.1.3-dev6
+
+- Presents cached ambiguous TMDb results as couch-readable selectable entries
+  and commits the chosen identity only for the current optical generation.
+- Keeps canonical optical media identity authoritative and rejects selection
+  callbacks after eject or replacement by a newer disc generation.
+- Attaches the canonical media badge to fallback or TMDb poster artwork,
+  separates year/runtime metadata, and moves optical status out of actions.
+
 ## OPENHTPC emergency startup hotfix — 1.1.3-dev5
 
 - Validates the mandatory HOME optical action by its authoritative
