@@ -70,4 +70,16 @@ class Integration(unittest.TestCase):
   source=(PAYLOAD/"openhtpc-session-engine.py").read_text();self.assertIn("openhtpc-bind-disc",source);self.assertIn('cached_meta.get("candidates", [])[:3]',source)
  def test_24_startup_contract_retained(self):
   source=(PAYLOAD/"openhtpc-session-start").read_text();self.assertIn("write_flex_config",source);self.assertNotIn("openhtpc-tmdb-management",source)
+ def test_25_tmdb_actions_use_qualified_lower_dock(self):
+  screen_height=1080;content_bottom=170+680;action_top=screen_height*88//100
+  self.assertGreater(action_top,content_bottom)
+  source=(ROOT/"vendor/flex-launcher/src/launcher.c").read_text()
+  self.assertIn('strcmp(name, "SYSTEM_TMDB") == 0',source)
+  self.assertIn("entry->icon_rect.y = (geo.screen_height * 88) / 100",source)
+  self.assertIn("int safety_margin = (geo.screen_height * 1) / 100",source)
+ def test_26_tmdb_action_order_is_deterministic(self):
+  source=(PAYLOAD/"openhtpc-session-engine.py").read_text()
+  ordered=("Entry1=TESTER;","Entry2=MODIFIER;","Entry3=SUPPRIMER;","Entry4=RETOUR;")
+  positions=[source.index(marker,source.index("[SYSTEM_TMDB]")) for marker in ordered]
+  self.assertEqual(positions,sorted(positions))
 if __name__=="__main__":unittest.main()
