@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.1.3-dev13"
+readonly OPENHTPC_VERSION="1.1.3-dev14"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ readonly SOURCE_OPTICAL="${SCRIPT_DIR}/openhtpc-optical.py"
 readonly SOURCE_DVD_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-dvd-dependencies.py"
 readonly SOURCE_FEDORA_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-fedora-dependencies.py"
 readonly SOURCE_DNF_TRANSACTION="${SCRIPT_DIR}/openhtpc-dnf-transaction.py"
-readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-capabilities.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
+readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-capabilities.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-runtime-generator.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
 
 
 readonly SOURCE_FLEX="${SCRIPT_DIR}/flex"
@@ -625,21 +625,34 @@ EOF
 chmod 0644 "$AUTOSTART_PATH"
 
 log "OPENHTPC ${OPENHTPC_VERSION} installé."
+capabilities_refreshed=false
 if [[ ! -f ${HOME}/.config/openhtpc/profile.json && ${OPENHTPC_UPDATE_MODE:-0} == 1 ]]; then
-    log "Hardware Passport absent dans ce profil Builder : mise à jour des fichiers terminée sans lancer l'assistant matériel interactif."
+    die "Hardware Passport absent : impossible de régénérer le runtime après mise à jour. Relancez l'installation matérielle OPENHTPC."
 elif [[ ! -f ${HOME}/.config/openhtpc/profile.json ]]; then
     log "Découverte matérielle et génération du runtime OPENHTPC..."
     stage MATÉRIEL
     "$INSTALLED_BUILDER"
     stage RUNTIME
 else
-    log "Hardware Passport existant conservé. Relancez openhtpc-builder après un changement matériel."
+    log "Hardware Passport existant conservé."
+    if [[ ${OPENHTPC_UPDATE_MODE:-0} == 1 ]]; then
+        stage CAPACITÉS
+        OPENHTPC_HOME="$HOME" OPENHTPC_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/openhtpc-capabilities.py" --refresh >/dev/null || \
+            die "Le refresh canonique des capacités a échoué; régénération runtime refusée."
+        capabilities_refreshed=true
+        stage RUNTIME
+        "$INSTALLED_BUILDER" --regenerate-runtime || \
+            die "La régénération du runtime courant a échoué; la mise à jour n'est pas prête."
+        log "Runtime et configuration MPV régénérés depuis le Hardware Passport conservé."
+    else
+        log "Relancez openhtpc-builder après un changement matériel."
+    fi
 fi
 if [[ ! -f ${HOME}/.config/openhtpc/user-config.json && ${OPENHTPC_UPDATE_MODE:-0} != 1 ]]; then
     stage CONFIGURATION
     "$INSTALL_DIR/openhtpc-initial-setup.py" --home "$HOME" --default-empty || die "Configuration initiale interrompue."
 fi
-if ! OPENHTPC_HOME="$HOME" OPENHTPC_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/openhtpc-capabilities.py" --refresh >/dev/null; then
+if ! $capabilities_refreshed && ! OPENHTPC_HOME="$HOME" OPENHTPC_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/openhtpc-capabilities.py" --refresh >/dev/null; then
     log "Le snapshot de capacités n'a pas pu être généré; il pourra être relancé avec openhtpc capabilities --refresh."
 fi
 # Safely remove only specific legacy transitional non-disc cache if present

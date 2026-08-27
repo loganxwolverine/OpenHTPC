@@ -1,0 +1,20 @@
+Dev14 is an update-migration qualification candidate. Do not use a clean install
+as a substitute for the required public RC3 -> Dev14 physical sequence.
+
+1. Establish public v1.1.0-rc3 on the Ryzen validator.
+2. Configure a MEDIA source, a TMDb credential without disclosing it, PCM or
+   BITSTREAM preference, and (where available) one confirmed disc association.
+3. Record the Hardware Passport, generated runtime/MPV provenance, and persistent
+   state without recording the credential value.
+4. Apply the delivered Dev14 candidate through the normal validator/updater path.
+5. Confirm version 1.1.3-dev14 and build update-runtime-regeneration-dev14.
+6. Prove generated runtime and MPV files carry current Dev14 provenance and that
+   recognizable RC3 generated state did not survive.
+7. Confirm the Passport, MEDIA configuration, credential configured-state,
+   confirmed disc mapping, audio preference, and user configuration survived.
+8. Start OPENHTPC manually: HOME PASS; Alerte.mkv video/audio/seek PASS; return to
+   MEDIA PASS; one known optical disc sheet/TMDb smoke PASS.
+9. QUITTER -> KDE PASS, then manual OPENHTPC restart PASS.
+
+Do not remotely apply this candidate. Steve owns the physical graphical update
+and validation sequence.

@@ -12,6 +12,15 @@ readonly MPV_PURE_CONFIG="${MPV_RUNTIME_DIR}/pure.conf"
 readonly MPV_REFERENCE_CONFIG="${MPV_RUNTIME_DIR}/reference.conf"
 readonly DRI_ROOT="${OPENHTPC_DRI_ROOT:-/dev/dri}"
 readonly DRM_SYSFS_ROOT="${OPENHTPC_DRM_SYSFS_ROOT:-/sys/class/drm}"
+readonly RUNTIME_GENERATOR="${OPENHTPC_RUNTIME_GENERATOR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/openhtpc-runtime-generator.py}"
+readonly VERSION_METADATA="${OPENHTPC_VERSION_METADATA:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/version.json}"
+REGENERATE_RUNTIME=false
+if [[ ${1:-} == "--regenerate-runtime" && $# -eq 1 ]]; then
+    REGENERATE_RUNTIME=true
+elif [[ $# -ne 0 ]]; then
+    printf 'Usage : %s [--regenerate-runtime]\n' "$0" >&2
+    exit 2
+fi
 WORK_DIR="$(mktemp -d -t openhtpc-builder.XXXXXX)"
 trap 'rm -rf -- "$WORK_DIR"' EXIT
 
@@ -83,6 +92,14 @@ if command -v mpv >/dev/null 2>&1; then
         mpv --no-config --gpu-api=help 2>&1 || true
         mpv --no-config --hwdec=help 2>&1 || true
     } >"$WORK_DIR/mpv-values.txt"
+fi
+
+if $REGENERATE_RUNTIME; then
+    [[ -r $PROFILE_FILE ]] || { printf 'Hardware Passport absent : %s\n' "$PROFILE_FILE" >&2; exit 1; }
+    [[ -x $RUNTIME_GENERATOR && -r $VERSION_METADATA ]] || { printf 'Générateur runtime courant incomplet.\n' >&2; exit 1; }
+    mkdir -p "$MPV_RUNTIME_DIR"
+    exec "$RUNTIME_GENERATOR" "$PROFILE_FILE" "$MPV_PURE_CONFIG" "$MPV_REFERENCE_CONFIG" \
+        "$WORK_DIR/mpv-options.txt" "$WORK_DIR/mpv-values.txt" "$VERSION_METADATA"
 fi
 
 rpmfusion_enabled=false
@@ -714,159 +731,8 @@ pathlib.Path(profile_path).write_text(
 PY
 
 mkdir -p "$MPV_RUNTIME_DIR"
-python3 - "$PROFILE_FILE" "$MPV_PURE_CONFIG" "$MPV_REFERENCE_CONFIG" \
-    "$WORK_DIR/mpv-options.txt" "$WORK_DIR/mpv-values.txt" <<'PYRUNTIME'
-import json
-import os
-import pathlib
-import re
-import sys
-
-profile_path = pathlib.Path(sys.argv[1])
-pure_path = pathlib.Path(sys.argv[2])
-reference_path = pathlib.Path(sys.argv[3])
-options = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8", errors="replace")
-values = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8", errors="replace")
-profile = json.loads(profile_path.read_text(encoding="utf-8"))
-
-topology = profile["gpu_topology"]
-backend = profile["video_backend"]
-blueprint = profile["mpv_blueprint"]
-display = topology.get("display_gpu")
-processing = topology.get("processing_gpu")
-
-same_gpu = bool(
-    display and processing
-    and display.get("pci_slot") == processing.get("pci_slot")
-)
-if topology.get("offload_required") is True:
-    display_path = "offload_pending"
-elif same_gpu and topology.get("offload_required") is False:
-    display_path = "direct"
-else:
-    display_path = "pending"
-
-required_options = (
-    "vo", "gpu-api", "hwdec", "vaapi-device", "include",
-    "scale", "dscale", "cscale", "dither", "dither-depth",
-    "scaler-resizes-only", "correct-downscaling", "linear-downscaling",
-    "sigmoid-upscaling", "target-colorspace-hint", "gamut-mapping-mode",
-)
-options_available = all(re.search(rf"^ --{re.escape(name)}\s", options, re.MULTILINE) for name in required_options)
-values_available = all(token in values for token in ("gpu-next", "vulkan", "vaapi"))
-reference_values_available = all(
-    re.search(rf"^ --{name}\s+.*\b{re.escape(value)}\b", options, re.MULTILINE)
-    for name, value in (
-        ("scale", "spline36"), ("dscale", "mitchell"), ("cscale", "spline36"),
-        ("dither", "fruit"), ("dither-depth", "auto"),
-        ("target-colorspace-hint", "auto"), ("gamut-mapping-mode", "auto"),
-    )
-)
-
-reason = None
-ready = True
-if not processing:
-    ready, reason = False, "Aucun GPU de traitement fiable n’a été retenu."
-elif display_path == "offload_pending":
-    ready, reason = False, "Chemin multi-GPU à valider."
-elif display_path != "direct":
-    ready, reason = False, "Le chemin entre affichage et traitement reste à valider."
-elif backend.get("status") != "observed":
-    ready, reason = False, "Le backend vidéo n’est pas observé."
-elif backend.get("decode_api") != "vaapi" or backend.get("render_api") != "vulkan":
-    ready, reason = False, "VA-API et Vulkan ne sont pas tous deux observés."
-elif not processing.get("render_node"):
-    ready, reason = False, "Aucun render node fiable n’est associé au GPU de traitement."
-elif not options_available or not values_available or not reference_values_available:
-    ready, reason = False, "Le MPV installé n’expose pas toutes les options requises."
-
-if ready:
-    pure_content = (
-        "# OPENHTPC Build 4 — profil PURE isolé\n"
-        "# Générée depuis profile.json ; ne pas copier dans ~/.config/mpv/mpv.conf\n"
-        "vo=gpu-next\n"
-        "gpu-api=vulkan\n"
-        "hwdec=vaapi\n"
-        f"vaapi-device={processing['render_node']}\n"
-    )
-    reference_content = (
-        "# OPENHTPC Build 4 — profil REFERENCE isolé\n"
-        "# Fonctions natives MPV/libplacebo uniquement ; validation visuelle requise\n"
-        "vo=gpu-next\n"
-        "gpu-api=vulkan\n"
-        "hwdec=vaapi\n"
-        f"vaapi-device={processing['render_node']}\n"
-        "scale=spline36\n"
-        "dscale=mitchell\n"
-        "cscale=spline36\n"
-        "dither=fruit\n"
-        "dither-depth=auto\n"
-        "scaler-resizes-only=yes\n"
-        "correct-downscaling=yes\n"
-        "linear-downscaling=yes\n"
-        "sigmoid-upscaling=yes\n"
-        "target-colorspace-hint=auto\n"
-        "gamut-mapping-mode=auto\n"
-    )
-    for path, content in ((pure_path, pure_content), (reference_path, reference_content)):
-        temporary = path.with_suffix(".conf.tmp")
-        temporary.write_text(content, encoding="utf-8")
-        os.replace(temporary, path)
-else:
-    pure_path.unlink(missing_ok=True)
-    reference_path.unlink(missing_ok=True)
-
-last_video = profile.get("playback_validation", {}).get("last_test", {}).get("video", {})
-pure_validated = bool(
-    ready
-    and last_video.get("status") == "validated"
-    and last_video.get("hwdec_observed") == backend.get("decode_api")
-    and last_video.get("renderer_observed") == backend.get("render_api")
-    and last_video.get("vo_observed") == "gpu-next"
-)
-
-profile["runtime_profiles"] = {
-    "available": ["PURE", "REFERENCE"] if ready else [],
-    "enhanced": "pending",
-    "default": "PURE",
-    "selection_scope": "playback",
-    "selected": None,
-    "profiles": {
-        "PURE": {
-            "description": "Chaîne minimale fidèle sans traitement esthétique",
-            "generation_status": "generated" if ready else "pending",
-            "validation_status": "validated" if pure_validated else "validation_pending",
-            "config_path": str(pure_path) if ready else None,
-        },
-        "REFERENCE": {
-            "description": "Rendu fidèle avec scaling, chroma et dithering natifs MPV/libplacebo",
-            "generation_status": "generated" if ready else "pending",
-            "validation_status": "validation_pending",
-            "config_path": str(reference_path) if ready else None,
-        },
-        "ENHANCED": {
-            "description": "Profil futur",
-            "generation_status": "pending",
-            "validation_status": "pending",
-            "config_path": None,
-        },
-    },
-}
-
-profile["runtime"] = {
-    "status": "ready" if ready else "pending",
-    "config_path": str(pure_path) if ready else None,
-    "backend": backend,
-    "display_path": display_path,
-    "reason": "Configuration candidate générée ; validation de lecture requise." if ready else reason,
-    "configuration_generated": ready,
-    "configuration_applied_globally": False,
-    "playback_validated": False,
-    "mpv_options_verified": options_available and values_available and reference_values_available,
-}
-profile["mpv_configuration_generated"] = ready
-profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PYRUNTIME
+"$RUNTIME_GENERATOR" "$PROFILE_FILE" "$MPV_PURE_CONFIG" "$MPV_REFERENCE_CONFIG" \
+    "$WORK_DIR/mpv-options.txt" "$WORK_DIR/mpv-values.txt" "$VERSION_METADATA"
 
 {
     printf 'OPENHTPC — Rapport Build 4\n'

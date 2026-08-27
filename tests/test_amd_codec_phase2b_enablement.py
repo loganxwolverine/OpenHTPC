@@ -10,6 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "payload/install-openhtpc-fedora.sh"
 BUILDER = ROOT / "payload/openhtpc-builder.sh"
+RUNTIME_GENERATOR = ROOT / "payload/openhtpc-runtime-generator.py"
 
 
 def function_prefix() -> str:
@@ -110,15 +111,22 @@ class AmdCodecPhase2BEnablement(unittest.TestCase):
         installer = INSTALLER.read_text(encoding="utf-8")
         self.assertIn('"$INSTALL_DIR/openhtpc-capabilities.py" --refresh', installer)
         builder = BUILDER.read_text(encoding="utf-8")
+        generator = RUNTIME_GENERATOR.read_text(encoding="utf-8")
         self.assertNotIn('backend.get("vendor") != "intel"', builder)
-        self.assertIn('hwdec=vaapi', builder)
-        self.assertIn('gpu-api=vulkan', builder)
+        self.assertEqual(builder.count('"$RUNTIME_GENERATOR" "$PROFILE_FILE"'), 2)
+        self.assertIn('hwdec=vaapi', generator)
+        self.assertIn('gpu-api=vulkan', generator)
 
     def test_installer_always_runs_canonical_refresh_after_noop_package_path(self):
         installer = INSTALLER.read_text(encoding="utf-8")
         canonical = '"$INSTALL_DIR/openhtpc-capabilities.py" --refresh'
-        self.assertEqual(installer.count(canonical), 1)
-        self.assertGreater(installer.index(canonical), installer.index("install_multimedia_extension"))
+        update_refresh, normal_refresh = [installer.index(canonical, offset) for offset in
+                                          (0, installer.index(canonical) + len(canonical))]
+        regenerate = installer.index('"$INSTALLED_BUILDER" --regenerate-runtime')
+        self.assertGreater(update_refresh, installer.index("install_multimedia_extension"))
+        self.assertLess(update_refresh, regenerate)
+        self.assertLess(installer.index("capabilities_refreshed=true"), normal_refresh)
+        self.assertIn("if ! $capabilities_refreshed && ! OPENHTPC_HOME=", installer)
 
     def run_profile_refresh(self, initial, values=(True, True, True, False, True, False)):
         scenario = function_prefix() + """

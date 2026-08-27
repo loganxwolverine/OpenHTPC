@@ -1,5 +1,16 @@
 # Changelog
 
+# OPENHTPC update runtime regeneration — 1.1.3-dev14
+
+- Regenerates version-derived runtime and MPV configuration during updates from
+  the preserved Hardware Passport and freshly observed canonical capabilities.
+- Preserves user configuration, MEDIA sources, TMDb credentials and confirmed
+  disc associations, audio preference, caches, and the valid Hardware Passport.
+- Refuses to report a successful update when capability refresh or runtime
+  regeneration cannot produce a truthful READY state.
+- Uses the same authoritative runtime generator for fresh Builder execution and
+  update migration, including the qualified VA-API policy.
+
 # OPENHTPC Optical TMDb search recovery UX — 1.1.3-dev13
 
 - Conservatively removes recognized technical suffixes from TMDb search queries

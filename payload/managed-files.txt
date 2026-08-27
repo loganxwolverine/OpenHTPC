@@ -153,6 +153,7 @@ openhtpc-quit
 openhtpc-readahead.py
 openhtpc-recipes.py
 openhtpc-runtime.py
+openhtpc-runtime-generator.py
 openhtpc-session-engine.py
 openhtpc-session-start
 openhtpc-support-bundle.py
