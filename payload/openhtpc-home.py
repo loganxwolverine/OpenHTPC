@@ -147,9 +147,12 @@ if runtime:
     runtime.log(home, "ui", "FLEX_STARTED", ui_instance_identity=f"flex-{proc.pid}", authoritative_flex_pid=proc.pid, session_id=os.environ.get("OPENHTPC_SESSION_ID", "unknown"), start_reason="SESSION_START", caller_component="home-controller", caller_pid=os.getpid(), optical_generation=optical_state().get("generation", 0), menu_generation=engine.menu_identity(target), current_optical_state=optical_state().get("state"))
 
 key = full_state_key()
+previous_optical_state = optical_state()
 regenerator = None
 regenerator_generation = None
 regenerator_started = None
+pending_auto_open_generation = 0
+pending_eject_home_generation = 0
 
 def request_regeneration():
     global regenerator, regenerator_generation, regenerator_started
@@ -189,10 +192,26 @@ while proc.poll() is None:
         successful = regenerator.returncode == 0
         regenerator = None
         if successful and completed_generation == int(optical_state().get("generation", 0) or 0):
+            current = optical_state(); media = optical.presentation(current); icon = install / "assets/ui" / media["icon"]
+            engine.write_live_optical_state(home, current, icon,
+                                            pending_auto_open_generation, pending_eject_home_generation)
+            if completed_generation == pending_auto_open_generation:
+                pending_auto_open_generation = 0
+            if completed_generation == pending_eject_home_generation:
+                pending_eject_home_generation = 0
             start_enrichment()
     newest = full_state_key()
     if newest!=key:
         key = newest
+        current = optical_state()
+        auto_generation, eject_generation = engine.optical_navigation_event(previous_optical_state, current)
+        previous_optical_state = current
+        if auto_generation:
+            pending_auto_open_generation = auto_generation
+            pending_eject_home_generation = 0
+        elif eject_generation:
+            pending_auto_open_generation = 0
+            pending_eject_home_generation = eject_generation
         request_regeneration()
         if runtime:
             runtime.log(home, "ui", "OPTICAL_GENERATION_DEFERRED", flex_pid=proc.pid, action_type="STATE_UPDATE", source_page="ANY", destination_page="CURRENT", optical_generation=optical_state().get("generation", 0))

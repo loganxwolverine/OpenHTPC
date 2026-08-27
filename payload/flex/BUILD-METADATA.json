@@ -1,14 +1,14 @@
 {
-  "binary_sha256": "182e57ef9d01355a3612d4a1b27f143bff7b43de7be12805c6a118d02c960064",
-  "build_id": "d1fc30568a5d6b91e01fa9f942c759dcc766c579",
+  "binary_sha256": "00f98c8d1b2a6d9a59ddce08fec640861c766d9b34663a1f4c5f2d00e44a522d",
+  "build_id": "57f639a563920fb39912b7268e6a016e272e5ad7",
   "compile_sdl": "2.32.70",
   "compile_sdl_image": "2.8.12",
   "compile_sdl_ttf": "2.24.0",
   "compiler": "cc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2)",
-  "flex_source_fingerprint": "9b4a1fa88bf44b3bda95ec123197b7e3cdf02f84dc27ebc3f069ab1ff8281183",
+  "flex_source_fingerprint": "66976989237170eb684c2295bca1f12fce9d3bb7745350c9d2d7dfcda07fa9d5",
   "product_version": "1.1.1-rc3",
   "schema": 1,
-  "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-tmdb-real-lower-dock-dev10",
+  "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-optical-disc-auto-open-ux-dev11",
   "target": "Fedora 44 x86_64",
   "timestamp_policy": "release metadata deterministic; no wall-clock timestamp"
 }

@@ -442,7 +442,22 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
     return "\n".join(f"Entry{i}={ini_value(label)};{icon};{command}" for i, (label, icon, command) in enumerate(entries, 1))
 
 
-def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Path) -> pathlib.Path:
+def optical_navigation_event(previous: dict, current: dict) -> tuple[int, int]:
+    """Return generation-scoped (auto-open, eject-home) requests for a live transition."""
+    empty = {"DRIVE_PRESENT_NO_MEDIA", "NO_OPTICAL_DRIVE", "DETECTION_INDETERMINATE"}
+    old = _optical_model.canonical_state(previous); new = _optical_model.canonical_state(current)
+    generation = int(current.get("generation", 0) or 0)
+    if generation <= int(previous.get("generation", 0) or 0):
+        return (0, 0)
+    if old in empty and new not in empty:
+        return (generation, 0)
+    if old not in empty and new in {"DRIVE_PRESENT_NO_MEDIA", "NO_OPTICAL_DRIVE"}:
+        return (0, generation)
+    return (0, 0)
+
+
+def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Path,
+                             auto_open_generation: int = 0, eject_home_generation: int = 0) -> pathlib.Path:
     state = optical.get("state"); canonical = _optical_model.canonical_state(optical)
     labels = {"NO_DRIVE":"LECTEUR · AUCUN LECTEUR", "EMPTY":"LECTEUR · Aucun disque",
               "INITIALIZING":"LECTEUR · Initialisation du disque…", "UNKNOWN_DISC":"LECTEUR · DISQUE INCONNU",
@@ -450,20 +465,17 @@ def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Pa
     label = optical_home_label(optical) if canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"} else labels.get(state, "LECTEUR · ÉTAT INCONNU")
     target = home / ".local/state/openhtpc/flex-optical-state"
     target.parent.mkdir(parents=True, exist_ok=True)
-    auto_open = 0
-    if state == "DVD" and optical.get("disc_id"):
-        cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json"
-        cached_meta = load_optional_object(cache_target)
-        if (cached_meta.get("status") == "PASS" and cached_meta.get("tmdb_id")) or (cached_meta.get("status") == "AMBIGUOUS" and cached_meta.get("candidates")):
-            auto_open = 1
+    generation = int(optical.get("generation", 0) or 0)
+    auto_open_generation = generation if int(auto_open_generation or 0) == generation else 0
+    eject_home_generation = generation if int(eject_home_generation or 0) == generation else 0
     fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             title = normalized_disc_title(optical.get("tmdb_title") or optical.get("disc_title") or optical.get("volume_label"))
             stream.write(ini_value(label) + "\n" + str(icon) + "\n" + str(state or "UNKNOWN") + "\n" +
                          str(optical.get("device") or "") + "\n" + ini_value(title) + "\n" +
-                         str(int(optical.get("generation", 0) or 0)) + "\n" +
-                         str(auto_open) + "\n")
+                         str(generation) + "\n" + str(auto_open_generation) + "\n" +
+                         str(eject_home_generation) + "\n")
             stream.flush(); os.fsync(stream.fileno())
         os.chmod(temporary, 0o600); os.replace(temporary, target)
     finally:

@@ -1539,9 +1539,12 @@ static void refresh_live_optical_state(void)
         fgets(disc_title, sizeof(disc_title), stream) == NULL || fgets(generation, sizeof(generation), stream) == NULL) {
         fclose(stream); return;
     }
-    char auto_open_str[32] = "0";
+    char auto_open_str[32] = "0", eject_home_str[32] = "0";
     if (fgets(auto_open_str, sizeof(auto_open_str), stream) != NULL) {
         auto_open_str[strcspn(auto_open_str, "\r\n")] = 0;
+    }
+    if (fgets(eject_home_str, sizeof(eject_home_str), stream) != NULL) {
+        eject_home_str[strcspn(eject_home_str, "\r\n")] = 0;
     }
     fclose(stream); title[strcspn(title, "\r\n")] = 0; icon_path[strcspn(icon_path, "\r\n")] = 0;
     state_name[strcspn(state_name, "\r\n")] = 0; device[strcspn(device, "\r\n")] = 0;
@@ -1568,20 +1571,25 @@ static void refresh_live_optical_state(void)
             }
         }
         static int last_auto_opened_generation = -1;
+        static int last_eject_home_generation = -1;
         int gen_num = atoi(generation);
-        int auto_open = atoi(auto_open_str);
-        if (strcmp(state_name, "DVD") != 0) {
-            last_auto_opened_generation = -1;
-        } else if (auto_open == 1 && gen_num > 0 && last_auto_opened_generation != gen_num) {
-            if (current_menu == config.first_menu) {
-                last_auto_opened_generation = gen_num;
+        int auto_open_generation = atoi(auto_open_str);
+        int eject_home_generation = atoi(eject_home_str);
+        if (auto_open_generation == gen_num && gen_num > 0 && last_auto_opened_generation != gen_num) {
+            last_auto_opened_generation = gen_num;
+            if (!(state.application_running || state.application_launching) && current_menu == default_menu) {
                 Menu *disc = get_menu("DISQUE");
                 if (disc != NULL) {
                     if (disc->back == NULL)
-                        disc->back = (config.first_menu != NULL) ? config.first_menu : default_menu;
+                        disc->back = default_menu;
                     load_menu(disc, false, true);
                 }
             }
+        }
+        if (eject_home_generation == gen_num && gen_num > 0 && last_eject_home_generation != gen_num) {
+            last_eject_home_generation = gen_num;
+            if (!(state.application_running || state.application_launching) && is_disc_sheet())
+                load_menu(default_menu, false, true);
         }
     } else {
         if (new_icon != NULL) SDL_DestroyTexture(new_icon);
@@ -2696,8 +2704,8 @@ int main(int argc, char *argv[])
         }
 
         // Post-event loop updates
+        refresh_live_optical_state();
         if (!(state.application_running || state.application_launching)) {
-            refresh_live_optical_state();
             refresh_disc_sheet_background();
             refresh_current_menu_background_and_entries();
             if (gamepads != NULL)

@@ -1,5 +1,14 @@
 # Changelog
 
+## OPENHTPC optical disc auto-open UX — 1.1.3-dev11
+
+- Auto-opens the optical disc sheet only for a new insertion observed while
+  HOME is active, using generation-scoped navigation requests.
+- Returns to HOME when the active disc sheet observes eject, while SYSTÈME,
+  MEDIA, settings and playback retain their current navigation authority.
+- Preserves startup with an already-present disc, TMDb enrichment and the
+  existing ambiguous-result picker without replaying stale navigation.
+
 ## OPENHTPC TMDb picker close and media logo — 1.1.3-dev7
 
 - Extends the existing presentation signature to generation-scoped optical
