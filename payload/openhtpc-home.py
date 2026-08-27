@@ -60,7 +60,10 @@ if len(sys.argv) >= 2 and sys.argv[1] == "--regenerate-only":
     target = pathlib.Path(sys.argv[2])
     generation = int(sys.argv[3])
     state = engine.evaluate(home)
-    changed = engine.write_flex_config(target, home, state["sources"], expected_optical_generation=generation)
+    changed = engine.write_flex_config(
+        target, home, state["sources"], expected_optical_generation=generation,
+        media_generation=engine.active_media_generation(home),
+    )
     if changed and runtime:
         st = optical_state()
         runtime.log(home, "ui", "MENU_GENERATED", menu_generation=engine.menu_identity(target), optical_generation=st.get("generation", 0), current_optical_state=st.get("state"))

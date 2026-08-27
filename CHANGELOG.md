@@ -1,5 +1,15 @@
 # Changelog
 
+## OPENHTPC MEDIA action-token runtime binding — 1.1.3-dev12
+
+- Keeps the authoritative MEDIA generation stable across optical-only menu
+  regeneration, so unchanged dynamic `MEDIA_<hash>` pages and their secure
+  action manifest retain the same token binding.
+- Continues to advance MEDIA generation for genuine MEDIA graph generation;
+  stale, unknown, malformed and wrong-page tokens remain rejected.
+- The captured `current_page=MEDIA` value was a pending diagnostic default,
+  not evidence that Flex published generic MEDIA instead of a hashed page.
+
 ## OPENHTPC optical disc auto-open UX — 1.1.3-dev11
 
 - Auto-opens the optical disc sheet only for a new insertion observed while

@@ -212,6 +212,13 @@ def current_media_manifest(home: pathlib.Path) -> pathlib.Path:
     return home/".local/state/openhtpc/media-actions/current.json"
 
 
+def active_media_generation(home: pathlib.Path) -> str | None:
+    """Return the generation bound to the authoritative active MEDIA manifest."""
+    model = load_optional_object(current_media_manifest(home))
+    generation = model.get("manifest_generation")
+    return generation if isinstance(generation, str) and generation else None
+
+
 def write_media_model_state(home: pathlib.Path, generation: str, sources: list[dict], actions: dict[str, dict], target: pathlib.Path | None = None) -> pathlib.Path:
     target=target or current_media_manifest(home);target.parent.mkdir(parents=True,exist_ok=True)
     fd,temporary=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
@@ -620,7 +627,7 @@ def canonical_flex_config_path(home: pathlib.Path | None = None) -> pathlib.Path
     return home / ".config/openhtpc/flex-v1.ini"
 
 
-def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None) -> bool:
+def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None, media_generation: str | None = None) -> bool:
     install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
     icon_dir = install / "assets/ui"
@@ -745,7 +752,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         try: menu_generation = int(counter.read().strip() or "0") + 1
         except ValueError: menu_generation = 1
         counter.seek(0); counter.truncate(); counter.write(str(menu_generation)); counter.flush(); os.fsync(counter.fileno())
-    media_generation=f"{ui_generation_id}-{menu_generation}"
+    media_generation=media_generation or f"{ui_generation_id}-{menu_generation}"
     manifest_candidate=path.with_name(path.name+".media-actions.json")
     _media_root, media_sections = media_menu_sections(home, sources, media_icon, media_generation,manifest_candidate)
     content = f"""# OPENHTPC menu_generation={menu_generation} ui_generation_id={ui_generation_id} optical_generation={optical_generation} state_hash={state_hash}
