@@ -29,8 +29,21 @@ def _normalize_title(text: str) -> str:
 def clean_disc_title(query: str) -> str:
     if not query: return ""
     s = query.replace("_", " ").strip()
-    s = re.sub(r"(?i)(?:[ _.-]+)(?:DVD|DISC|DISK)\s*[12]\s*$", "", s).strip()
+    suffix = r"(?:16\s*[/ :]\s*9|4\s*[/ :]\s*3|PAL|NTSC|WIDESCREEN|FULLSCREEN|(?:DVD|DISC|DISK)\s*[12])"
+    while True:
+        cleaned = re.sub(rf"(?i)(?:[ _.-]+){suffix}\s*$", "", s).strip()
+        if cleaned == s: break
+        s = cleaned
     return s or query
+
+def validate_year(value: str | int | None) -> int | None:
+    """Return an optional plausible movie year without treating it as media truth."""
+    text = str(value or "").strip()
+    if not text: return None
+    if not re.fullmatch(r"\d{4}", text): raise ValueError("INVALID_MOVIE_YEAR")
+    year = int(text)
+    if year < 1888 or year > 2100: raise ValueError("INVALID_MOVIE_YEAR")
+    return year
 
 def is_generic_query(query: str) -> bool:
     cleaned = (query or "").lower().strip()
@@ -138,7 +151,9 @@ def lookup(home: pathlib.Path, query: str, opener=urllib.request.urlopen, durati
     is_v4 = token.startswith("ey")
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"} if is_v4 else {"Accept": "application/json"}
     api_param = "" if is_v4 else f"api_key={token}&"
+    year = validate_year(year)
     url = f"https://api.themoviedb.org/3/search/movie?{api_param}language=fr-FR&query=" + urllib.parse.quote(clean_query)
+    if year is not None: url += "&year=" + str(year)
     request = urllib.request.Request(url, headers=headers)
     try:
         with opener(request, timeout=8) as response:

@@ -1,0 +1,10 @@
+Candidate is delivered to ~/OPENHTPC-VALIDATOR/inbox on the Ryzen validator.
+
+Apply exactly once with:
+
+  ~/OPENHTPC-VALIDATOR/openhtpc-validator apply-latest
+
+OPENHTPC remains stopped after apply. Steve starts it manually and validates:
+CITY OF ANGEL 16/9 zero-result recovery, confirmation and reinsertion reuse;
+the unchanged Hancock ambiguity picker; Colombiana automatic enrichment; and
+QUITTER to KDE followed by a manual OPENHTPC restart.

@@ -371,6 +371,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
                 cached_meta = {}
 
     meta_status = cached_meta.get("status")
+    recovery = install / "openhtpc-tmdb-recovery"
     if meta_status == "AMBIGUOUS":
         disc_id = str(optical.get("disc_id") or "")
         generation = int(optical.get("generation", 0) or 0)
@@ -428,6 +429,8 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             entries.append(("CONFIGURER TMDb", tmdb_icon, f":fork {install/'openhtpc-configure-tmdb'}"))
         elif meta_status in {"UNAVAILABLE", "AUTH_ERROR", "AUTH_FAILED"}:
             entries.append(("RECONNECTER TMDb", tmdb_icon, f":fork {install/'openhtpc-configure-tmdb'}"))
+        elif meta_status == "NO_RESULT":
+            entries.append(("RECHERCHE MANUELLE", tmdb_icon, f":fork {recovery}"))
 
     if state == "DVD_VIDEO":
         presentation = "PURE"

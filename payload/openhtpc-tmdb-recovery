@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Generation-bound manual TMDb recovery using the qualified kdialog input path."""
+from __future__ import annotations
+import argparse, importlib.util, json, os, pathlib, subprocess
+
+def load(path, name):
+    spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+def current_state(home):
+    try:return json.loads((home/".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError):return {}
+
+def same_identity(current, expected):
+    if int(current.get("generation",0) or 0)!=int(expected.get("generation",0) or 0):return False
+    if str(current.get("canonical_state") or "")!=str(expected.get("canonical_state") or ""):return False
+    disc_id=str(expected.get("disc_id") or "")
+    return not disc_id or str(current.get("disc_id") or "")==disc_id
+
+def dialog(args, capture=False):
+    return subprocess.run(["kdialog",*args],text=True,capture_output=capture,check=False)
+
+def candidate_text(candidate):
+    title=str(candidate.get("title") or "Film").strip();year=str(candidate.get("release_date") or "")[:4]
+    runtime=candidate.get("runtime");bits=[year] if year else []
+    if isinstance(runtime,(int,float)) and runtime>0:bits.append(f"{int(runtime)} min")
+    overview=str(candidate.get("overview") or "").strip()
+    return title+("\n"+" • ".join(bits) if bits else "")+("\n\n"+overview[:420] if overview else "")
+
+def choose_candidate(data, run_dialog=dialog):
+    if data.get("status")=="PASS":return data
+    args=["--title","OPENHTPC — Recherche TMDb","--menu","RÉSULTATS — Choisissez un film :"];by_id={}
+    for candidate in data.get("candidates") or []:
+        cid=str(candidate.get("tmdb_id") or candidate.get("id") or "");by_id[cid]=candidate
+        year=str(candidate.get("release_date") or "")[:4];args.extend([cid,f"{candidate.get('title') or 'Film'}  ·  {year}".rstrip("  ·  ")])
+    selected=run_dialog(args,True)
+    return by_id.get(selected.stdout.strip()) if selected.returncode==0 else None
+
+def interactive(home, install, run_dialog=dialog, opener=None):
+    tmdb=load(install/"openhtpc-tmdb.py","recovery_tmdb");expected=current_state(home)
+    if not expected or not expected.get("generation"):return 1
+    raw=str(expected.get("disc_title") or expected.get("volume_label") or "");proposed=tmdb.clean_disc_title(raw)
+    while same_identity(current_state(home),expected):
+        entered=run_dialog(["--title","OPENHTPC — Recherche TMDb","--inputbox","AUCUNE CORRESPONDANCE TROUVÉE\n\nNous n'avons pas pu identifier automatiquement ce disque.\n\nTitre du film :",proposed],True)
+        if entered.returncode:return 0
+        title=entered.stdout.strip()
+        if not title:
+            run_dialog(["--title","OPENHTPC — Recherche TMDb","--error","Le titre du film ne peut pas être vide."]);continue
+        year_entry=run_dialog(["--title","OPENHTPC — Recherche TMDb","--inputbox","Année — facultatif :",""],True)
+        if year_entry.returncode:return 0
+        try:year=tmdb.validate_year(year_entry.stdout)
+        except ValueError:
+            run_dialog(["--title","OPENHTPC — Recherche TMDb","--error","Année invalide. Entrez quatre chiffres plausibles ou laissez vide."]);proposed=title;continue
+        if not same_identity(current_state(home),expected):return 1
+        data=tmdb.lookup(home,title,year=year,**({"opener":opener} if opener else {}));status=data.get("status")
+        if status=="NO_RESULT":
+            run_dialog(["--title","OPENHTPC — Recherche TMDb","--error","AUCUNE CORRESPONDANCE TROUVÉE\nModifiez le titre ou l'année puis réessayez."]);proposed=title;continue
+        if status in {"UNAVAILABLE","AUTH_FAILED","NOT_CONFIGURED"}:
+            run_dialog(["--title","OPENHTPC — Recherche TMDb","--error","RECHERCHE IMPOSSIBLE\nLe réseau, le service TMDb ou sa configuration est indisponible."]);return 2
+        while True:
+            candidate=choose_candidate(data,run_dialog)
+            if candidate is None:break
+            confirm=run_dialog(["--title","OPENHTPC — Confirmation TMDb","--yesno","EST-CE BIEN CE FILM ?\n\n"+candidate_text(candidate),"--yes-label","OUI, UTILISER CE FILM","--no-label","NON / AUTRES RÉSULTATS"])
+            if confirm.returncode:
+                if status=="AMBIGUOUS":continue
+                break
+            if not same_identity(current_state(home),expected):return 1
+            cid=int(candidate.get("tmdb_id") or candidate.get("id") or 0);guard=lambda:same_identity(current_state(home),expected)
+            result=tmdb.commit_binding(home,expected,cid,title=raw,commit_guard=guard,**({"opener":opener} if opener else {}))
+            if result.get("status")!="PASS":return 1
+            view=install/"openhtpc-disc-view.py"
+            if view.is_file():subprocess.run([str(view),"--home",str(home),"--generation",str(expected["generation"])],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False)
+            return 0
+        proposed=title
+    return 1
+
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument("--home",type=pathlib.Path);args=parser.parse_args()
+    home=args.home or pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()));install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"))
+    return interactive(home,install)
+if __name__=="__main__":raise SystemExit(main())

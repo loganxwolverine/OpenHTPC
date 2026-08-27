@@ -1,5 +1,14 @@
 # Changelog
 
+# OPENHTPC Optical TMDb search recovery UX — 1.1.3-dev13
+
+- Conservatively removes recognized technical suffixes from TMDb search queries
+  while preserving the physical label and optical identity unchanged.
+- Adds a generation-bound manual title and optional-year recovery path only after
+  a genuine automatic `NO_RESULT`, with explicit confirmation before persistence.
+- Reuses the existing physical-disc cache so confirmed DVDs resolve after reinsertion.
+- Preserves the qualified automatic ambiguity picker without new entries or layout changes.
+
 ## OPENHTPC MEDIA action-token runtime binding — 1.1.3-dev12
 
 - Keeps the authoritative MEDIA generation stable across optical-only menu

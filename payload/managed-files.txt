@@ -162,6 +162,7 @@ openhtpc-system-page
 openhtpc-system-view
 openhtpc-theme.py
 openhtpc-tmdb.py
+openhtpc-tmdb-recovery
 openhtpc-tmdb-management.py
 openhtpc-ui.py
 openhtpc-update-managed-files
