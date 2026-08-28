@@ -53,17 +53,40 @@ def refresh_system(home: pathlib.Path, install: pathlib.Path) -> None:
     # Trigger session engine config regeneration directly and fast
     engine_script = install / "openhtpc-session-engine.py"
     flex_config = home / ".config/openhtpc/flex-v1.ini"
-    if engine_script.is_file() and flex_config.parent.is_dir():
+    if not engine_script.is_file() or not flex_config.parent.is_dir():
+        raise RuntimeError("MEDIA_PUBLICATION_UNAVAILABLE")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("session_engine", engine_script)
+    if not spec or not spec.loader:
+        raise RuntimeError("MEDIA_PUBLICATION_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    state = module.evaluate(home)
+    if not module.publish_flex_config(flex_config, home, state.get("sources", []), install):
+        raise RuntimeError("MEDIA_PUBLICATION_FAILED")
+
+
+def commit_config_and_refresh(home: pathlib.Path, install: pathlib.Path, config: dict) -> None:
+    """Commit source configuration and generated MEDIA authority as one transaction."""
+    target=home/".config/openhtpc/user-config.json"
+    previous=target.read_bytes() if target.is_file() else None
+    try:
+        save_config(home,config)
+        refresh_system(home,install)
+    except Exception as publication_error:
         try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("session_engine", engine_script)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                state = module.evaluate(home)
-                module.write_flex_config(flex_config, home, state.get("sources", []))
-        except Exception:
-            pass
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                fd,tmp=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+                try:
+                    with os.fdopen(fd,"wb") as stream:stream.write(previous);stream.flush();os.fsync(stream.fileno())
+                    os.chmod(tmp,0o600);os.replace(tmp,target)
+                finally:
+                    if os.path.exists(tmp):os.unlink(tmp)
+        except Exception as rollback_error:
+            raise RuntimeError("MEDIA_SOURCE_TRANSACTION_ROLLBACK_FAILED") from rollback_error
+        raise RuntimeError("MEDIA_SOURCE_PUBLICATION_FAILED") from publication_error
 
 
 def list_sources(home: pathlib.Path) -> list[dict]:
@@ -117,8 +140,8 @@ def add_source(home: pathlib.Path, install: pathlib.Path, path_str: str) -> tupl
     sources.append(str(resolved))
     config["local_media_sources"] = sources
     config["configuration_completed"] = True
-    save_config(home, config)
-    refresh_system(home, install)
+    try: commit_config_and_refresh(home,install,config)
+    except Exception as exc:return False,str(exc)
     return True, "SOURCE_AJOUTEE"
 
 
@@ -157,8 +180,8 @@ def remove_source(home: pathlib.Path, install: pathlib.Path, target_str: str) ->
         return False, "SOURCE_NON_TROUVEE"
 
     config["local_media_sources"] = new_sources
-    save_config(home, config)
-    refresh_system(home, install)
+    try: commit_config_and_refresh(home,install,config)
+    except Exception as exc:return False,str(exc)
     return True, "SOURCE_RETIREE"
 
 

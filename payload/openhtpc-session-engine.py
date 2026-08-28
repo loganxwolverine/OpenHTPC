@@ -979,6 +979,42 @@ def activate_media_manifest(config_path:pathlib.Path,home:pathlib.Path)->pathlib
     return target
 
 
+def publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None)->bool:
+    """Publish one MEDIA generation at the synchronous Flex action boundary."""
+    path.parent.mkdir(parents=True,exist_ok=True)
+    fd,name=tempfile.mkstemp(prefix=path.name+".publish.",dir=path.parent);os.close(fd);staged=pathlib.Path(name)
+    candidate=path.with_name(path.name+".media-actions.json");staged_candidate=staged.with_name(staged.name+".media-actions.json")
+    current=current_media_manifest(home);targets=(path,candidate,current)
+    previous={target:(target.read_bytes() if target.is_file() else None) for target in targets}
+    def replace_bytes(target:pathlib.Path,data:bytes)->None:
+        target.parent.mkdir(parents=True,exist_ok=True);fd,tmp=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+        try:
+            with os.fdopen(fd,"wb") as stream:stream.write(data);stream.flush();os.fsync(stream.fileno())
+            os.chmod(tmp,0o600);os.replace(tmp,target)
+        finally:
+            if os.path.exists(tmp):os.unlink(tmp)
+    try:
+        staged.unlink()
+        if not write_flex_config(staged,home,sources,install):return False
+        model=load_object(staged_candidate,"media_actions","ACTION_MANIFEST_MISSING","ACTION_MANIFEST_INVALID")
+        if model.get("schema")!=1 or not isinstance(model.get("items"),dict):raise GateError("media_actions","ACTION_MANIFEST_INVALID","Le manifeste MEDIA candidat est invalide.")
+        replace_bytes(candidate,staged_candidate.read_bytes())
+        activate_media_manifest(path,home)
+        replace_bytes(path,staged.read_bytes())
+        return True
+    except Exception:
+        for target,data in previous.items():
+            if data is None:
+                try:target.unlink()
+                except OSError:pass
+            else:replace_bytes(target,data)
+        raise
+    finally:
+        for target in (staged,staged_candidate):
+            try:target.unlink()
+            except OSError:pass
+
+
 def load_optional_object(path: pathlib.Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
