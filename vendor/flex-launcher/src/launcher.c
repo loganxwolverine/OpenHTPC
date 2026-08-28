@@ -44,6 +44,7 @@ static void execute_command(const char *command);
 static void refresh_live_optical_state(void);
 static void refresh_disc_sheet_background(void);
 static void reload_menu_section(Menu *menu);
+static void reload_media_menu_sections(void);
 static void refresh_current_menu_background_and_entries(void);
 static void poll_gamepad(void);
 static void init_gamepad(Gamepad **gamepad, int device_index);
@@ -1481,11 +1482,84 @@ static void reload_menu_section(Menu *menu)
     is_reloading = false;
 }
 
+static bool is_media_menu_name(const char *name)
+{
+    return name != NULL && (!strcmp(name, "MEDIA_ROOT") || !strncmp(name, "MEDIA_", 6));
+}
+
+static bool config_has_menu_section(const char *name)
+{
+    if (name == NULL || config.config_file_path == NULL) return false;
+    FILE *stream = fopen(config.config_file_path, "r");
+    if (stream == NULL) return false;
+    char line[2048];
+    bool found = false;
+    while (fgets(line, sizeof(line), stream) != NULL) {
+        char *start = line;
+        while (*start == ' ' || *start == '\t') start++;
+        if (*start != '[') continue;
+        char *end = strchr(start, ']');
+        if (end == NULL) continue;
+        *end = '\0';
+        if (!strcmp(start + 1, name)) {
+            found = true;
+            break;
+        }
+    }
+    fclose(stream);
+    return found;
+}
+
+static bool read_media_generation(char *generation, size_t generation_size)
+{
+    if (generation == NULL || generation_size == 0 || config.config_file_path == NULL) return false;
+    FILE *stream = fopen(config.config_file_path, "r");
+    if (stream == NULL) return false;
+    char line[2048];
+    bool found = false;
+    if (fgets(line, sizeof(line), stream) != NULL) {
+        const char *marker = strstr(line, "media_generation=");
+        if (marker != NULL) {
+            marker += strlen("media_generation=");
+            size_t length = strcspn(marker, " \t\r\n");
+            if (length > 0 && length < generation_size) {
+                memcpy(generation, marker, length);
+                generation[length] = '\0';
+                found = true;
+            }
+        }
+    }
+    fclose(stream);
+    return found;
+}
+
+/* A live MEDIA graph commit replaces the token generation for every MEDIA
+ * descendant, including menus which Flex loaded lazily before the mutation.
+ * Refresh the complete cached MEDIA family, not only the currently visible
+ * section.  Sections removed by the new graph are made empty so no stale
+ * action remains selectable through an existing back/menu pointer. */
+static void reload_media_menu_sections(void)
+{
+    bool current_removed = false;
+    for (Menu *menu = config.first_menu; menu != NULL; menu = menu->next) {
+        if (!is_media_menu_name(menu->name)) continue;
+        if (config_has_menu_section(menu->name)) {
+            reload_menu_section(menu);
+        } else {
+            if (menu == current_menu) current_removed = true;
+            free_menu_entries(menu);
+        }
+    }
+    if (current_removed)
+        load_menu_by_name("MEDIA_ROOT", false, true);
+}
+
 static void refresh_current_menu_background_and_entries(void)
 {
     static ino_t observed_cfg_inode = 0;
     static time_t observed_cfg_mtime = 0;
     static off_t observed_cfg_size = 0;
+    static char observed_media_generation[256] = "";
     static ino_t observed_bg_inode = 0;
     static off_t observed_bg_size = 0;
 
@@ -1514,7 +1588,20 @@ static void refresh_current_menu_background_and_entries(void)
                 observed_cfg_inode = cfg_info.st_ino;
                 observed_cfg_mtime = cfg_info.st_mtime;
                 observed_cfg_size = cfg_info.st_size;
-                reload_menu_section(current_menu);
+                char media_generation[256] = "";
+                bool has_media_generation = read_media_generation(media_generation, sizeof(media_generation));
+                bool media_generation_changed = (
+                    has_media_generation
+                    && observed_media_generation[0] != '\0'
+                    && strcmp(media_generation, observed_media_generation) != 0
+                );
+                if (has_media_generation) {
+                    snprintf(observed_media_generation, sizeof(observed_media_generation), "%s", media_generation);
+                }
+                if (media_generation_changed)
+                    reload_media_menu_sections();
+                else
+                    reload_menu_section(current_menu);
             }
         }
     }

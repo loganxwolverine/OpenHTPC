@@ -1,12 +1,12 @@
 # Flex Launcher provenance
 
-The distributed `payload/flex/bin/flex-launcher` is the dev37 OPENHTPC Flex
+The distributed `payload/flex/bin/flex-launcher` is the Dev16 OPENHTPC Flex
 binary recorded by `payload/flex/BUILD-METADATA.json`.
 
 - Upstream: `complexlogic/flex-launcher`
 - Upstream commit: `94a7a273fe8124df51e63058816526b66bbc9538`
-- OPENHTPC adaptation: `openhtpc-1.1-final-ui-dev37`
-- Binary SHA256: `b2e101c87a1c5c3d468e5706163ffe6408ed1b5802ac62dacbcb3a06b4945042`
+- OPENHTPC adaptation: `openhtpc-running-flex-media-generation-sync-dev16`
+- Binary SHA256: `351fbe72572fa719fd325899e6ab3703cf42de9a62732904c80555daf236448c`
 - Target: Fedora 44 x86_64
 
 The OPENHTPC adaptation retains the launcher/menu/input engine and includes the
@@ -19,7 +19,11 @@ Dev36 preserves that geometry and restores the approved entry artwork inside
 the six playback action cards.
 Dev37 vertically separates those icons from their labels while keeping the
 approved bottom dock bounds unchanged.
+Dev16 adds generation-driven invalidation of every cached MEDIA descendant
+after a committed live source mutation. The authoritative Flex process is
+retained; stale or removed MEDIA sections cannot remain selectable.
 
 Flex Launcher is distributed under The Unlicense. NanoSVG/NanoSVGRast notices
-for code incorporated into the binary are provided separately. This candidate
-does not rebuild or alter the qualified dev27 binary.
+for code incorporated into the binary are provided separately. Dev16 rebuilds
+the shipped ELF from the recorded vendor source and records its exact hash and
+build ID in `payload/flex/BUILD-METADATA.json`.

@@ -758,7 +758,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     media_generation=media_generation or f"{ui_generation_id}-{menu_generation}"
     manifest_candidate=path.with_name(path.name+".media-actions.json")
     _media_root, media_sections = media_menu_sections(home, sources, media_icon, media_generation,manifest_candidate)
-    content = f"""# OPENHTPC menu_generation={menu_generation} ui_generation_id={ui_generation_id} optical_generation={optical_generation} state_hash={state_hash}
+    content = f"""# OPENHTPC menu_generation={menu_generation} ui_generation_id={ui_generation_id} media_generation={media_generation} optical_generation={optical_generation} state_hash={state_hash}
 [General]
 DefaultMenu=OPENHTPC
 VSync=true
