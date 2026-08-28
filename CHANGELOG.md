@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC 1.1.3 Release Candidate 1 — 1.1.3-rc1
+
+- Promotes the physically qualified Dev16 implementation without functional product changes.
+- Records consistent RC identity across source, installer, runtime provenance, validator metadata, and artifact tooling.
+- Adds bounded RC1 release notes and completed update/fresh-install qualification evidence.
+
 # OPENHTPC running Flex MEDIA generation synchronization — 1.1.3-dev16
 
 - Synchronizes every cached MEDIA descendant when a committed live source mutation changes the authoritative MEDIA generation.
