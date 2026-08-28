@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.1.3-dev14"
+readonly OPENHTPC_VERSION="1.1.3-dev15"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

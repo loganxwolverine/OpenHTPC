@@ -1,5 +1,13 @@
 # Changelog
 
+# OPENHTPC MEDIA live refresh manifest activation — 1.1.3-dev15
+
+- Publishes live MEDIA source configuration, Flex graph, candidate manifest, and
+  authoritative action manifest as one rollback-safe transaction.
+- Propagates publication failures truthfully and restores the exact prior user
+  configuration and MEDIA generation without weakening token validation.
+- Preserves Dev12 optical-only MEDIA generation binding and all Dev14 runtime behavior.
+
 # OPENHTPC update runtime regeneration — 1.1.3-dev14
 
 - Regenerates version-derived runtime and MPV configuration during updates from
