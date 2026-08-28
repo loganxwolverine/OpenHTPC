@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC running Flex MEDIA generation synchronization — 1.1.3-dev16
+
+- Synchronizes every cached MEDIA descendant when a committed live source mutation changes the authoritative MEDIA generation.
+- Retains the single authoritative Flex process and redirects removed current descendants to MEDIA_ROOT.
+- Preserves Dev15 atomic config/Flex/manifest publication and Dev12 optical-only generation preservation.
+- Rebuilds and records the shipped Flex ELF from the Dev16 vendor source.
+
 # OPENHTPC MEDIA live refresh manifest activation — 1.1.3-dev15
 
 - Publishes live MEDIA source configuration, Flex graph, candidate manifest, and
