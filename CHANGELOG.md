@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC NVIDIA native foundation — 1.1.3-dev17
+
+- Characterizes the qualified Intel/AMD VA-API and Vulkan runtime paths without changing them.
+- Tracks Capability Snapshot provenance in new Hardware Passports and generated runtimes.
+- Reports stale and legacy passports without fabricating compatibility.
+- Fixes the public initial setup argument contract.
+
 # OPENHTPC 1.1.3 Release Candidate 1 — 1.1.3-rc1
 
 - Promotes the physically qualified Dev16 implementation without functional product changes.
