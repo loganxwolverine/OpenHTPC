@@ -103,7 +103,7 @@ class AmdBaseRuntimeP0(unittest.TestCase):
     def test_vendor_veto_is_absent_but_capability_gates_remain(self):
         source = GENERATOR.read_text(encoding="utf-8")
         self.assertNotIn('backend.get("vendor") != "intel"', source)
-        for marker in ('backend.get("status") != "observed"', 'backend.get("decode_api") != "vaapi"',
+        for marker in ('backend.get("status") != "observed"', 'decode_api not in {"vaapi", "nvdec"}',
                        'backend.get("render_api") != "vulkan"', 'not processing.get("render_node")',
                        'display_path == "offload_pending"'):
             self.assertIn(marker, source)

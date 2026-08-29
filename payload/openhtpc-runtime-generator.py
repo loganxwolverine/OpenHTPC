@@ -51,14 +51,17 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
     else:
         display_path = "pending"
 
-    required_options = (
-        "vo", "gpu-api", "hwdec", "vaapi-device", "include", "scale", "dscale",
+    common_options = (
+        "vo", "gpu-api", "hwdec", "include", "scale", "dscale",
         "cscale", "dither", "dither-depth", "scaler-resizes-only",
         "correct-downscaling", "linear-downscaling", "sigmoid-upscaling",
         "target-colorspace-hint", "gamut-mapping-mode",
     )
+    decode_api = backend.get("decode_api")
+    required_options = common_options + (("vaapi-device",) if decode_api == "vaapi" else ())
+    required_values = ("gpu-next", "vulkan", decode_api) if decode_api in {"vaapi", "nvdec"} else ("gpu-next", "vulkan")
     options_available = all(re.search(rf"^ --{re.escape(name)}\s", options, re.MULTILINE) for name in required_options)
-    values_available = all(token in values for token in ("gpu-next", "vulkan", "vaapi"))
+    values_available = all(token in values for token in required_values)
     reference_values_available = all(
         re.search(rf"^ --{name}\s+.*\b{re.escape(value)}\b", options, re.MULTILINE)
         for name, value in (
@@ -78,9 +81,9 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
         ready, reason = False, "Le chemin entre affichage et traitement reste à valider."
     elif backend.get("status") != "observed":
         ready, reason = False, "Le backend vidéo n’est pas observé."
-    elif backend.get("decode_api") != "vaapi" or backend.get("render_api") != "vulkan":
-        ready, reason = False, "VA-API et Vulkan ne sont pas tous deux observés."
-    elif not processing.get("render_node"):
+    elif decode_api not in {"vaapi", "nvdec"} or backend.get("render_api") != "vulkan":
+        ready, reason = False, "Aucun couple décodage matériel et Vulkan pris en charge n’est observé."
+    elif decode_api == "vaapi" and not processing.get("render_node"):
         ready, reason = False, "Aucun render node fiable n’est associé au GPU de traitement."
     elif not options_available or not values_available or not reference_values_available:
         ready, reason = False, "Le MPV installé n’expose pas toutes les options requises."
@@ -88,17 +91,19 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
     pure_path.parent.mkdir(parents=True, exist_ok=True)
     provenance = f"# OPENHTPC runtime {version['version']} / {version['build_id']}\n"
     if ready:
+        backend_content = f"vo=gpu-next\ngpu-api=vulkan\nhwdec={decode_api}\n"
+        if decode_api == "vaapi":
+            backend_content += f"vaapi-device={processing['render_node']}\n"
         pure_content = (
             provenance + "# OPENHTPC Build 4 — profil PURE isolé\n"
             "# Générée depuis profile.json ; ne pas copier dans ~/.config/mpv/mpv.conf\n"
-            "vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n"
-            f"vaapi-device={processing['render_node']}\n"
+            + backend_content
         )
         reference_content = (
             provenance + "# OPENHTPC Build 4 — profil REFERENCE isolé\n"
             "# Fonctions natives MPV/libplacebo uniquement ; validation visuelle requise\n"
-            "vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n"
-            f"vaapi-device={processing['render_node']}\n"
+            + backend_content
+            +
             "scale=spline36\ndscale=mitchell\ncscale=spline36\ndither=fruit\n"
             "dither-depth=auto\nscaler-resizes-only=yes\ncorrect-downscaling=yes\n"
             "linear-downscaling=yes\nsigmoid-upscaling=yes\n"
