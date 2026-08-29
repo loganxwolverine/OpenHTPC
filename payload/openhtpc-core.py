@@ -24,6 +24,26 @@ def read_json(path: pathlib.Path) -> dict[str, Any] | None:
         return None
 
 
+def capability_provenance_state(profile: dict[str, Any], snapshot: dict[str, Any] | None) -> str:
+    """Compare decision provenance without treating legacy passports as current."""
+    if not snapshot:
+        return "SNAPSHOT_MISSING"
+    source = profile.get("capability_source")
+    if not isinstance(source, dict):
+        return "REBUILD_REQUIRED"
+    keys = ("hardware_fingerprint", "runtime_fingerprint")
+    if not all(isinstance(source.get(key), str) and source.get(key) for key in keys):
+        return "REBUILD_REQUIRED"
+    return "CURRENT" if all(source[key] == snapshot.get(key) for key in keys) else "STALE"
+
+
+def runtime_provenance_state(profile: dict[str, Any], passport_state: str) -> str:
+    if passport_state != "CURRENT":
+        return passport_state
+    source = profile.get("runtime", {}).get("generation_provenance", {}).get("capability_source")
+    return "CURRENT" if source == profile.get("capability_source") else "STALE"
+
+
 def plugin_roots(home: pathlib.Path, install: pathlib.Path) -> list[pathlib.Path]:
     return [install / "plugins", home / ".local/share/openhtpc/plugins"]
 
@@ -68,6 +88,9 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
     user = read_json(home / ".config/openhtpc/user-config.json") or {}
     optical = read_json(home / ".local/state/openhtpc/optical-current.json") or {}
     runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+    snapshot = read_json(home / ".config/openhtpc/runtime/capabilities.json")
+    passport_provenance = capability_provenance_state(profile, snapshot)
+    runtime_provenance = runtime_provenance_state(profile, passport_provenance)
     profiles = profile.get("runtime_profiles") if isinstance(profile.get("runtime_profiles"), dict) else {}
     pure = profiles.get("profiles", {}).get("PURE", {}) if isinstance(profiles.get("profiles"), dict) else {}
     pure_path = pure.get("config_path")
@@ -87,6 +110,8 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
         "VIDEO_RUNTIME_READY": runtime.get("status") == "ready" and isinstance(pure_path, str) and pathlib.Path(pure_path).is_file(),
         "AUDIO_RUNTIME_READY": runtime.get("status") == "ready",
         "HARDWARE_PASSPORT_READY": profile.get("generator", {}).get("name") == "OPENHTPC Builder",
+        "HARDWARE_PASSPORT_PROVENANCE": passport_provenance,
+        "VIDEO_RUNTIME_PROVENANCE": runtime_provenance,
         "FLEX_READY": (install / "flex/bin/flex-launcher").is_file(),
         "MEDIA_BROWSER_READY": (install / "openhtpc-media-browser.py").is_file(),
         "AUTOSTART_READY": (home / ".config/autostart/openhtpc.desktop").is_file(),
@@ -142,8 +167,8 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
     optical_status = "PASS" if optical_initialized else ("NOT_INITIALIZED" if first_run or not state.get("OPTICAL_DRIVE_PRESENT") else "INITIALIZING")
     checks_raw = [
         ("OPENHTPC Core", install.is_dir()),
-        ("Hardware Passport", state["HARDWARE_PASSPORT_READY"]),
-        ("Generated Runtime", state["VIDEO_RUNTIME_READY"] and state["AUDIO_RUNTIME_READY"]),
+        ("Hardware Passport", state["HARDWARE_PASSPORT_PROVENANCE"] if state["HARDWARE_PASSPORT_READY"] and state["HARDWARE_PASSPORT_PROVENANCE"] != "CURRENT" else state["HARDWARE_PASSPORT_READY"]),
+        ("Generated Runtime", state["VIDEO_RUNTIME_PROVENANCE"] if state["VIDEO_RUNTIME_READY"] and state["VIDEO_RUNTIME_PROVENANCE"] != "CURRENT" else state["VIDEO_RUNTIME_READY"] and state["AUDIO_RUNTIME_READY"]),
         ("Flex Launcher", state["FLEX_READY"]),
         ("Media Browser", state["MEDIA_BROWSER_READY"]),
         ("MPV executable", bool(shutil.which("mpv"))),
@@ -195,7 +220,7 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
     for label,value in checks_raw:
         status = value if isinstance(value, str) else ("PASS" if value else "FAIL")
         checks.append({"label":label,"status":status})
-        blocking |= status == "FAIL" and label != "Plasma optical suppression"
+        blocking |= status in {"FAIL", "STALE", "REBUILD_REQUIRED"} and label != "Plasma optical suppression"
         blocking |= label == "Desktop restore" and status.startswith("FAILED")
     installed = {item["plugin_id"] for item in state["plugins"]}
     optional=[]
@@ -356,5 +381,4 @@ def _video_profile_status(home: pathlib.Path, install: pathlib.Path) -> str:
         return "PURE"
     except Exception:
         return "PROFILE_UNREADABLE"
-
 

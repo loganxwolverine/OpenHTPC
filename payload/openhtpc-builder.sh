@@ -624,8 +624,10 @@ python3 - "$PROFILE_FILE" "$WORK_DIR" \
     "$ffmpeg_h264" "$ffmpeg_hevc" "$ffmpeg_av1" \
     "$has_mpeg2" "$has_h264" "$has_hevc" "$has_hevc10" "$has_vp9" "$has_av1" <<'PY'
 import datetime
+import hashlib
 import json
 import pathlib
+import platform
 import sys
 
 (profile_path, work_dir, os_name, kernel, cpu, ram, mpv, ffmpeg,
@@ -640,6 +642,25 @@ def lines(name):
     return (work / name).read_text(encoding="utf-8", errors="replace").splitlines()
 
 decision = json.loads((work / "gpu-decision.json").read_text(encoding="utf-8"))
+fingerprint_gpus = decision["gpus"]
+fingerprint_data = {
+    "gpus": [[gpu.get("vendor_id"), gpu.get("device_id"), gpu.get("kernel_driver")] for gpu in fingerprint_gpus],
+    "architecture": platform.machine(),
+}
+hardware_fingerprint = hashlib.sha256(json.dumps(fingerprint_data, sort_keys=True).encode()).hexdigest()
+vaapi_drivers = []
+for gpu in fingerprint_gpus:
+    driver = gpu.get("vaapi_driver")
+    if driver:
+        vaapi_drivers.append(driver.split("Driver version:", 1)[-1].strip())
+runtime_data = {
+    "mpv": mpv.splitlines()[0] if mpv else None,
+    "ffmpeg": ffmpeg.splitlines()[0] if ffmpeg else None,
+    "vaapi_drivers": sorted(set(vaapi_drivers)),
+    "gpu_drivers": [gpu.get("kernel_driver") for gpu in fingerprint_gpus],
+}
+runtime_fingerprint = hashlib.sha256(json.dumps(runtime_data, sort_keys=True).encode()).hexdigest()
+generated_at = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
 optical_drives = []
 for entry in sorted(pathlib.Path("/sys/class/block").glob("*")):
     try:
@@ -664,7 +685,12 @@ if existing_profile.exists():
 profile = {
     "schema": 1,
     "generator": {"name": "OPENHTPC Builder", "version": "4.0.0"},
-    "generated_at": datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(),
+    "generated_at": generated_at,
+    "capability_source": {
+        "hardware_fingerprint": hardware_fingerprint,
+        "runtime_fingerprint": runtime_fingerprint,
+        "generated_at": generated_at,
+    },
     "detected": {
         "os": os_name,
         "kernel": kernel,

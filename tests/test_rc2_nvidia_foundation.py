@@ -13,6 +13,14 @@ SPEC = importlib.util.spec_from_file_location("rc2_runtime_generator", GENERATOR
 GENERATOR = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(GENERATOR)
+CORE_SPEC = importlib.util.spec_from_file_location("rc2_openhtpc_core", ROOT / "payload/openhtpc-core.py")
+CORE = importlib.util.module_from_spec(CORE_SPEC)
+assert CORE_SPEC.loader
+CORE_SPEC.loader.exec_module(CORE)
+SESSION_SPEC = importlib.util.spec_from_file_location("rc2_session_engine", ROOT / "payload/openhtpc-session-engine.py")
+SESSION = importlib.util.module_from_spec(SESSION_SPEC)
+assert SESSION_SPEC.loader
+SESSION_SPEC.loader.exec_module(SESSION)
 
 OPTIONS = (
     "vo", "gpu-api", "hwdec", "vaapi-device", "include", "scale", "dscale",
@@ -116,6 +124,50 @@ class Rc2QualifiedGpuRuntimeCharacterization(unittest.TestCase):
         self.assertFalse(result["mpv_configuration_generated"])
         self.assertIsNone(pure)
 
+
+class Rc2CapabilityProvenance(unittest.TestCase):
+    SNAPSHOT = {"hardware_fingerprint": "hardware-current", "runtime_fingerprint": "runtime-current"}
+    SOURCE = {**SNAPSHOT, "generated_at": "2026-08-29T00:00:00+00:00"}
+
+    def test_matching_passport_and_runtime_are_current(self):
+        value = passport("intel")
+        value["capability_source"] = self.SOURCE.copy()
+        value["runtime"] = {"generation_provenance": {"capability_source": self.SOURCE.copy()}}
+        self.assertEqual(CORE.capability_provenance_state(value, self.SNAPSHOT), "CURRENT")
+        self.assertEqual(CORE.runtime_provenance_state(value, "CURRENT"), "CURRENT")
+        SESSION.validate_capability_provenance(value, self.SNAPSHOT)
+
+    def test_driver_or_runtime_change_marks_passport_stale(self):
+        value = passport("intel")
+        value["capability_source"] = self.SOURCE.copy()
+        changed = {**self.SNAPSHOT, "runtime_fingerprint": "runtime-after-driver-change"}
+        self.assertEqual(CORE.capability_provenance_state(value, changed), "STALE")
+        with self.assertRaises(SESSION.GateError) as raised:
+            SESSION.validate_capability_provenance(value, changed)
+        self.assertEqual(raised.exception.reason, "PASSPORT_STALE")
+
+    def test_legacy_rc1_passport_requires_rebuild(self):
+        value = passport("intel")
+        self.assertEqual(CORE.capability_provenance_state(value, self.SNAPSHOT), "REBUILD_REQUIRED")
+        with self.assertRaises(SESSION.GateError) as raised:
+            SESSION.validate_capability_provenance(value, self.SNAPSHOT)
+        self.assertEqual(raised.exception.reason, "PASSPORT_REBUILD_REQUIRED")
+
+    def test_missing_snapshot_is_unknown_without_fabricating_staleness(self):
+        self.assertEqual(CORE.capability_provenance_state(passport("intel"), None), "SNAPSHOT_MISSING")
+
+    def test_runtime_records_the_exact_passport_capability_source(self):
+        value = passport("intel")
+        value["capability_source"] = self.SOURCE.copy()
+        result, _, failure = generate(value)
+        self.assertIsNone(failure)
+        self.assertEqual(result["runtime"]["generation_provenance"]["capability_source"], self.SOURCE)
+
+    def test_runtime_from_an_older_passport_is_stale(self):
+        value = passport("intel")
+        value["capability_source"] = self.SOURCE.copy()
+        value["runtime"] = {"generation_provenance": {"capability_source": {**self.SOURCE, "runtime_fingerprint": "old"}}}
+        self.assertEqual(CORE.runtime_provenance_state(value, "CURRENT"), "STALE")
 
 if __name__ == "__main__":
     unittest.main()

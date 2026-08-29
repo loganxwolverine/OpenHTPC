@@ -59,6 +59,19 @@ def validate_profile(profile: dict) -> None:
         raise GateError("hardware_profile", "PROFILE_INVALID", "Le profil ne provient pas du Builder OPENHTPC CURRENT.")
 
 
+def validate_capability_provenance(profile: dict, snapshot: dict) -> None:
+    if not snapshot:
+        return
+    source = profile.get("capability_source")
+    if not isinstance(source, dict) or not all(source.get(key) for key in ("hardware_fingerprint", "runtime_fingerprint")):
+        raise GateError("hardware_profile", "PASSPORT_REBUILD_REQUIRED", "Le Hardware Passport legacy doit être reconstruit.")
+    if any(source.get(key) != snapshot.get(key) for key in ("hardware_fingerprint", "runtime_fingerprint")):
+        raise GateError("hardware_profile", "PASSPORT_STALE", "Le Hardware Passport ne correspond pas aux capacités courantes.")
+    runtime_source = profile.get("runtime", {}).get("generation_provenance", {}).get("capability_source")
+    if runtime_source != source:
+        raise GateError("runtime", "RUNTIME_STALE", "Le runtime ne correspond pas au Hardware Passport courant.")
+
+
 def viability(profile: dict) -> dict:
     backend = profile["video_backend"]
     topology = profile["gpu_topology"]
@@ -1078,6 +1091,9 @@ def evaluate(home: pathlib.Path) -> dict:
     root = home / ".config/openhtpc"
     profile = load_object(root / "profile.json", "hardware_profile", "PROFILE_MISSING", "PROFILE_INVALID")
     validate_profile(profile)
+    snapshot_path = root / "runtime/capabilities.json"
+    snapshot = load_object(snapshot_path, "capabilities", "CAPABILITIES_MISSING", "CAPABILITIES_INVALID") if snapshot_path.exists() else {}
+    validate_capability_provenance(profile, snapshot)
     decision = viability(profile)
     if decision["status"] != "PASS":
         raise GateError("viability", "MACHINE_NOT_VIABLE", "; ".join(decision["failures"]))

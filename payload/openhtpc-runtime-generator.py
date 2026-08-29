@@ -140,7 +140,10 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
         "configuration_generated": ready, "configuration_applied_globally": False,
         "playback_validated": False,
         "mpv_options_verified": options_available and values_available and reference_values_available,
-        "generation_provenance": {"version": version["version"], "build_id": version["build_id"]},
+        "generation_provenance": {
+            "version": version["version"], "build_id": version["build_id"],
+            "capability_source": profile.get("capability_source"),
+        },
     }
     profile["mpv_configuration_generated"] = ready
     atomic_json(profile_path, profile)
