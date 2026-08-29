@@ -1,138 +1,436 @@
 <img width="1254" height="1254" alt="ChatGPT Image 12 août 2026, 14_42_40" src="https://github.com/user-attachments/assets/696bd719-3e75-4512-bc53-e0f5527436f1" />
-# OPENHTPC 1.1 RC3 Development Candidate
+# 🎬 Qu'est-ce qu'OPENHTPC ?
 
-This bounded final RC3 corrective package is version `1.1.0-dev38`, build
-`rc3-final-dvd-policy-refresh-corrective-dev1`. It is derived from dev37 and preserves its
-playback policy while finalizing playback action geometry, immediate parent
-refresh, effective-mode OSD wording and the global-mode DVD shortcut. Its history descends normally from the physically
-qualified and frozen public RC2 baseline. It is not RC3 final and
-requires physical playback-policy validation.
+**OPENHTPC est un projet open source visant à transformer un PC sous Linux en véritable système Home Cinema de salon.**
 
-The public RC2 tag `v1.1.0-rc2` remains immutable. No RC3 tag is created by
-this development iteration.
+L'objectif n'est pas simplement de lancer un lecteur multimédia dans une distribution Linux classique.
 
-OPENHTPC was created as an original project by Steve Dehanne and is licensed
-under Apache-2.0. Third-party components retain their own copyrights and
-licenses; see `NOTICE`, `AUTHORS.md` and `THIRD_PARTY_NOTICES.md`.
+OPENHTPC cherche à proposer une expérience pensée dès le départ pour une utilisation **depuis un canapé, sur un téléviseur ou un vidéoprojecteur**, avec une interface simple, lisible et adaptée au Home Cinema.
 
-OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC. Its
-Core manages playback, capabilities and appliance lifecycle; the Hardware
-Passport records user-confirmed hardware choices; optional plugins extend the
-system without changing Core capability truth. Flex Launcher provides the
-ten-foot interface and MPV provides playback.
+Le projet repose actuellement sur **Fedora KDE Plasma / Wayland**, avec une interface pilotable depuis le salon et une chaîne de lecture basée notamment sur **MPV**.
 
-## Qualified platform and video modes
+---
 
-The currently qualified platform is Fedora 44 KDE Plasma on Wayland. Other
-platforms are not claimed as validated.
+## 🏠 Une interface pensée pour le salon
 
-`PURE` is the default presentation and uses the qualified native MPV path.
-`CINÉMA AUTO` combines content scope, the project Recipe Catalogue and the
-current local Performance Map. It selects the highest-quality project-qualified
-presentation that is technically stable on the local hardware. It does not
-mean that a shader is always enabled; PURE is a valid CINÉMA AUTO result.
+OPENHTPC masque autant que possible la complexité habituelle d'un environnement Linux de bureau.
 
-Calibration is local, signature-driven and based on observed playback
-stability. It uses no cloud or AI service. The Hardware Passport and Performance
-Map remain user-local. `openhtpc doctor` reports product health; an unknown or
-unsupported capability is not automatically a product failure.
+Une fois lancé, l'utilisateur accède directement aux principales fonctions Home Cinema :
 
-Appliance mode inhibits desktop idle/suspend while OPENHTPC owns the couch
-session. Explicit quit restores the KDE Plasma desktop lifecycle.
+- lecture des médias locaux ;
+- gestion des sources multimédias ;
+- lecture de DVD ;
+- détection des disques optiques ;
+- récupération de métadonnées ;
+- gestion du système ;
+- arrêt d'OPENHTPC et retour propre vers KDE.
 
-## Verify the download
+L'objectif est de pouvoir utiliser la machine comme un **véritable appareil Home Cinema**, et non comme un PC nécessitant constamment clavier, terminal ou manipulations techniques.
 
-Keep the archive and its `.sha256` file together, then run:
+---
+
+## 🎞️ Une base de lecture centrée sur MPV
+
+La lecture vidéo repose principalement sur **MPV**, choisi pour sa flexibilité, ses performances et ses possibilités de configuration.
+
+OPENHTPC génère automatiquement une configuration adaptée à la machine sur laquelle il est installé.
+
+Cette génération prend notamment en compte :
+
+- le GPU ;
+- les capacités de décodage matériel ;
+- VA-API ;
+- Vulkan ;
+- les capacités vidéo disponibles ;
+- les politiques audio ;
+- les caractéristiques détectées par OPENHTPC.
+
+Le but est d'éviter autant que possible les configurations MPV génériques copiées d'une machine à une autre.
+
+---
+
+## 🧬 Hardware Passport
+
+OPENHTPC utilise un système appelé **Hardware Passport**.
+
+Lors de l'installation ou de la configuration, OPENHTPC analyse la machine afin de construire une représentation de ses capacités matérielles.
+
+Ces informations servent ensuite à générer le runtime adapté au matériel réellement présent.
+
+Cela permet notamment à OPENHTPC de distinguer différentes configurations Intel, AMD ou NVIDIA et d'adapter son comportement lorsque cela est nécessaire.
+
+---
+
+## 💿 Médias locaux et supports physiques
+
+OPENHTPC ne se limite pas aux fichiers stockés sur un disque.
+
+Le projet vise progressivement à réunir plusieurs formes de médias dans une même expérience :
+
+- fichiers MKV et autres médias locaux ;
+- bibliothèques stockées sur le réseau ;
+- DVD physiques ;
+- Blu-ray ;
+- UHD lorsque leur identification et leur lecture peuvent réellement être démontrées et qualifiées.
+
+Une attention particulière est portée à la fiabilité des actions.
+
+Lorsqu'un média est affiché dans l'interface, OPENHTPC utilise un système d'identités et de tokens afin de s'assurer que l'action demandée correspond bien au média, à la source et à la génération actuellement autorisés.
+
+---
+
+## 🎬 Métadonnées TMDb
+
+OPENHTPC peut également utiliser **TMDb** pour enrichir l'expérience autour des supports physiques.
+
+Lorsqu'un disque est reconnu, OPENHTPC peut récupérer notamment :
+
+- le titre du film ;
+- son année ;
+- son affiche ;
+- différentes métadonnées associées.
+
+Lorsque l'identification automatique n'est pas suffisante, une recherche manuelle peut également être proposée.
+
+L'association choisie peut ensuite être mémorisée afin de reconnaître plus facilement le même disque lors d'une prochaine insertion.
+
+---
+<img width="1920" height="1080" alt="Screenshot 2026-08-27 19-24-44" src="https://github.com/user-attachments/assets/f6708a9d-4ddc-4267-ab6f-f7c0f6a15310" />
+
+## 🔊 Une approche Home Cinema de l'audio
+
+OPENHTPC ne considère pas l'audio comme un simple détail de lecture.
+
+Le projet prévoit une véritable politique audio adaptée aux environnements Home Cinema.
+
+Le mode **PCM** constitue actuellement la base la plus sûre et la plus largement applicable.
+
+Le bitstream peut également être utilisé lorsque le matériel et la chaîne audio le permettent.
+
+Les formats sont progressivement qualifiés physiquement plutôt que simplement déclarés comme fonctionnels parce qu'ils existent dans une configuration logicielle.
+
+---
+
+## 🩺 OPENHTPC Doctor
+
+OPENHTPC intègre son propre outil de diagnostic :
 
 ```bash
-sha256sum -c OpenHTPC-1.1-PublicR2-Dev31.tar.gz.sha256
+openhtpc doctor
+
 ```
 
-## Install
+Doctor permet de vérifier l'état général de l'installation et de plusieurs composants importants du système.
 
-Extract the archive, enter the extracted directory and inspect first:
+Sur une machine correctement configurée et prête à utiliser OPENHTPC, l'objectif est d'obtenir :
 
-```bash
-./install.sh --check
+```text
+Overall: READY
 ```
 
-Install with the normal user account, not a root shell:
+Cela permet également de faciliter considérablement les diagnostics lorsqu'un utilisateur rencontre un problème.
 
-```bash
-./install.sh
-```
+---
 
-The installer accepts only Fedora 44 with KDE Plasma. It may propose specific
-missing packages, RPM Fusion repositories and `libdvdcss`. Every system or
-repository mutation is explained and requires interactive consent before
-`sudo`/DNF is invoked. OPENHTPC never performs a general Fedora upgrade.
+<img width="1920" height="1080" alt="Screenshot 2026-08-15 16-13-14" src="https://github.com/user-attachments/assets/29450bb7-adb5-4600-8474-eb80627c63bf" />
 
-The installation lives under `~/.local/lib/openhtpc`; commands are linked under
-`~/.local/bin`. Reconnect the session or add that directory to `PATH` if it is
-not already present. OPENHTPC installs a managed KDE autostart entry and starts
-on the next login. First installation runs local hardware discovery and initial
-setup; updates preserve the existing Hardware Passport when present.
+## 🔄 Installation et mises à jour
 
-## Update and uninstall
+OPENHTPC dispose de son propre mécanisme d'installation et de mise à jour.
 
-From the extracted candidate directory:
+Le projet cherche à éviter les procédures composées de dizaines de commandes manuelles.
+
+Lors d'une installation, OPENHTPC peut notamment :
+
+- vérifier l'environnement ;
+- installer les dépendances nécessaires avec l'accord de l'utilisateur ;
+- créer le Hardware Passport ;
+- générer le runtime ;
+- installer l'interface ;
+- préparer la configuration ;
+- configurer son démarrage dans la session KDE.
+
+Lors d'une mise à jour, les données persistantes de l'utilisateur sont conservées et le runtime peut être régénéré afin d'éviter de conserver une configuration devenue obsolète.
+
+Une installation existante peut être mise à jour directement depuis une archive OPENHTPC :
 
 ```bash
 ./update.sh
-./uninstall.sh
-./uninstall.sh --purge-config
 ```
 
-Update preserves user configuration, configured media sources, Hardware
-Passport, Performance Map, runtime and system dependencies. A versioned
-managed-file manifest removes only files proven to have belonged to the prior
-OPENHTPC installation and absent from the target payload. Unknown files and
-all user-persistent paths are outside this cleanup contract.
+Il n'est normalement **pas nécessaire de désinstaller la version précédente** avant d'effectuer une mise à jour.
 
-Normal uninstall removes the managed product, command links and autostart entry
-while preserving user configuration. `--purge-config` also removes OPENHTPC
-configuration, cache, state and shared data. Neither mode removes media files,
-Fedora packages, RPM Fusion repositories or `libdvdcss`.
+Après installation ou mise à jour, deux commandes permettent de contrôler rapidement l'état du système :
 
-## Graphical Media Sources
+```bash
+openhtpc version
+```
 
-The MÉDIA page supports zero to multiple configured filesystem sources. From
-the couch UI you can add a source, open it, navigate folders and files, or use
-RIGHT on a source to expose the non-destructive removal action. Removal only
-updates OPENHTPC configuration: it never deletes, moves or modifies media.
-Duplicate additions produce an explicit `SOURCE DÉJÀ AJOUTÉE` result.
+et :
 
-Sources must already be accessible as local filesystem paths. An existing CIFS
-or NFS mount can be selected through the picker, but OPENHTPC does not configure
-or mount SMB/NFS shares itself. SMB/NFS service integration remains future
-plugin work.
+```bash
+openhtpc doctor
+```
 
-## Public commands in dev31
+---
+
+# 🧩 Un Core fixe et des plugins
+
+C'est l'un des principes fondamentaux du projet.
+
+OPENHTPC n'a pas vocation à devenir un énorme logiciel monolithique contenant toutes les fonctions imaginables.
+
+L'architecture recherchée est plutôt :
 
 ```text
-openhtpc start
-openhtpc stop
-openhtpc setup
-openhtpc doctor
-openhtpc doctor --json
-openhtpc version
-openhtpc plugins
-openhtpc capabilities
-openhtpc capabilities --json
-openhtpc capabilities --refresh
-openhtpc support-bundle
+OPENHTPC CORE
+│
+├── Interface
+├── Hardware Passport
+├── Runtime
+├── MEDIA
+├── Audio
+├── Diagnostic
+├── Cycle de vie
+└── Fonctions essentielles
+        │
+        ├── Plugin Blu-ray
+        ├── Plugin UHD
+        ├── Plugin Cinema
+        ├── Plugin Streaming
+        ├── Plugin Gaming
+        └── ...
 ```
 
-There is no `openhtpc status` or `openhtpc update` command in this baseline.
+Le **Core** doit rester aussi stable, prévisible et qualifiable que possible.
 
-See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md),
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[assets/ASSET_PROVENANCE.md](assets/ASSET_PROVENANCE.md) before distribution.
+Les fonctionnalités plus spécialisées viendront progressivement sous forme de **plugins**, afin que chacun puisse construire l'OPENHTPC correspondant réellement à son installation.
 
-## Candidate status
+Cette philosophie permet également d'éviter qu'une nouvelle fonctionnalité spécialisée fragilise l'ensemble du système.
 
-This package preserves the qualified dev27 Media Sources behavior while adding
-public packaging, managed-update hygiene and provenance-safe UI polish. The
-RC2 candidate completed physical validation and is frozen. This status does
-not constitute a final `1.1.0` release announcement.
-<img width="1920" height="1080" alt="Screenshot 2026-08-15 16-13-14" src="https://github.com/user-attachments/assets/29450bb7-adb5-4600-8474-eb80627c63bf" />
+---
+
+## 🎯 Pourquoi créer OPENHTPC ?
+
+Il existe déjà Kodi, MPV, VLC et de nombreuses distributions Linux multimédias.
+
+OPENHTPC n'a pas pour objectif de remplacer chacun de ces projets.
+
+L'idée est différente :
+
+> **Assembler les meilleures briques disponibles dans un environnement Home Cinema Linux cohérent, automatisé et réellement pensé pour le salon.**
+
+OPENHTPC cherche notamment à résoudre les problèmes qui apparaissent lorsque l'on construit soi-même un HTPC Linux :
+
+- configuration des pilotes ;
+- accélération matérielle ;
+- comportement de MPV ;
+- audio HDMI ;
+- gestion des lecteurs optiques ;
+- métadonnées ;
+- retour propre vers l'interface ;
+- changements de matériel ;
+- mises à jour ;
+- diagnostics ;
+- cohérence entre l'interface et le lecteur.
+
+L'utilisateur ne devrait pas avoir besoin de comprendre toute cette chaîne technique simplement pour regarder un film.
+
+---
+
+## 🐧 Pourquoi Linux ?
+
+Parce qu'un HTPC ne devrait pas nécessairement devenir obsolète simplement parce que son système d'exploitation commercial ne le supporte plus.
+
+Linux permet de construire une plateforme :
+
+- ouverte ;
+- modifiable ;
+- documentable ;
+- durable ;
+- indépendante d'un constructeur ;
+- capable de fonctionner sur du matériel très différent.
+
+OPENHTPC s'inscrit pleinement dans cette philosophie.
+
+L'idée est aussi de pouvoir **réutiliser du matériel que l'on possède déjà**, plutôt que d'imposer une plateforme matérielle unique.
+
+---
+
+# 🛋️ Une appliance Home Cinema plutôt qu'un simple logiciel
+
+À terme, OPENHTPC doit se comporter davantage comme un **appareil Home Cinema** que comme une application Linux traditionnelle.
+
+L'utilisateur allume son PC.
+
+Fedora démarre.
+
+La session KDE s'ouvre.
+
+OPENHTPC se lance automatiquement.
+
+L'utilisateur retrouve alors son interface Home Cinema :
+
+```text
+ALLUMAGE
+   ↓
+Fedora
+   ↓
+KDE Plasma
+   ↓
+OPENHTPC
+   ↓
+HOME
+   ↓
+Films / DVD / Médias / Plugins
+```
+
+Le bureau Linux reste disponible lorsque cela est nécessaire, mais il ne doit pas être au centre de l'expérience quotidienne.
+
+OPENHTPC peut être quitté proprement afin de revenir vers KDE.
+
+---
+
+# 🔐 Fiabilité avant fonctionnalités
+
+Un autre principe important d'OPENHTPC consiste à ne pas confondre :
+
+**« le code sait théoriquement le faire »**
+
+et :
+
+**« nous avons réellement démontré que cela fonctionne ».**
+
+Les différentes fonctions sont donc progressivement :
+
+1. implémentées ;
+2. testées automatiquement ;
+3. testées sur du matériel réel ;
+4. qualifiées ;
+5. seulement ensuite annoncées comme supportées.
+
+Cette approche est particulièrement importante pour :
+
+- l'accélération matérielle ;
+- l'audio bitstream ;
+- les lecteurs optiques ;
+- Blu-ray et UHD ;
+- HDR ;
+- les pilotes GPU ;
+- les comportements dépendant du matériel.
+
+OPENHTPC préfère annoncer une limitation plutôt que prétendre supporter une fonction qui n'a pas encore été réellement validée.
+
+---
+
+# 🧪 Plusieurs niveaux de validation
+
+Le développement d'OPENHTPC utilise plusieurs niveaux de validation.
+
+### Tests automatisés
+
+Ils permettent de vérifier les comportements internes du Core, du runtime, de MEDIA, des actions et des différents composants.
+
+### Tests physiques
+
+Les versions importantes sont également installées sur de véritables machines.
+
+Cela permet de vérifier des éléments impossibles à démontrer uniquement avec des tests logiciels :
+
+- affichage réel ;
+- audio HDMI ;
+- comportement du GPU ;
+- lecteur DVD ;
+- téléviseur ou amplificateur ;
+- démarrage KDE ;
+- retour vers le bureau ;
+- mise en veille ;
+- interactions avec les périphériques.
+
+### Fresh Install
+
+Certaines versions sont également testées depuis une installation Fedora totalement fraîche afin de vérifier que le fonctionnement ne dépend pas accidentellement de fichiers provenant d'une ancienne version.
+
+---
+
+# 🚧 Un projet encore en développement
+
+OPENHTPC est un projet actif.
+
+Les versions **Release Candidate** sont justement là pour permettre de tester le système sur davantage de configurations matérielles avant de considérer certaines fonctions comme définitivement stabilisées.
+
+Certaines fonctions sont déjà physiquement qualifiées.
+
+D'autres sont encore expérimentales, en développement ou volontairement reportées afin de ne pas fragiliser le Core.
+
+Parmi les futurs chantiers figurent notamment :
+
+- amélioration du framework de plugins ;
+- qualification audio avancée ;
+- sélection intelligente des pistes audio ;
+- sélection automatique du français / TrueFrench ;
+- gestion des sous-titres français forcés ;
+- adaptation automatique de la fréquence d'affichage ;
+- HDR et tone mapping ;
+- amélioration de la lecture Blu-ray et UHD ;
+- amélioration de l'expérience TMDb ;
+- fonctions Cinema avancées ;
+- amélioration de l'expérience utilisateur ;
+- prise en charge et qualification d'un plus grand nombre de configurations matérielles.
+
+---
+
+# ❤️ La philosophie OPENHTPC
+
+OPENHTPC repose sur quelques principes simples.
+
+### ♻️ Utiliser ce que l'on possède déjà
+
+Un ancien PC, une workstation, un Mini PC ou une machine récupérée peut encore devenir une excellente plateforme Home Cinema.
+
+### 🧱 Un Core stable
+
+Les fonctions essentielles doivent être fiables et prévisibles.
+
+### 🧩 Des plugins pour aller plus loin
+
+Les fonctions spécialisées doivent pouvoir évoluer sans transformer le Core en logiciel monolithique.
+
+### 🔍 Ne pas masquer les problèmes
+
+L'automatisation doit simplifier l'expérience sans empêcher le diagnostic.
+
+Des outils comme :
+
+```bash
+openhtpc doctor
+```
+
+doivent permettre de comprendre rapidement l'état du système.
+
+### ✅ Ne revendiquer que ce qui a été démontré
+
+Une fonction présente dans le code n'est pas automatiquement considérée comme qualifiée.
+
+### 🐧 Faire de Linux une véritable plateforme Home Cinema
+
+Pas simplement un bureau Linux sur lequel on lance occasionnellement un film.
+
+Mais une expérience conçue autour du téléviseur, du vidéoprojecteur, de l'amplificateur et du canapé.
+
+---
+
+# 🎯 En une phrase
+
+> **OPENHTPC est une plateforme Home Cinema open source basée sur Linux, conçue pour transformer un PC en véritable lecteur multimédia de salon, avec une interface dédiée, une configuration adaptée au matériel et une architecture évolutive basée sur un Core stable et des plugins.**
+
+---
+
+# 🔗 Projet
+
+Le développement d'OPENHTPC est public et open source.
+
+Les versions, Release Candidates, notes de publication et sources du projet sont disponibles sur GitHub :
+
+**https://github.com/loganxwolverine/OpenHTPC**
+
