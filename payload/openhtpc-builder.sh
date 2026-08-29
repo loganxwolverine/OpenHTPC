@@ -16,10 +16,13 @@ readonly RUNTIME_GENERATOR="${OPENHTPC_RUNTIME_GENERATOR:-$(cd -- "$(dirname -- 
 readonly VERSION_METADATA="${OPENHTPC_VERSION_METADATA:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/version.json}"
 readonly GPU_POLICY="${OPENHTPC_GPU_POLICY:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/openhtpc-gpu-policy.py}"
 REGENERATE_RUNTIME=false
+REBUILD_PASSPORT=false
 if [[ ${1:-} == "--regenerate-runtime" && $# -eq 1 ]]; then
     REGENERATE_RUNTIME=true
+elif [[ ${1:-} == "--rebuild-passport" && $# -eq 1 ]]; then
+    REBUILD_PASSPORT=true
 elif [[ $# -ne 0 ]]; then
-    printf 'Usage : %s [--regenerate-runtime]\n' "$0" >&2
+    printf 'Usage : %s [--regenerate-runtime|--rebuild-passport]\n' "$0" >&2
     exit 2
 fi
 WORK_DIR="$(mktemp -d -t openhtpc-builder.XXXXXX)"
@@ -232,15 +235,33 @@ if ((gpu_count > 1)); then
 fi
 
 title "ÉCRAN 2 — VOTRE AFFICHAGE"
-ask_choice "Résolution de l'écran :" display_resolution \
-    "1920x1080" "3840x2160" "Autre"
-display_hdr="Je ne sais pas"
-ask_choice "Fréquence connue :" display_refresh \
-    "60 Hz" "120 Hz" "Autre" "Je ne sais pas"
+if $REBUILD_PASSPORT; then
+    [[ -r $PROFILE_FILE ]] || { printf 'Hardware Passport absent : reconstruction impossible.\n' >&2; exit 1; }
+    mapfile -t saved_display < <(python3 - "$PROFILE_FILE" <<'PYANSWERS'
+import json,sys
+value=json.load(open(sys.argv[1],encoding="utf-8"));answers=value.get("user_answers",{});display=answers.get("display",{});audio=answers.get("audio",{})
+for source,key in ((display,"resolution"),(display,"hdr"),(display,"refresh_rate"),(audio,"destination"),(audio,"mode")):
+    item=source.get(key)
+    if not isinstance(item,str) or not item:raise SystemExit("Réponses écran absentes ; reconstruction non interactive refusée")
+    print(item)
+PYANSWERS
+    )
+    [[ ${#saved_display[@]} -eq 5 ]] || { printf 'Réponses matérielles absentes ; reconstruction non interactive refusée.\n' >&2; exit 1; }
+    display_resolution=${saved_display[0]}; display_hdr=${saved_display[1]}; display_refresh=${saved_display[2]}
+else
+    ask_choice "Résolution de l'écran :" display_resolution \
+        "1920x1080" "3840x2160" "Autre"
+    display_hdr="Je ne sais pas"
+    ask_choice "Fréquence connue :" display_refresh \
+        "60 Hz" "120 Hz" "Autre" "Je ne sais pas"
+fi
 
 title "ÉCRAN 3 — VOTRE AUDIO"
-audio_destination="Détection système"
-audio_mode="PCM"
+if $REBUILD_PASSPORT; then
+    audio_destination=${saved_display[3]}; audio_mode=${saved_display[4]}
+else
+    audio_destination="Détection système"; audio_mode="PCM"
+fi
 printf 'Fondations audio détectées automatiquement. Mode initial sûr : PCM.\n'
 
 has_mpeg2=false has_h264=false has_hevc=false has_hevc10=false has_vp9=false has_av1=false
