@@ -181,7 +181,7 @@ def parse_vulkan(text: str) -> list[dict[str, Any]]:
             if current and any(current.values()): devices.append(current)
             current = {}
         if current is None: current = {}
-        for key, output in (("deviceName", "name"), ("apiVersion", "api_version"), ("driverName", "driver_name"), ("driverInfo", "driver_version"), ("deviceType", "device_type")):
+        for key, output in (("deviceName", "name"), ("apiVersion", "api_version"), ("driverName", "driver_name"), ("driverInfo", "driver_version"), ("deviceType", "device_type"), ("vendorID", "vendor_id"), ("deviceID", "device_id")):
             match = re.search(rf"\b{key}\s*=\s*(.+)$", line)
             if match: current[output] = match.group(1).strip()
     if current and any(current.values()): devices.append(current)
@@ -208,6 +208,47 @@ def parse_vaapi(text: str) -> tuple[str | None, dict[str, bool]]:
 
 def parse_ffmpeg_decoders(text: str) -> set[str]:
     return {match.group(1) for line in text.splitlines() if (match := re.match(r"^\s*[VAS\.FBD]{6}\s+([a-zA-Z0-9_]+)\s", line))}
+
+
+def normalize_pci_address(value: str) -> str | None:
+    match = re.fullmatch(r"(?:(?:0000|00000000):)?([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.([0-7])", value.strip())
+    return f"0000:{match.group(1).lower()}:{match.group(2).lower()}.{match.group(3)}" if match else None
+
+
+def parse_nvidia_smi(text: str) -> dict[str, dict[str, str]]:
+    result = {}
+    for line in text.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 3 or not (address := normalize_pci_address(parts[0])):
+            continue
+        result[address] = {"name": parts[1], "driver_version": parts[2]}
+    return result
+
+
+def nvdec_profiles(decoders: set[str]) -> dict[str, bool]:
+    return {
+        "mpeg2": "mpeg2_cuvid" in decoders,
+        "h264_8bit": "h264_cuvid" in decoders,
+        "hevc_main": "hevc_cuvid" in decoders,
+        "hevc_main10": "hevc_cuvid" in decoders,
+        "vp9_profile0": "vp9_cuvid" in decoders,
+        "vp9_10bit": "vp9_cuvid" in decoders,
+        "av1_main": "av1_cuvid" in decoders,
+    }
+
+
+def nvdec_backend(gpu: dict[str, Any], vulkan_devices: list[dict[str, Any]], smi_gpus: dict[str, dict[str, str]],
+                  mpv_hwdec_help: str, decoders: set[str]) -> dict[str, Any]:
+    address = normalize_pci_address(str(gpu.get("pci_address") or ""))
+    vulkan_match = next((item for item in vulkan_devices
+                         if str(item.get("vendor_id", "")).lower().removeprefix("0x") == "10de"
+                         and str(item.get("device_id", "")).lower().removeprefix("0x").zfill(4) == str(gpu.get("device_id") or "").lower()), None)
+    available = bool(gpu.get("vendor_id", "").lower() == "10de" and gpu.get("kernel_driver") == "nvidia"
+                     and address in smi_gpus and vulkan_match and "nvdec" in mpv_hwdec_help.lower())
+    return {"status":"SUPPORTED" if available else "UNSUPPORTED" if gpu.get("vendor_id", "").lower()=="10de" else "NOT_APPLICABLE",
+            "profiles":nvdec_profiles(decoders) if available else {key:False for key in CODECS},
+            "evidence":["NVIDIA_KERNEL_DRIVER","NVIDIA_SMI","MPV","FFMPEG","VULKAN"] if available else [],
+            "validated":False}
 
 
 def parse_kscreen(text: str) -> list[dict[str, Any]]:
@@ -359,12 +400,18 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
             va_observed=True; driver, support=parse_vaapi(va.get("stdout", "")+va.get("stderr", "")); va_drivers.extend([driver] if driver else [])
             va_profiles={key:va_profiles[key] or support[key] for key in va_profiles}
             gpu=next((item for item in gpus if node in item.get("render_nodes",[])),None)
-            if gpu is not None: gpu["video_decode"]={"backend":"vaapi","driver":driver,"profiles":support}
+            if gpu is not None: gpu["video_decode"]={"backends":{"vaapi":{"status":"SUPPORTED","driver":driver,"profiles":support,"evidence":["VAAPI"]}}}
     ffmpeg = run_probe("ffmpeg", ["ffmpeg", "-hide_banner", "-decoders"], diagnostics, runner, 8)
     decoders = parse_ffmpeg_decoders(ffmpeg.get("stdout", "") + ffmpeg.get("stderr", ""))
     ffver = run_probe("ffmpeg_version", ["ffmpeg", "-version"], diagnostics, runner)
     mpv = run_probe("mpv", ["mpv", "--no-config", "--version"], diagnostics, runner)
     mpv_help = run_probe("mpv_vo", ["mpv", "--no-config", "--vo=help"], diagnostics, runner)
+    mpv_hwdec = run_probe("mpv_hwdec", ["mpv", "--no-config", "--hwdec=help"], diagnostics, runner)
+    smi = run_probe("nvidia_smi", ["nvidia-smi", "--query-gpu=pci.bus_id,name,driver_version", "--format=csv,noheader,nounits"], diagnostics, runner, 8)
+    smi_gpus = parse_nvidia_smi(smi.get("stdout", "")) if smi.get("status") == "OK" else {}
+    for gpu in gpus:
+        backend = nvdec_backend(gpu, vulkan_devices, smi_gpus, mpv_hwdec.get("stdout", ""), decoders)
+        video = gpu.setdefault("video_decode", {"backends":{}}); video.setdefault("backends", {})["nvdec"] = backend
     fingerprint_data={"gpus":[[g.get("vendor_id"),g.get("device_id"),g.get("kernel_driver")] for g in gpus],"architecture":platform.machine()}
     hardware_fingerprint=hashlib.sha256(json.dumps(fingerprint_data,sort_keys=True).encode()).hexdigest()
     runtime_data={"mpv":(mpv.get("stdout","").splitlines() or [None])[0],"ffmpeg":(ffver.get("stdout","").splitlines() or [None])[0],"vaapi_drivers":sorted(set(va_drivers)),"gpu_drivers":[g.get("kernel_driver") for g in gpus]}
@@ -373,11 +420,12 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
     codec_matrix={}
     for key,(decoder,_) in CODECS.items():
         validated = any(record_validates_class(item,key) for item in history)
-        hardware_validated=any(record_validates_class(item,key) and item.get("hardware_decode_backend")=="vaapi" and item.get("hardware_fingerprint")==hardware_fingerprint and item.get("runtime_fingerprint")==runtime_fingerprint for item in history)
+        backends = [name for name, supported in (("vaapi", va_profiles[key]), ("nvdec", any(g.get("video_decode",{}).get("backends",{}).get("nvdec",{}).get("profiles",{}).get(key) for g in gpus))) if supported]
+        hardware_validated=any(record_validates_class(item,key) and item.get("hardware_decode_backend") in backends and item.get("hardware_fingerprint")==hardware_fingerprint and item.get("runtime_fingerprint")==runtime_fingerprint for item in history)
         codec_matrix[key]={"codec":decoder,"profile":key,"bit_depth":10 if "10" in key else 8,
                            "software_decode":fact("AVAILABLE" if decoder in decoders else "UNAVAILABLE" if ffmpeg.get("status")=="OK" else "UNKNOWN",["FFMPEG"]),
-                           "hardware_decode":fact("SUPPORTED" if va_profiles[key] else "UNSUPPORTED" if va_observed else "UNKNOWN",["VAAPI","OPENHTPC_RUNTIME_TEST"] if hardware_validated else ["VAAPI"] if va_observed else [],hardware_validated),
-                           "hardware_backends":["vaapi"] if va_profiles[key] else [],
+                           "hardware_decode":fact("SUPPORTED" if backends else "UNSUPPORTED" if va_observed or smi.get("status")=="OK" else "UNKNOWN",backends+["OPENHTPC_RUNTIME_TEST"] if hardware_validated else backends,hardware_validated),
+                           "hardware_backends":backends,
                            "validated_playback":fact("VALIDATED" if validated else "UNVALIDATED",["OPENHTPC_RUNTIME_TEST"] if validated else [],validated)}
     graphical=resolve_graphical_context(proc_root,home=home,install=install)
     graphical_argv=["env","-u","DISPLAY","-u","WAYLAND_DISPLAY","-u","XDG_RUNTIME_DIR","-u","DBUS_SESSION_BUS_ADDRESS",*(f"{key}={value}" for key,value in graphical.get("environment",{}).items()),"kscreen-doctor","-o"] if graphical.get("status")=="RESOLVED" else ["kscreen-doctor","-o"]
