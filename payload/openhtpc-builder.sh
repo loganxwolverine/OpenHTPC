@@ -14,6 +14,7 @@ readonly DRI_ROOT="${OPENHTPC_DRI_ROOT:-/dev/dri}"
 readonly DRM_SYSFS_ROOT="${OPENHTPC_DRM_SYSFS_ROOT:-/sys/class/drm}"
 readonly RUNTIME_GENERATOR="${OPENHTPC_RUNTIME_GENERATOR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/openhtpc-runtime-generator.py}"
 readonly VERSION_METADATA="${OPENHTPC_VERSION_METADATA:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/version.json}"
+readonly GPU_POLICY="${OPENHTPC_GPU_POLICY:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/openhtpc-gpu-policy.py}"
 REGENERATE_RUNTIME=false
 if [[ ${1:-} == "--regenerate-runtime" && $# -eq 1 ]]; then
     REGENERATE_RUNTIME=true
@@ -92,6 +93,12 @@ if command -v mpv >/dev/null 2>&1; then
         mpv --no-config --gpu-api=help 2>&1 || true
         mpv --no-config --hwdec=help 2>&1 || true
     } >"$WORK_DIR/mpv-values.txt"
+fi
+
+: >"$WORK_DIR/nvidia-smi.csv"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=pci.bus_id,name,driver_version --format=csv,noheader,nounits \
+        >"$WORK_DIR/nvidia-smi.csv" 2>/dev/null || true
 fi
 
 if $REGENERATE_RUNTIME; then
@@ -245,8 +252,10 @@ grep -Eq 'VAProfileVP9.*VAEntrypointVLD' "$WORK_DIR/vaapi.txt" && has_vp9=true
 grep -Eq 'VAProfileAV1.*VAEntrypointVLD' "$WORK_DIR/vaapi.txt" && has_av1=true
 
 ffmpeg_h264=false ffmpeg_hevc=false ffmpeg_av1=false
+: >"$WORK_DIR/ffmpeg-decoders.txt"
 if command -v ffmpeg >/dev/null 2>&1; then
-    ffmpeg_decoders="$(ffmpeg -hide_banner -decoders 2>/dev/null || true)"
+    ffmpeg -hide_banner -decoders >"$WORK_DIR/ffmpeg-decoders.txt" 2>/dev/null || true
+    ffmpeg_decoders="$(<"$WORK_DIR/ffmpeg-decoders.txt")"
     grep -Eq '[[:space:]]h264[[:space:]]' <<<"$ffmpeg_decoders" && ffmpeg_h264=true
     grep -Eq '[[:space:]]hevc[[:space:]]' <<<"$ffmpeg_decoders" && ffmpeg_hevc=true
     grep -Eq '[[:space:]]av1[[:space:]]' <<<"$ffmpeg_decoders" && ffmpeg_av1=true
@@ -254,14 +263,18 @@ fi
 vaapi_driver="$(grep -m1 'Driver version' "$WORK_DIR/vaapi.txt" | sed 's/^[[:space:]]*//' || true)"
 
 python3 - "$WORK_DIR" "$display_resolution" "$display_hdr" "$display_refresh" \
-    "$audio_destination" "$audio_mode" "$mpv_version" <<'PYGPU'
+    "$audio_destination" "$audio_mode" "$mpv_version" "$GPU_POLICY" <<'PYGPU'
+import importlib.util
 import json
 import pathlib
 import re
 import sys
 
 work = pathlib.Path(sys.argv[1])
-resolution, hdr, refresh, audio_destination, audio_mode, mpv_version = sys.argv[2:]
+resolution, hdr, refresh, audio_destination, audio_mode, mpv_version = sys.argv[2:8]
+policy_path = pathlib.Path(sys.argv[8])
+spec = importlib.util.spec_from_file_location("openhtpc_gpu_policy", policy_path)
+policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
 
 def read_lines(name):
     path = work / name
@@ -303,6 +316,8 @@ for line in read_lines("gpus.txt"):
             "vulkan_device": None,
             "vaapi_driver": None,
             "vaapi_decode": {name: False for name in ("mpeg2", "h264", "hevc", "hevc_main10", "vp9", "av1")},
+            "nvdec_available": False,
+            "nvdec_decode": {name: False for name in ("mpeg2", "h264", "hevc", "hevc_main10", "vp9", "av1")},
         }
         gpus.append(current)
     elif current and "Kernel driver in use:" in line:
@@ -412,6 +427,24 @@ for gpu in gpus:
             "api_version": device.get("apiVersion"),
         }
 
+def normalize_pci(value):
+    match = re.fullmatch(r"(?:(?:0000|00000000):)?([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.([0-7])", value.strip())
+    return f"0000:{match.group(1).lower()}:{match.group(2).lower()}.{match.group(3)}" if match else None
+
+smi_slots = set()
+for line in read_lines("nvidia-smi.csv"):
+    parts = [part.strip() for part in line.split(",")]
+    if len(parts) == 3 and (slot := normalize_pci(parts[0])):
+        smi_slots.add(slot)
+mpv_values = "\n".join(read_lines("mpv-values.txt")).lower()
+decoder_text = "\n".join(read_lines("ffmpeg-decoders.txt"))
+cuvid_names = {"mpeg2":"mpeg2", "h264":"h264", "hevc":"hevc", "hevc_main10":"hevc", "vp9":"vp9", "av1":"av1"}
+for gpu in gpus:
+    gpu["nvdec_available"] = bool(gpu["vendor_id"] == "10de" and gpu["kernel_driver"] == "nvidia"
+                                      and gpu["pci_slot"] in smi_slots and gpu["vulkan_device"] and "nvdec" in mpv_values)
+    if gpu["nvdec_available"]:
+        gpu["nvdec_decode"] = {name: bool(re.search(rf"\b{decoder}_cuvid\b", decoder_text)) for name, decoder in cuvid_names.items()}
+
 weights = {"mpeg2": 1, "h264": 2, "hevc": 2, "hevc_main10": 2, "vp9": 1, "av1": 2}
 for gpu in gpus:
     gpu["selection_score"] = (
@@ -420,24 +453,12 @@ for gpu in gpus:
         + sum(weights[name] for name, value in gpu["vaapi_decode"].items() if value)
     )
 
-valid = [gpu for gpu in gpus if gpu["render_node"] and (gpu["vulkan_device"] or any(gpu["vaapi_decode"].values()))]
-selected = None
-confidence = "pending"
-if len(valid) == 1:
-    selected = valid[0]
-    confidence = "high" if selected["vulkan_device"] and any(selected["vaapi_decode"].values()) else "medium"
-    reason = "Seul GPU matériel avec render node et capacités observées."
-elif len(valid) > 1:
-    ranked = sorted(valid, key=lambda item: item["selection_score"], reverse=True)
-    margin = ranked[0]["selection_score"] - ranked[1]["selection_score"]
-    if margin >= 2 and ranked[0]["vulkan_device"]:
-        selected = ranked[0]
-        confidence = "medium"
-        reason = "Capacités VA-API/Vulkan observées supérieures aux autres GPU matériels."
-    else:
-        reason = "Plusieurs GPU matériels ont des capacités trop proches ou incomplètes."
-else:
-    reason = "Aucun GPU matériel ne dispose d’une association complète mesurée."
+policy_decision = policy.select(gpus)
+display_gpu = policy_decision["display_gpu"]
+selected = policy_decision["processing_gpu"]
+confidence = policy_decision["confidence"]
+reason = policy_decision["reason"]
+display_candidates = [gpu for gpu in gpus if gpu["display_connectors"]]
 
 def public_gpu(gpu):
     if not gpu:
@@ -445,12 +466,11 @@ def public_gpu(gpu):
     return {key: gpu[key] for key in (
         "vendor", "pci_slot", "pci_id", "vendor_id", "device_id", "model",
         "kernel_driver", "drm_card", "render_node", "vulkan_device",
-        "vaapi_driver", "vaapi_decode", "display_connectors", "display_path_status"
+        "vaapi_driver", "vaapi_decode", "nvdec_available", "nvdec_decode",
+        "display_connectors", "display_path_status"
     )}
 
 # Le GPU d'affichage est identifié séparément par les connecteurs DRM actifs.
-display_candidates = [gpu for gpu in gpus if gpu["display_connectors"]]
-display_gpu = display_candidates[0] if len(display_candidates) == 1 else None
 if len(display_candidates) == 1:
     display_confidence = "high"
 elif len(display_candidates) > 1:
@@ -459,7 +479,7 @@ else:
     display_confidence = "pending"
 
 if display_gpu and selected:
-    offload_required = display_gpu["pci_slot"] != selected["pci_slot"]
+    offload_required = policy_decision["offload_required"]
     topology_confidence = "high" if not offload_required and confidence == "high" else "medium"
 else:
     offload_required = None
@@ -483,20 +503,21 @@ if selected:
         evidence.append(f"Périphérique Vulkan matériel associé : {selected['vulkan_device']['name']}")
     if any(selected["vaapi_decode"].values()):
         evidence.append("Profils de décodage VA-API observés par vainfo sur ce render node")
+    if selected["nvdec_available"] and any(selected["nvdec_decode"].values()):
+        evidence.append("NVDEC observé par pile NVIDIA PCI, Vulkan, nvidia-smi, MPV et FFmpeg")
 
 decode_api = None
 render_api = None
 backend_status = "pending"
 if selected:
     render_api = "vulkan" if selected["vulkan_device"] else "pending"
-    if selected["vendor"] in {"intel", "amd"} and any(selected["vaapi_decode"].values()):
+    if any(selected["vaapi_decode"].values()):
         decode_api = "vaapi"
-    elif selected["vendor"] == "nvidia":
-        decode_api = "pending"
-        evidence.append("NVDEC non validé physiquement ; aucune API de décodage NVIDIA n’est certifiée")
+    elif selected["nvdec_available"] and any(selected["nvdec_decode"].values()):
+        decode_api = "nvdec"
     else:
         decode_api = "pending"
-    backend_status = "observed" if decode_api == "vaapi" and render_api == "vulkan" else "proposed"
+    backend_status = "observed" if decode_api in {"vaapi", "nvdec"} and render_api == "vulkan" else "proposed"
 
 video_backend = {
     "vendor": selected["vendor"] if selected else "unknown",
@@ -523,7 +544,7 @@ blueprint = {
     "video_backend": video_backend,
     "vo": "gpu-next" if selected and mpv_version != "absent" else None,
     "gpu_api": "vulkan" if render_api == "vulkan" else None,
-    "hwdec": "vaapi" if decode_api == "vaapi" else None,
+    "hwdec": decode_api if decode_api in {"vaapi", "nvdec"} else None,
     "render_node": selected["render_node"] if selected else None,
     "offload_path": "direct" if offload_required is False else "pending",
     "display": {"resolution": resolution, "hdr": hdr, "refresh_rate": refresh},

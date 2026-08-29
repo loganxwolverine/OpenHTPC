@@ -118,6 +118,7 @@ openhtpc-builder.sh
 openhtpc-calibrate-ui
 openhtpc-calibrate.py
 openhtpc-capabilities.py
+openhtpc-gpu-policy.py
 openhtpc-cinema-auto.py
 openhtpc-configure-tmdb
 openhtpc-core.py
