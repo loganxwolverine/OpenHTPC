@@ -123,6 +123,7 @@ def main() -> int:
     parser.add_argument("--no-media-sources", action="store_true")
     parser.add_argument("--tmdb-from-stdin", action="store_true")
     parser.add_argument("--default-empty", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true")
     args = parser.parse_args()
     if args.default_empty:
         selected = ([], None)
