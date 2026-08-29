@@ -641,9 +641,27 @@ else
             die "Le refresh canonique des capacités a échoué; régénération runtime refusée."
         capabilities_refreshed=true
         stage RUNTIME
-        "$INSTALLED_BUILDER" --regenerate-runtime || \
-            die "La régénération du runtime courant a échoué; la mise à jour n'est pas prête."
-        log "Runtime et configuration MPV régénérés depuis le Hardware Passport conservé."
+        passport_rebuild_required="$(python3 - "${HOME}/.config/openhtpc/profile.json" "${HOME}/.config/openhtpc/runtime/capabilities.json" <<'PYSTALE'
+import json,sys
+try:
+    profile=json.load(open(sys.argv[1],encoding="utf-8"));snapshot=json.load(open(sys.argv[2],encoding="utf-8"))
+    source=profile.get("capability_source") if isinstance(profile,dict) else None
+    print("true" if not isinstance(source,dict) or any(source.get(key)!=snapshot.get(key) for key in ("hardware_fingerprint","runtime_fingerprint")) else "false")
+except (OSError,ValueError):
+    print("false")
+PYSTALE
+        )"
+        if [[ $passport_rebuild_required == true ]]; then
+            "$INSTALLED_BUILDER" --rebuild-passport || \
+                die "Le Hardware Passport périmé n'a pas pu être reconstruit; la mise à jour n'est pas prête."
+            OPENHTPC_HOME="$HOME" OPENHTPC_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/openhtpc-capabilities.py" --refresh >/dev/null || \
+                die "Le refresh post-reconstruction des capacités a échoué."
+            log "Hardware Passport et runtime reconstruits depuis les capacités courantes."
+        else
+            "$INSTALLED_BUILDER" --regenerate-runtime || \
+                die "La régénération du runtime courant a échoué; la mise à jour n'est pas prête."
+            log "Runtime et configuration MPV régénérés depuis le Hardware Passport conservé."
+        fi
     else
         log "Relancez openhtpc-builder après un changement matériel."
     fi

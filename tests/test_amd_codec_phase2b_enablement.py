@@ -114,7 +114,7 @@ class AmdCodecPhase2BEnablement(unittest.TestCase):
         generator = RUNTIME_GENERATOR.read_text(encoding="utf-8")
         self.assertNotIn('backend.get("vendor") != "intel"', builder)
         self.assertEqual(builder.count('"$RUNTIME_GENERATOR" "$PROFILE_FILE"'), 2)
-        self.assertIn('hwdec=vaapi', generator)
+        self.assertIn('hwdec={decode_api}', generator)
         self.assertIn('gpu-api=vulkan', generator)
 
     def test_installer_always_runs_canonical_refresh_after_noop_package_path(self):

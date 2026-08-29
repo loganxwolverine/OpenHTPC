@@ -22,5 +22,7 @@ class PassportRebuildWorkflow(unittest.TestCase):
    self.assertEqual(json.loads((config/"user-config.json").read_text()),user);self.assertEqual((config/"tmdb.json").read_text(),'{"state":"synthetic"}')
  def test_builder_requires_saved_answers_for_noninteractive_rebuild(self):
   source=(PAYLOAD/"openhtpc-builder.sh").read_text();self.assertIn('"--rebuild-passport"',source);self.assertIn("reconstruction non interactive refusée",source)
+ def test_update_automatically_rebuilds_only_when_snapshot_proves_staleness(self):
+  source=(PAYLOAD/"install-openhtpc-fedora.sh").read_text();self.assertIn('passport_rebuild_required=',source);self.assertIn('"$INSTALLED_BUILDER" --rebuild-passport',source);self.assertIn("refresh post-reconstruction",source)
 
 if __name__=="__main__":unittest.main()
