@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC NVIDIA native backend — 1.1.3-dev18
+
+- Discovers NVDEC through a bounded, PCI-associated NVIDIA software-stack probe without fabricating physical validation.
+- Prefers a directly capable display GPU before considering an unqualified multi-GPU offload path.
+- Generates native MPV NVDEC PURE and REFERENCE runtimes without a VA-API device option.
+- Rebuilds stale or legacy Hardware Passports through a safe, non-interactive product workflow.
+
 # OPENHTPC NVIDIA native foundation — 1.1.3-dev17
 
 - Characterizes the qualified Intel/AMD VA-API and Vulkan runtime paths without changing them.
