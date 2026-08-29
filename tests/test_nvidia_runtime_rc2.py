@@ -4,6 +4,8 @@ import importlib.util,json,pathlib,tempfile,unittest
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SPEC=importlib.util.spec_from_file_location("nv_runtime",ROOT/"payload/openhtpc-runtime-generator.py")
 RUNTIME=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(RUNTIME)
+CORE_SPEC=importlib.util.spec_from_file_location("nv_core",ROOT/"payload/openhtpc-core.py")
+CORE=importlib.util.module_from_spec(CORE_SPEC);CORE_SPEC.loader.exec_module(CORE)
 COMMON=("vo","gpu-api","hwdec","include","scale","dscale","cscale","dither","dither-depth","scaler-resizes-only","correct-downscaling","linear-downscaling","sigmoid-upscaling","target-colorspace-hint","gamut-mapping-mode")
 
 def execute(api,values,include_vaapi_option=True,offload=False):
@@ -30,5 +32,12 @@ class NvidiaRuntime(unittest.TestCase):
  def test_vaapi_option_and_value_remain_required(self):
   self.assertIsNotNone(execute("vaapi","gpu-next vulkan vaapi\n",False)[3]);self.assertIsNotNone(execute("vaapi","gpu-next vulkan nvdec\n",True)[3])
  def test_unqualified_offload_remains_blocked(self):self.assertIsNotNone(execute("nvdec","gpu-next vulkan nvdec\n",False,True)[3])
+ def test_doctor_generated_runtime_passes_for_current_direct_nvdec(self):
+  with tempfile.TemporaryDirectory() as raw:
+   home=pathlib.Path(raw);config=home/".config/openhtpc";runtime_dir=config/"runtime";runtime_dir.mkdir(parents=True);pure=runtime_dir/"pure.conf";pure.write_text("hwdec=nvdec\n")
+   source={"hardware_fingerprint":"h","runtime_fingerprint":"r","generated_at":"now"}
+   profile={"generator":{"name":"OPENHTPC Builder"},"capability_source":source,"runtime":{"status":"ready","generation_provenance":{"capability_source":source}},"runtime_profiles":{"profiles":{"PURE":{"config_path":str(pure)}}}}
+   (config/"profile.json").write_text(json.dumps(profile));(runtime_dir/"capabilities.json").write_text(json.dumps({"hardware_fingerprint":"h","runtime_fingerprint":"r"}))
+   state=CORE.capability_state(home,home/"install");self.assertTrue(state["VIDEO_RUNTIME_READY"]);self.assertEqual(state["VIDEO_RUNTIME_PROVENANCE"],"CURRENT")
 
 if __name__=="__main__":unittest.main()

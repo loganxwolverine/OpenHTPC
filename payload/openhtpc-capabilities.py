@@ -414,7 +414,8 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
         video = gpu.setdefault("video_decode", {"backends":{}}); video.setdefault("backends", {})["nvdec"] = backend
     fingerprint_data={"gpus":[[g.get("vendor_id"),g.get("device_id"),g.get("kernel_driver")] for g in gpus],"architecture":platform.machine()}
     hardware_fingerprint=hashlib.sha256(json.dumps(fingerprint_data,sort_keys=True).encode()).hexdigest()
-    runtime_data={"mpv":(mpv.get("stdout","").splitlines() or [None])[0],"ffmpeg":(ffver.get("stdout","").splitlines() or [None])[0],"vaapi_drivers":sorted(set(va_drivers)),"gpu_drivers":[g.get("kernel_driver") for g in gpus]}
+    runtime_data={"mpv":(mpv.get("stdout","").splitlines() or [None])[0],"ffmpeg":(ffver.get("stdout","").splitlines() or [None])[0],"vaapi_drivers":sorted(set(va_drivers)),"gpu_drivers":[g.get("kernel_driver") for g in gpus],
+                  "nvidia_drivers":sorted({item["driver_version"] for item in smi_gpus.values()}),"mpv_hwdec_nvdec":"nvdec" in mpv_hwdec.get("stdout","").lower()}
     runtime_fingerprint=hashlib.sha256(json.dumps(runtime_data,sort_keys=True).encode()).hexdigest()
     history = validation_history(home)
     codec_matrix={}
@@ -510,10 +511,13 @@ def profile_codec_observation(snapshot: dict[str, Any]) -> dict[str, bool]:
     codecs = snapshot.get("video_decode", {}).get("codecs", {})
     result = {}
     for profile_name, canonical_names in PROFILE_CODEC_MAP.items():
-        statuses = [codecs.get(name, {}).get("hardware_decode", {}).get("status") for name in canonical_names]
+        entries = [codecs.get(name, {}) for name in canonical_names]
+        statuses = [entry.get("hardware_decode", {}).get("status") for entry in entries]
         if any(status not in {"SUPPORTED", "UNSUPPORTED"} for status in statuses):
             raise ValueError("CAPABILITY_CODEC_OBSERVATION_INCOMPLETE")
-        result[profile_name] = any(status == "SUPPORTED" for status in statuses)
+        result[profile_name] = any(status == "SUPPORTED" and
+                                   ("hardware_backends" not in entry or "vaapi" in entry.get("hardware_backends", []))
+                                   for entry, status in zip(entries, statuses))
     return result
 
 

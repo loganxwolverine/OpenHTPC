@@ -700,6 +700,8 @@ runtime_data = {
     "ffmpeg": ffmpeg.splitlines()[0] if ffmpeg else None,
     "vaapi_drivers": sorted(set(vaapi_drivers)),
     "gpu_drivers": [gpu.get("kernel_driver") for gpu in fingerprint_gpus],
+    "nvidia_drivers": sorted({parts[2].strip() for line in lines("nvidia-smi.csv") if len(parts := line.split(",")) == 3}),
+    "mpv_hwdec_nvdec": "nvdec" in "\n".join(lines("mpv-values.txt")).lower(),
 }
 runtime_fingerprint = hashlib.sha256(json.dumps(runtime_data, sort_keys=True).encode()).hexdigest()
 generated_at = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
