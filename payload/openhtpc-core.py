@@ -197,6 +197,9 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("External key database", key_database.get("status", "NOT_CONFIGURED")),
         ("Protected optical playback", "ENABLED" if protected.get("status") == "AVAILABLE" else "DISABLED"),
     ])
+    last_protected_attempt = read_json(state_root / "protected-optical-last-attempt.json")
+    if last_protected_attempt:
+        checks_raw.append(("Last protected disc attempt", last_protected_attempt.get("status", "UNKNOWN")))
     runtime_lifecycle = _runtime_lifecycle(home, install)
     version=read_json(install/"version.json") or {"product":"OPENHTPC Basic V1","version":(install/"VERSION").read_text().strip() if (install/"VERSION").is_file() else "UNKNOWN","build_id":"UNKNOWN","build_date":"UNKNOWN"}
     flex_metadata = read_json(install / "flex/BUILD-METADATA.json") or {}

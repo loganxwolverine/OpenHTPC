@@ -450,8 +450,9 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         media_name = {"BLURAY_VIDEO":"BLU-RAY","UHD_BLURAY_VIDEO":"UHD BLU-RAY","BLURAY_FAMILY":"BLU-RAY / UHD"}[state]
         if decision["playback_action"] == "ENABLED":
             device = shlex.quote(str(optical.get("device") or "")); generation = int(optical.get("generation", 0) or 0)
+            token = _optical_model.playback_action_token(optical, _optical_model.protected_capability(home) if home else {})
             entries.append((f"LIRE LE {media_name}", media_play_icon,
-                            f":fork {install/'openhtpc-play-optical'} --device {device} --generation {generation}"))
+                            f":fork {install/'openhtpc-play-optical'} --device {device} --generation {generation} --action-token {token}"))
         else:
             reason_labels = {
                 "PROTECTION_UNKNOWN":"PROTECTION NON DÉTERMINÉE",

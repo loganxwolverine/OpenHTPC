@@ -234,6 +234,15 @@ def playback_decision(state,protected_media=None):
             "playback_action":"ENABLED" if enabled else "DISABLED","playback_reason":reason,
             "playable":enabled,"playback_provider":"core" if canonical=="DVD_VIDEO" else "protected-optical-provider"}
 
+def playback_action_token(state,protected_media=None):
+    """Bind an optical action to disc identity and the current provider snapshot."""
+    protected_media=protected_media if isinstance(protected_media,dict) else {}
+    identity={"generation":int(state.get("generation",0) or 0),"device":state.get("device"),
+              "canonical_state":canonical_state(state),"protection":state.get("protection","UNKNOWN"),
+              "capability":protected_media}
+    digest=hashlib.blake2s(json.dumps(identity,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode(),digest_size=16).hexdigest()
+    return "oact_"+digest
+
 def _playback_fields(canonical):
     if canonical=="DVD_VIDEO":
         return {"detected":True,"playback_provider":"core","playable":True,"playback_status":"AVAILABLE"}

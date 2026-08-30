@@ -43,7 +43,8 @@ def write_menu(home,install,data):
   entries.append(("ÉJECTER",f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {dev}"))
  elif canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
   if decision["playback_action"]=="ENABLED":
-   entries.append(("LIRE · "+data["title"],f"{install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)}"))
+   token=optical_model.playback_action_token(state,optical_model.protected_capability(home))
+   entries.append(("LIRE · "+data["title"],f"{install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)} --action-token {token}"))
   else: entries.append((media["message"]+" — "+decision["playback_reason"].replace("_"," ")+".",":fork true"))
  elif state.get("state")=="INITIALIZING": entries.append(("INITIALISATION DU DISQUE…",":fork true"))
  else: entries.append(("AUCUN DISQUE DÉTECTÉ — Insérez un DVD, Blu-ray ou UHD compatible.",":fork true"))

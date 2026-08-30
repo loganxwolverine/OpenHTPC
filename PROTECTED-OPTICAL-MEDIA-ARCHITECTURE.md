@@ -46,3 +46,20 @@ optical dispatcher independently rechecks device, generation, media type,
 protection, and capability before accepting an action. Phase 2 stops after
 authorization and does not invoke libbluray, libaacs, MPV, or any decryption
 mechanism.
+
+## Phase 3 system backend
+
+Provider `AVAILABLE` means only that OPENHTPC may attempt to open a protected
+disc. It is not evidence that the current disc is accessible. After the Dev2
+dispatcher checks generation, action token, device, media identity, protection,
+and current capability again, the backend passes the canonical device to MPV's
+normal libbluray integration. System libbluray delegates protected access to
+the already-installed system libraries and the user's external configuration.
+
+`OPEN_SUCCESS` records that the backend actually opened media streams.
+`OPEN_FAILED` records a clean failure for that disc and session. This runtime
+result is informational, remains separate from the machine capability, and
+does not change `PROTECTED_OPTICAL_SUPPORT` from `AVAILABLE`. Unprotected
+Blu-ray and UHD Blu-ray use the same libbluray path without requiring libaacs
+or an external key database. OPENHTPC still never reads, parses, copies,
+changes, supplies, or acquires key material.

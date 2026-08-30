@@ -119,6 +119,7 @@ openhtpc-calibrate-ui
 openhtpc-calibrate.py
 openhtpc-capabilities.py
 openhtpc-protected-optical.py
+openhtpc-protected-optical-backend.py
 openhtpc-gpu-policy.py
 openhtpc-cinema-auto.py
 openhtpc-configure-tmdb

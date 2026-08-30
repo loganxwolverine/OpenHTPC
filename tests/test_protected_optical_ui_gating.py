@@ -69,10 +69,12 @@ class MenuAndDispatcher(unittest.TestCase):
   self.assertIn("openhtpc-play-optical --device /dev/sr0 --generation 7",text)
  def test_forged_or_stale_action_is_refused_server_side(self):
   current=state();self.write(current,capability("NOT_AVAILABLE"))
-  with self.assertRaisesRegex(ValueError,"OPTICAL_PLAYBACK_PROTECTED_SUPPORT_NOT_AVAILABLE"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr0",7)
+  unavailable=OPTICAL.playback_action_token(current,capability("NOT_AVAILABLE"))
+  with self.assertRaisesRegex(ValueError,"OPTICAL_PLAYBACK_PROTECTED_SUPPORT_NOT_AVAILABLE"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr0",7,unavailable,lambda _device:True)
   self.write(current,capability("AVAILABLE"))
-  with self.assertRaisesRegex(ValueError,"STALE_OPTICAL_GENERATION"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr0",6)
-  with self.assertRaisesRegex(ValueError,"OPTICAL_DEVICE_MISMATCH"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr1",7)
+  token=OPTICAL.playback_action_token(current,capability("AVAILABLE"))
+  with self.assertRaisesRegex(ValueError,"STALE_OPTICAL_GENERATION"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr0",6,token,lambda _device:True)
+  with self.assertRaisesRegex(ValueError,"OPTICAL_DEVICE_MISMATCH"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr1",7,token,lambda _device:True)
  def test_next_menu_generation_reflects_capability_refresh(self):
   current=state();self.write(current,capability("NOT_CONFIGURED"));before=self.menu(current)
   self.write(current,capability("AVAILABLE"));after=self.menu(current)
@@ -84,7 +86,7 @@ class PhaseBoundary(unittest.TestCase):
   code="\n".join((PAYLOAD/name).read_text() for name in ("openhtpc-optical.py","openhtpc-play-optical"))
   for forbidden in ("urlopen(","requests.","curl ","wget ","download_keydb","fetch_keys"):
    self.assertNotIn(forbidden,code.lower())
- def test_dispatcher_contains_no_provider_or_mpv_launch(self):
-  code=(PAYLOAD/"openhtpc-play-optical").read_text();self.assertNotIn("subprocess",code);self.assertNotIn("execv",code);self.assertNotIn("mpv",code.lower())
+ def test_dispatcher_delegates_only_after_authorization(self):
+  code=(PAYLOAD/"openhtpc-play-optical").read_text();self.assertIn("authorize(home,install",code);self.assertIn("openhtpc-protected-optical-backend.py",code)
 
 if __name__=="__main__":unittest.main()

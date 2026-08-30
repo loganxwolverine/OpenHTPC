@@ -1,42 +1,62 @@
 #!/usr/bin/env python3
-"""Validate a generation-bound optical action; Phase 2 launches no provider."""
+"""Revalidate and dispatch a generation-bound Blu-ray/UHD action."""
 # Copyright 2026 Steve Dehanne
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
+import argparse,datetime,hmac,importlib.machinery,importlib.util,json,os,pathlib,shutil,subprocess,sys,tempfile
+from typing import Any,Callable
 
-import argparse
-import importlib.util
-import json
-import os
-import pathlib
-import sys
+def load(path:pathlib.Path):
+    loader=importlib.machinery.SourceFileLoader(path.stem,str(path));spec=importlib.util.spec_from_loader(path.stem,loader)
+    module=importlib.util.module_from_spec(spec);loader.exec_module(module);return module
 
-
-def load(path: pathlib.Path):
-    spec=importlib.util.spec_from_file_location("openhtpc_optical_dispatch",path)
-    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
-
-
-def authorize(home: pathlib.Path, install: pathlib.Path, device: str, generation: int) -> dict:
+def authorize(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,action_token:str,
+              device_exists:Callable[[str],bool]=os.path.exists)->dict[str,Any]:
     optical=load(install/"openhtpc-optical.py")
-    try: state=json.loads((home/".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
-    except (OSError,json.JSONDecodeError) as error: raise ValueError("OPTICAL_STATE_UNAVAILABLE") from error
+    try:state=json.loads((home/".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError) as error:raise ValueError("OPTICAL_STATE_UNAVAILABLE") from error
     if int(state.get("generation",0) or 0)!=generation:raise ValueError("STALE_OPTICAL_GENERATION")
     if state.get("device")!=device or not device.startswith("/dev/"):raise ValueError("OPTICAL_DEVICE_MISMATCH")
-    if optical.canonical_state(state) not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO"}:raise ValueError("OPTICAL_MEDIA_NOT_SUPPORTED")
-    decision=optical.playback_decision(state,optical.protected_capability(home))
+    if not device_exists(device):raise ValueError("OPTICAL_DEVICE_REMOVED")
+    canonical=optical.canonical_state(state)
+    if canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO"}:raise ValueError("OPTICAL_MEDIA_NOT_SUPPORTED")
+    capability=optical.protected_capability(home);expected=optical.playback_action_token(state,capability)
+    if not hmac.compare_digest(action_token or "",expected):raise ValueError("OPTICAL_ACTION_TOKEN_INVALID")
+    decision=optical.playback_decision(state,capability)
     if decision["playback_action"]!="ENABLED":raise ValueError("OPTICAL_PLAYBACK_"+decision["playback_reason"])
-    return decision
+    return {"state":state,"capability":capability,"decision":decision}
 
+def atomic_result(home:pathlib.Path,result:dict[str,Any])->None:
+    target=home/".local/state/openhtpc/protected-optical-last-attempt.json";target.parent.mkdir(parents=True,exist_ok=True)
+    data={"schema":1,"timestamp":datetime.datetime.now().astimezone().isoformat(),**result}
+    fd,name=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as stream:json.dump(data,stream,sort_keys=True);stream.write("\n")
+        os.chmod(name,0o600);os.replace(name,target)
+    finally:
+        if os.path.exists(name):os.unlink(name)
 
-def main() -> int:
-    parser=argparse.ArgumentParser();parser.add_argument("--device",required=True);parser.add_argument("--generation",required=True,type=int);args=parser.parse_args()
+def dispatch(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,action_token:str,*,
+             backend:Callable[...,dict[str,Any]]|None=None,device_exists:Callable[[str],bool]=os.path.exists)->dict[str,Any]:
+    authorize(home,install,device,generation,action_token,device_exists)
+    current=authorize(home,install,device,generation,action_token,device_exists)
+    request={"device":device,"media_type":current["decision"]["media_type"],"protection":current["decision"]["protection"],
+             "provider_status":current["decision"]["protected_media_support"],"generation":generation}
+    if backend is None:backend=load(install/"openhtpc-protected-optical-backend.py").open_disc
+    result={**backend(home,request),"generation":generation,"device":device};atomic_result(home,result);return result
+
+def notify(message:str)->None:
+    if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("kdialog"):
+        subprocess.run(["kdialog","--title","OPENHTPC","--error",message],check=False)
+    else:print(f"[OPENHTPC] {message}",file=sys.stderr)
+
+def main()->int:
+    parser=argparse.ArgumentParser();parser.add_argument("--device",required=True);parser.add_argument("--generation",required=True,type=int);parser.add_argument("--action-token",required=True);args=parser.parse_args()
     home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()));install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"))
-    try:authorize(home,install,args.device,args.generation)
-    except (ValueError,OSError,ImportError,AttributeError) as error:
-        print(str(error),file=sys.stderr);return 3
-    print("OPTICAL_PLAYBACK_AUTHORIZED_PROVIDER_PENDING")
+    try:result=dispatch(home,install,args.device,args.generation,args.action_token)
+    except (ValueError,OSError,ImportError,AttributeError,KeyError,TypeError) as error:
+        print(str(error),file=sys.stderr);notify("Ce média optique n'est plus disponible ou autorisé.");return 0
+    if result.get("status")!="OPEN_SUCCESS":notify("Impossible d'ouvrir ce média protégé avec la configuration actuellement disponible.")
     return 0
-
 
 if __name__=="__main__":raise SystemExit(main())

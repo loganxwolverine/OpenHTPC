@@ -54,6 +54,7 @@ CHECK_LABELS_FR = {
     "Protected optical media": "Médias optiques protégés",
     "External key database": "Base de clés externe",
     "Protected optical playback": "Lecture optique protégée",
+    "Last protected disc attempt": "Dernière tentative de disque protégé",
 }
 
 

@@ -355,3 +355,11 @@ R1 did not claim final `1.1.0` status.
   preserving unprotected media and the existing DVD path.
 - Revalidate generation, device, media type, and capability in a bounded
   optical dispatcher without implementing protected playback.
+
+# OPENHTPC Protected Optical Provider Phase 3 — 1.1.4-dev3
+
+- Connect authorized Blu-ray/UHD actions to MPV's system libbluray backend.
+- Keep provider readiness separate from per-disc `OPEN_SUCCESS` and
+  `OPEN_FAILED` results.
+- Preserve the existing DVD and GPU runtime paths while rejecting stale,
+  forged, removed-device, and no-longer-authorized optical actions.

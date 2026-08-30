@@ -118,6 +118,8 @@ class ProtectedOpticalDoctor(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             home = pathlib.Path(raw); install = home / "install"; install.mkdir()
             (install / "version.json").write_text(json.dumps({"version":"test","build_id":"test","build_date":"test"}))
+            attempt = home / ".local/state/openhtpc/protected-optical-last-attempt.json"; attempt.parent.mkdir(parents=True)
+            attempt.write_text(json.dumps({"schema":1,"status":"OPEN_FAILED","reason":"DISC_OPEN_REFUSED"}))
             state = {
                 "HARDWARE_PASSPORT_READY":True, "HARDWARE_PASSPORT_PROVENANCE":"CURRENT",
                 "VIDEO_RUNTIME_READY":True, "AUDIO_RUNTIME_READY":True, "VIDEO_RUNTIME_PROVENANCE":"CURRENT",
@@ -146,6 +148,7 @@ class ProtectedOpticalDoctor(unittest.TestCase):
             self.assertEqual(report["overall"], "READY")
             self.assertEqual(statuses["Protected optical media"], "NOT_CONFIGURED")
             self.assertEqual(statuses["libbdplus"], "NOT_AVAILABLE")
+            self.assertEqual(statuses["Last protected disc attempt"], "OPEN_FAILED")
 
 
 class RuntimeNonRegression(unittest.TestCase):
