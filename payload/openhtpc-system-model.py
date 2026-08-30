@@ -33,6 +33,8 @@ STATUS_FR = {
     "RUNNING": "En cours",
     "STOPPED": "Arrêté",
     "NOT_CONFIGURED": "Non configuré",
+    "NOT_AVAILABLE": "Non disponible",
+    "BLOCKED": "Bloqué",
     "NOT_INSTALLED": "Non installé",
     "NOT_GENERATED": "Non généré",
     "SKIPPED_UNSUPPORTED_ENVIRONMENT": "Non applicable",
@@ -47,6 +49,8 @@ CHECK_LABELS_FR = {
     "Media Browser": "Explorateur de médias",
     "DVD": "Prise en charge DVD",
     "Capability snapshot": "Instantané des capacités",
+    "Protected optical media": "Médias optiques protégés",
+    "External key database": "Base de clés externe",
 }
 
 

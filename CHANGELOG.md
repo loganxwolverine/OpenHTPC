@@ -337,3 +337,12 @@ R1 did not claim final `1.1.0` status.
 ## OPENHTPC Basic V1.0.0 Gold Master
 
 - First qualified OPENHTPC Basic public baseline.
+
+# OPENHTPC Protected Optical Provider Phase 1 — 1.1.4-dev1
+
+- Add a read-only protected optical capability model for externally configured
+  `libbluray`, `libaacs`, optional `libbdplus`, and user-provided `KEYDB.cfg`.
+- Expose the optional state in Doctor without changing Overall READY when the
+  external configuration is unavailable or incomplete.
+- Preserve all RC2 playback dispatch, MPV, Hardware Passport, and GPU runtime
+  behavior.

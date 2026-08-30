@@ -89,6 +89,7 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
     optical = read_json(home / ".local/state/openhtpc/optical-current.json") or {}
     runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
     snapshot = read_json(home / ".config/openhtpc/runtime/capabilities.json")
+    protected = (snapshot or {}).get("optical", {}).get("protected_media", {})
     passport_provenance = capability_provenance_state(profile, snapshot)
     runtime_provenance = runtime_provenance_state(profile, passport_provenance)
     profiles = profile.get("runtime_profiles") if isinstance(profile.get("runtime_profiles"), dict) else {}
@@ -117,6 +118,7 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
         "AUTOSTART_READY": (home / ".config/autostart/openhtpc.desktop").is_file(),
         "PLUGIN_REGISTRY_READY": not plugin_errors,
         "DISC_MONITOR_ACTIVE": _process_active("openhtpc-optical-monitor"),
+        "PROTECTED_OPTICAL_SUPPORT": protected,
         "optical_state": optical_state,
         "plugins": plugins,
         "plugin_errors": plugin_errors,
@@ -184,6 +186,16 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("Plugin Registry", state["PLUGIN_REGISTRY_READY"]),
         ("Capability snapshot", "AVAILABLE" if read_json(home / ".config/openhtpc/runtime/capabilities.json") else "NOT_GENERATED"),
     ]
+    protected = state.get("PROTECTED_OPTICAL_SUPPORT") or {}
+    dependencies = protected.get("dependencies") if isinstance(protected.get("dependencies"), dict) else {}
+    key_database = protected.get("external_key_database") if isinstance(protected.get("external_key_database"), dict) else {}
+    checks_raw.extend([
+        ("Protected optical media", protected.get("status", "NOT_CONFIGURED")),
+        ("libbluray", (dependencies.get("libbluray") or {}).get("status", "NOT_AVAILABLE")),
+        ("libaacs", (dependencies.get("libaacs") or {}).get("status", "NOT_AVAILABLE")),
+        ("libbdplus", (dependencies.get("libbdplus") or {}).get("status", "NOT_AVAILABLE")),
+        ("External key database", key_database.get("status", "NOT_CONFIGURED")),
+    ])
     runtime_lifecycle = _runtime_lifecycle(home, install)
     version=read_json(install/"version.json") or {"product":"OPENHTPC Basic V1","version":(install/"VERSION").read_text().strip() if (install/"VERSION").is_file() else "UNKNOWN","build_id":"UNKNOWN","build_date":"UNKNOWN"}
     flex_metadata = read_json(install / "flex/BUILD-METADATA.json") or {}
@@ -222,6 +234,7 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         checks.append({"label":label,"status":status})
         blocking |= status in {"FAIL", "STALE", "REBUILD_REQUIRED"} and label != "Plasma optical suppression"
         blocking |= label == "Desktop restore" and status.startswith("FAILED")
+        blocking |= label == "Protected optical media" and status == "BLOCKED"
     installed = {item["plugin_id"] for item in state["plugins"]}
     optional=[]
     for name, label in (("bluray", "Blu-ray"), ("uhd", "UHD"), ("jellyfin", "Jellyfin"), ("plex", "Plex"), ("streaming", "Streaming")):
@@ -381,4 +394,3 @@ def _video_profile_status(home: pathlib.Path, install: pathlib.Path) -> str:
         return "PURE"
     except Exception:
         return "PROFILE_UNREADABLE"
-

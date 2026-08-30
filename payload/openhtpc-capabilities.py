@@ -6,6 +6,7 @@ import argparse
 import datetime
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -19,8 +20,22 @@ from typing import Any, Callable
 
 SCHEMA = 1
 PROBE_VERSION = "1.1-phase-a-3"
-STATES = {"SUPPORTED", "UNSUPPORTED", "AVAILABLE", "UNAVAILABLE", "DETECTED", "VALIDATED", "UNVALIDATED", "UNKNOWN", "ACTIVE", "INACTIVE", "NOT_APPLICABLE", "NOT_RUN", "NOT_EVALUATED"}
+STATES = {"SUPPORTED", "UNSUPPORTED", "AVAILABLE", "UNAVAILABLE", "NOT_AVAILABLE", "NOT_CONFIGURED", "BLOCKED", "DETECTED", "VALIDATED", "UNVALIDATED", "UNKNOWN", "ACTIVE", "INACTIVE", "NOT_APPLICABLE", "NOT_RUN", "NOT_EVALUATED"}
 Runner = Callable[[list[str], float], dict[str, Any]]
+
+
+def protected_optical_model(home: pathlib.Path) -> dict[str, Any]:
+    path = pathlib.Path(__file__).with_name("openhtpc-protected-optical.py")
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_protected_optical", path)
+        if spec is None or spec.loader is None:
+            raise ImportError("PROTECTED_OPTICAL_MODULE_UNAVAILABLE")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        return module.detect(home)
+    except (OSError, ImportError, AttributeError, TypeError, ValueError):
+        return {"capability": "PROTECTED_OPTICAL_SUPPORT", "status": "BLOCKED",
+                "available": False, "can_open_protected_optical_media": False,
+                "dependencies": {}, "external_key_database": {"status": "NOT_CONFIGURED"}}
 
 
 def fact(status: str, evidence: list[str] | None = None, validated: bool = False, **details: Any) -> dict[str, Any]:
@@ -471,7 +486,7 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
       "video_decode":{"ffmpeg":{"status":fact("AVAILABLE" if ffmpeg.get("status")=="OK" else "UNAVAILABLE" if ffmpeg.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["FFMPEG"]),"version":(ffver.get("stdout","").splitlines() or [None])[0]},
                       "mpv":{"status":fact("AVAILABLE" if mpv.get("status")=="OK" else "UNAVAILABLE" if mpv.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["MPV"]),"version":(mpv.get("stdout","").splitlines() or [None])[0],"gpu_next":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"])},"codecs":codec_matrix},
       "audio":audio,
-      "optical":{"drives":optical_devices,"dvd":{"physical_support":fact("DETECTED" if optical_devices else "UNAVAILABLE",["HARDWARE_PASSPORT"] if optical_devices else []),"css_support":fact("AVAILABLE" if shutil.which("lsdvd") else "UNKNOWN",["OPENHTPC_RUNTIME"]),"validated_playback":fact("UNVALIDATED")},"bluray_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"]),"uhd_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"])},
+      "optical":{"drives":optical_devices,"dvd":{"physical_support":fact("DETECTED" if optical_devices else "UNAVAILABLE",["HARDWARE_PASSPORT"] if optical_devices else []),"css_support":fact("AVAILABLE" if shutil.which("lsdvd") else "UNKNOWN",["OPENHTPC_RUNTIME"]),"validated_playback":fact("UNVALIDATED")},"protected_media":protected_optical_model(home),"bluray_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"]),"uhd_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"])},
       "media":{"configured_sources":len(sources),"accessible_sources":sum(item["accessible"] for item in sources),"sources":sources,"playback_backend":"mpv"},
       "video_processing":{"gpu_backend":fact("AVAILABLE" if any(item.get('device_type')!='PHYSICAL_DEVICE_TYPE_CPU' for item in vulkan_devices) else "UNKNOWN",["VULKAN"]),"render_backend":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"]),"output_mode":active_display.get("current_mode") if active_display else None,"benchmark":{"version":None,"status":"NOT_RUN","results":{}},"recommended_profile":None,"recommendation_status":"NOT_EVALUATED","active_profile":"PURE"},
       "validation":{"records":history},"confidence":{"partial":any(item.get("status") not in {"OK"} for item in diagnostics.values()),"probe_diagnostics":diagnostics}}
