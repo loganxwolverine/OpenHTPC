@@ -1,5 +1,10 @@
 # Changelog
 
+# OPENHTPC NVIDIA NVDEC MPEG-2 whitelist — 1.1.3-dev19
+
+- Preserve mpv 0.41's default hardware-decoder codec whitelist and add `mpeg2video` only for native NVIDIA NVDEC profiles that report MPEG-2 support.
+- Keep NVIDIA Vulkan/NVDEC selection and Intel/AMD VAAPI runtime generation unchanged.
+
 # OPENHTPC NVIDIA native backend — 1.1.3-dev18
 
 - Discovers NVDEC through a bounded, PCI-associated NVIDIA software-stack probe without fabricating physical validation.

@@ -10,6 +10,11 @@ import sys
 import tempfile
 
 
+MPV_DEFAULT_HWDEC_CODEC_WHITELIST = (
+    "h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx"
+)
+
+
 def atomic_json(path: pathlib.Path, value: dict) -> None:
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
@@ -58,7 +63,18 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
         "target-colorspace-hint", "gamut-mapping-mode",
     )
     decode_api = backend.get("decode_api")
-    required_options = common_options + (("vaapi-device",) if decode_api == "vaapi" else ())
+    nvdec_mpeg2 = bool(
+        decode_api == "nvdec"
+        and backend.get("vendor") == "nvidia"
+        and processing.get("vendor") == "nvidia"
+        and processing.get("nvdec_decode", {}).get("mpeg2") is True
+    )
+    backend_options = (
+        ("vaapi-device",) if decode_api == "vaapi"
+        else ("hwdec-codecs",) if nvdec_mpeg2
+        else ()
+    )
+    required_options = common_options + backend_options
     required_values = ("gpu-next", "vulkan", decode_api) if decode_api in {"vaapi", "nvdec"} else ("gpu-next", "vulkan")
     options_available = all(re.search(rf"^ --{re.escape(name)}\s", options, re.MULTILINE) for name in required_options)
     values_available = all(token in values for token in required_values)
@@ -92,6 +108,10 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
     provenance = f"# OPENHTPC runtime {version['version']} / {version['build_id']}\n"
     if ready:
         backend_content = f"vo=gpu-next\ngpu-api=vulkan\nhwdec={decode_api}\n"
+        if nvdec_mpeg2:
+            backend_content += (
+                f"hwdec-codecs={MPV_DEFAULT_HWDEC_CODEC_WHITELIST},mpeg2video\n"
+            )
         if decode_api == "vaapi":
             backend_content += f"vaapi-device={processing['render_node']}\n"
         pure_content = (

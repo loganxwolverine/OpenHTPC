@@ -6,13 +6,15 @@ SPEC=importlib.util.spec_from_file_location("nv_runtime",ROOT/"payload/openhtpc-
 RUNTIME=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(RUNTIME)
 CORE_SPEC=importlib.util.spec_from_file_location("nv_core",ROOT/"payload/openhtpc-core.py")
 CORE=importlib.util.module_from_spec(CORE_SPEC);CORE_SPEC.loader.exec_module(CORE)
-COMMON=("vo","gpu-api","hwdec","include","scale","dscale","cscale","dither","dither-depth","scaler-resizes-only","correct-downscaling","linear-downscaling","sigmoid-upscaling","target-colorspace-hint","gamut-mapping-mode")
+COMMON=("vo","gpu-api","hwdec","hwdec-codecs","include","scale","dscale","cscale","dither","dither-depth","scaler-resizes-only","correct-downscaling","linear-downscaling","sigmoid-upscaling","target-colorspace-hint","gamut-mapping-mode")
+WHITELIST="h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video"
 
-def execute(api,values,include_vaapi_option=True,offload=False):
+def execute(api,values,include_vaapi_option=True,offload=False,mpeg2=False):
  with tempfile.TemporaryDirectory() as raw:
-  root=pathlib.Path(raw);gpu={"pci_slot":"0000:01:00.0","render_node":"/dev/dri/renderD128"};display=dict(gpu)
+  root=pathlib.Path(raw);gpu={"vendor":"nvidia","pci_slot":"0000:01:00.0","render_node":"/dev/dri/renderD128"};display=dict(gpu)
   if offload:display["pci_slot"]="0000:00:02.0"
-  profile={"schema":1,"generator":{"name":"OPENHTPC Builder","version":"4"},"gpu_topology":{"display_gpu":display,"processing_gpu":gpu,"offload_required":offload},"video_backend":{"status":"observed","decode_api":api,"render_api":"vulkan","render_node":gpu["render_node"]}}
+  gpu["nvdec_decode"]={"mpeg2":mpeg2,"h264":True,"hevc":True}
+  profile={"schema":1,"generator":{"name":"OPENHTPC Builder","version":"4"},"gpu_topology":{"display_gpu":display,"processing_gpu":gpu,"offload_required":offload},"video_backend":{"vendor":"nvidia","status":"observed","decode_api":api,"render_api":"vulkan","render_node":gpu["render_node"]}}
   pp=root/"profile";pure=root/"pure";reference=root/"reference";opts=root/"opts";vals=root/"vals";version=root/"version"
   pp.write_text(json.dumps(profile));names=COMMON+(("vaapi-device",) if include_vaapi_option else ())
   rv={"scale":"spline36","dscale":"mitchell","cscale":"spline36","dither":"fruit","dither-depth":"auto","target-colorspace-hint":"auto","gamut-mapping-mode":"auto"}
@@ -23,6 +25,14 @@ def execute(api,values,include_vaapi_option=True,offload=False):
   return json.loads(pp.read_text()),pure.read_text() if pure.exists() else None,reference.read_text() if reference.exists() else None,error
 
 class NvidiaRuntime(unittest.TestCase):
+ def test_nvdec_mpeg2_pure_preserves_default_whitelist(self):
+  _,pure,_,error=execute("nvdec","gpu-next vulkan nvdec\n",False,mpeg2=True);self.assertIsNone(error);self.assertEqual(pure,"# OPENHTPC runtime test / test\n# OPENHTPC Build 4 — profil PURE isolé\n# Générée depuis profile.json ; ne pas copier dans ~/.config/mpv/mpv.conf\nvo=gpu-next\ngpu-api=vulkan\nhwdec=nvdec\n"+f"hwdec-codecs={WHITELIST}\n")
+ def test_nvdec_without_mpeg2_keeps_dev18_runtime(self):
+  _,pure,_,error=execute("nvdec","gpu-next vulkan nvdec\n",False);self.assertIsNone(error);self.assertNotIn("hwdec-codecs=",pure);self.assertNotIn("mpeg2video",pure)
+ def test_nvdec_mpeg2_runtime_never_uses_vaapi_or_all(self):
+  _,pure,_,error=execute("nvdec","gpu-next vulkan nvdec\n",False,mpeg2=True);self.assertIsNone(error);self.assertNotIn("vaapi-device",pure);self.assertNotIn("hwdec=vaapi",pure);self.assertNotIn("hwdec-codecs=all",pure)
+ def test_nvdec_h264_hevc_expectations_remain_valid(self):
+  _,pure,_,error=execute("nvdec","gpu-next vulkan nvdec\n",False,mpeg2=True);self.assertIsNone(error);self.assertIn("h264",pure);self.assertIn("hevc",pure)
  def test_nvdec_pure_has_no_vaapi_device(self):
   result,pure,_,error=execute("nvdec","gpu-next vulkan nvdec\n",False);self.assertIsNone(error);self.assertIn("hwdec=nvdec\n",pure);self.assertNotIn("vaapi-device",pure);self.assertEqual(result["runtime"]["status"],"ready")
  def test_nvdec_reference_keeps_historical_scaling(self):
