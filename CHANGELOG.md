@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC 1.1.3 Release Candidate 2 — 1.1.3-rc2
+
+- Promotes the physically qualified Dev19 NVIDIA stabilization baseline without additional functional changes.
+- Adds bounded native NVIDIA Vulkan/NVDEC support and preserves the qualified Intel/AMD VA-API paths.
+- Records physical MPEG-2, H.264, and HEVC Main 10 NVDEC qualification on the Fedora 44 NVIDIA validator.
+- Preserves all qualified Dev16/RC1 MEDIA synchronization, update, optical, audio, and desktop-return behavior.
+
 # OPENHTPC NVIDIA NVDEC MPEG-2 whitelist — 1.1.3-dev19
 
 - Preserve mpv 0.41's default hardware-decoder codec whitelist and add `mpeg2video` only for native NVIDIA NVDEC profiles that report MPEG-2 support.

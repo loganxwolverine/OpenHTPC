@@ -1,0 +1,42 @@
+OPENHTPC 1.1.3 RC2 — PHYSICAL VALIDATION PLAN
+
+Identity expected after update:
+  Version: 1.1.3-rc2
+  Build: public-release-1.1.3-rc2
+
+Use the canonical RC2 archive and update.sh. Do not purge persistent OPENHTPC
+state. Record version/build, Doctor output, generated runtime, playback result,
+quit/return behavior, and reboot/autostart result for every validator. A failure
+must remain a failure; do not infer PASS from automation or another machine.
+
+NVIDIA — OPENHTPCNVIDIA
+  1. Upgrade Dev19 -> RC2.
+  2. Confirm exact version/build and Doctor Overall READY.
+  3. Confirm PURE: vo=gpu-next, gpu-api=vulkan, hwdec=nvdec, and the default
+     mpv hardware-codec whitelist plus mpeg2video; confirm no VA-API option.
+  4. Through OPENHTPC MEDIA, smoke MPEG-2, H.264, and HEVC Main 10 4K; record
+     image/audio/seek/quit and hardware_decode_backend=nvdec evidence.
+  5. QUITTER -> usable KDE with no relaunch or logout.
+  6. Cold reboot/login and confirm one UI, autostart, and Doctor READY.
+
+RYZEN AMD VALIDATOR
+  1. Upgrade the existing qualified baseline -> RC2.
+  2. Confirm exact version/build and Doctor Overall READY.
+  3. Confirm the generated AMD Vulkan + VA-API path is unchanged.
+  4. Through OPENHTPC MEDIA, perform source listing and video playback smoke.
+  5. QUITTER -> usable KDE, then restart OPENHTPC.
+  6. Cold reboot/login and confirm autostart and Doctor READY.
+
+ZIMABOARD 2 INTEL VALIDATOR
+  1. Upgrade the existing qualified baseline -> RC2.
+  2. Confirm exact version/build and Doctor Overall READY.
+  3. Confirm the generated Intel Vulkan + VA-API path is unchanged.
+  4. Through OPENHTPC MEDIA, perform source listing and video playback smoke.
+  5. If physical DVD media is available, perform detection, metadata, playback,
+     seek, stop, and return smoke without expanding the test to Blu-ray/UHD.
+  6. QUITTER -> usable KDE, then restart OPENHTPC.
+  7. Cold reboot/login and confirm autostart and Doctor READY.
+
+STOP after recording results. Do not tag, publish, or overwrite RC1 from this
+plan. RC2 remains physically unqualified until all required human observations
+are explicitly recorded.

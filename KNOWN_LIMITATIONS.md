@@ -1,4 +1,4 @@
-# Known limitations — OPENHTPC 1.1 Public Candidate R2
+# Known limitations — OPENHTPC 1.1.3 RC2
 
 - Fedora 44 KDE Plasma on Wayland is the currently qualified platform.
 - Automatic French/TrueFrench audio selection is not qualified.
@@ -8,6 +8,9 @@
 - Jellyfin, Plex and NAS plugins are not integrated.
 - HDR-to-SDR phase C6 is not implemented.
 - Plasma Bigscreen is not the canonical OPENHTPC desktop/session platform.
+- Plasma Login Manager behavior with Fedora 44 and NVIDIA driver 610.57.04
+  required the externally configured SDDM workaround on the NVIDIA validator.
+  SDDM is not an OPENHTPC installer requirement.
 - Startup with a large mounted CIFS source was observed at approximately 14
   seconds; future MEDIA performance polish remains non-blocking backlog work.
 - Optical titles may contain technical suffixes or atypical metadata. A future
