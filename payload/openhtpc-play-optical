@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Validate a generation-bound optical action; Phase 2 launches no provider."""
+# Copyright 2026 Steve Dehanne
+# SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+
+
+def load(path: pathlib.Path):
+    spec=importlib.util.spec_from_file_location("openhtpc_optical_dispatch",path)
+    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
+
+
+def authorize(home: pathlib.Path, install: pathlib.Path, device: str, generation: int) -> dict:
+    optical=load(install/"openhtpc-optical.py")
+    try: state=json.loads((home/".local/state/openhtpc/optical-current.json").read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError) as error: raise ValueError("OPTICAL_STATE_UNAVAILABLE") from error
+    if int(state.get("generation",0) or 0)!=generation:raise ValueError("STALE_OPTICAL_GENERATION")
+    if state.get("device")!=device or not device.startswith("/dev/"):raise ValueError("OPTICAL_DEVICE_MISMATCH")
+    if optical.canonical_state(state) not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO"}:raise ValueError("OPTICAL_MEDIA_NOT_SUPPORTED")
+    decision=optical.playback_decision(state,optical.protected_capability(home))
+    if decision["playback_action"]!="ENABLED":raise ValueError("OPTICAL_PLAYBACK_"+decision["playback_reason"])
+    return decision
+
+
+def main() -> int:
+    parser=argparse.ArgumentParser();parser.add_argument("--device",required=True);parser.add_argument("--generation",required=True,type=int);args=parser.parse_args()
+    home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()));install=pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",home/".local/lib/openhtpc"))
+    try:authorize(home,install,args.device,args.generation)
+    except (ValueError,OSError,ImportError,AttributeError) as error:
+        print(str(error),file=sys.stderr);return 3
+    print("OPTICAL_PLAYBACK_AUTHORIZED_PROVIDER_PENDING")
+    return 0
+
+
+if __name__=="__main__":raise SystemExit(main())

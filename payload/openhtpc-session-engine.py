@@ -368,6 +368,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
     play_icon, tmdb_icon, eject_icon, back_icon = icons
     dvd_icon = install / "assets/ui/optical-dvd.png"
     media_play_icon = dvd_icon if (state == "DVD_VIDEO" and dvd_icon.is_file()) else play_icon
+    decision = _optical_model.playback_decision(optical, _optical_model.protected_capability(home)) if home else _optical_model.playback_decision(optical, {})
 
     has_token = bool(home and (home / ".config/openhtpc/secrets/tmdb-token").is_file())
     cached_meta = {}
@@ -444,6 +445,25 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             entries.append(("RECONNECTER TMDb", tmdb_icon, f":fork {install/'openhtpc-configure-tmdb'}"))
         elif meta_status == "NO_RESULT":
             entries.append(("RECHERCHE MANUELLE", tmdb_icon, f":fork {recovery}"))
+
+    if state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+        media_name = {"BLURAY_VIDEO":"BLU-RAY","UHD_BLURAY_VIDEO":"UHD BLU-RAY","BLURAY_FAMILY":"BLU-RAY / UHD"}[state]
+        if decision["playback_action"] == "ENABLED":
+            device = shlex.quote(str(optical.get("device") or "")); generation = int(optical.get("generation", 0) or 0)
+            entries.append((f"LIRE LE {media_name}", media_play_icon,
+                            f":fork {install/'openhtpc-play-optical'} --device {device} --generation {generation}"))
+        else:
+            reason_labels = {
+                "PROTECTION_UNKNOWN":"PROTECTION NON DÉTERMINÉE",
+                "MEDIA_TYPE_INDETERMINATE":"TYPE ET PROTECTION NON DÉTERMINÉS",
+                "STRUCTURAL_SUPPORT_NOT_AVAILABLE":"SUPPORT STRUCTUREL NON DISPONIBLE",
+                "PROTECTED_SUPPORT_NOT_CONFIGURED":"SUPPORT PROTÉGÉ NON CONFIGURÉ",
+                "PROTECTED_SUPPORT_NOT_AVAILABLE":"SUPPORT PROTÉGÉ NON DISPONIBLE",
+                "PROTECTED_SUPPORT_BLOCKED":"SUPPORT PROTÉGÉ BLOQUÉ",
+            }
+            entries.append((f"{media_name} · {reason_labels.get(decision['playback_reason'],'LECTURE NON DISPONIBLE')}", media_play_icon, ":fork true"))
+            if decision["protection"] == "PROTECTED":
+                entries.append(("OPENHTPC NE FOURNIT PAS DE CLÉS AACS", media_play_icon, ":fork true"))
 
     if state == "DVD_VIDEO":
         presentation = "PURE"

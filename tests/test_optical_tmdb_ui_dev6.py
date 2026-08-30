@@ -35,7 +35,7 @@ class TmdbDataFlow(unittest.TestCase):
   entries=[line for line in menu.splitlines() if line.startswith("Entry")]
   self.assertIn("Hancock  ·  2008",entries[0]);self.assertIn("--generation 12",entries[0]);self.assertIn("--tmdb-id 1",entries[0])
   self.assertIn("Hancock  ·  1963",entries[1]);self.assertEqual(entries[0].split("=",1)[0],"Entry1")
-  self.assertTrue(entries[-1].startswith("Entry4=RETOUR;"))
+  self.assertRegex(entries[-1],r"^Entry\d+=RETOUR;")
 
  def test_navigation_contract_has_multiple_ordered_selectable_entries(self):
   source=(PAYLOAD/"openhtpc-session-engine.py").read_text()

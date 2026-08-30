@@ -145,6 +145,7 @@ openhtpc-media-sources-action
 openhtpc-optical-monitor
 openhtpc-optical.py
 openhtpc-play
+openhtpc-play-optical
 openhtpc-playback-setting
 openhtpc-play-dvd
 openhtpc-playback-policy.py

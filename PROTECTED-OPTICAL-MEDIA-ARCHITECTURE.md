@@ -29,3 +29,20 @@ playback, MPV, a dispatcher, or the interface's Play action.
 The small `status()`, `available()`, and
 `can_open_protected_optical_media()` functions form the future generic provider
 boundary. They deliberately expose no acquisition or decryption operation.
+
+## Phase 2 playback gating
+
+The canonical optical state classifies the disc as `UNPROTECTED`, `PROTECTED`,
+or `UNKNOWN` from mounted-disc filesystem metadata. An unprotected Blu-ray or
+UHD Blu-ray does not require a key database; its action depends only on the
+structural `libbluray` capability. A protected disc requires the external
+protected-media capability to be `AVAILABLE`. Unknown protection is disabled
+conservatively and never presented as playable.
+
+The Flex Play action is derived from the current optical generation and the
+current capability snapshot. A capability refresh changes the presentation
+signature and therefore triggers the existing menu-regeneration cycle. The
+optical dispatcher independently rechecks device, generation, media type,
+protection, and capability before accepting an action. Phase 2 stops after
+authorization and does not invoke libbluray, libaacs, MPV, or any decryption
+mechanism.

@@ -195,6 +195,7 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("libaacs", (dependencies.get("libaacs") or {}).get("status", "NOT_AVAILABLE")),
         ("libbdplus", (dependencies.get("libbdplus") or {}).get("status", "NOT_AVAILABLE")),
         ("External key database", key_database.get("status", "NOT_CONFIGURED")),
+        ("Protected optical playback", "ENABLED" if protected.get("status") == "AVAILABLE" else "DISABLED"),
     ])
     runtime_lifecycle = _runtime_lifecycle(home, install)
     version=read_json(install/"version.json") or {"product":"OPENHTPC Basic V1","version":(install/"VERSION").read_text().strip() if (install/"VERSION").is_file() else "UNKNOWN","build_id":"UNKNOWN","build_date":"UNKNOWN"}

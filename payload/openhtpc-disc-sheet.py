@@ -34,6 +34,7 @@ def model(home,install,state):
  return {"state":state,"title":title,"metadata":metadata,"artwork":artwork,"duration":duration(state["device"]) if canonical=="DVD_VIDEO" else None}
 def write_menu(home,install,data):
  state=data["state"]; canonical=optical_model.canonical_state(state); media=optical_model.presentation(state); icon=data["artwork"]; font=install/"flex/assets/fonts/OpenSans-Regular.ttf"; theme=load_theme(install); entries=[]
+ decision=optical_model.playback_decision(state,optical_model.protected_capability(home))
  if canonical=="DVD_VIDEO":
   meta=data["metadata"]; year=(meta.get("release_date") or "")[:4]
   title=f"{data['title']}{' ('+year+')' if year else ''}"; dev=shlex.quote(state["device"])
@@ -41,7 +42,9 @@ def write_menu(home,install,data):
   if meta.get("status")!="PASS": entries.append(("CONFIGURER TMDb",f":replace {install/'openhtpc-configure-tmdb'}"))
   entries.append(("ÉJECTER",f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {dev}"))
  elif canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
-  entries.append((media["message"]+" — "+media["provider_message"]+".",":fork true"))
+  if decision["playback_action"]=="ENABLED":
+   entries.append(("LIRE · "+data["title"],f"{install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)}"))
+  else: entries.append((media["message"]+" — "+decision["playback_reason"].replace("_"," ")+".",":fork true"))
  elif state.get("state")=="INITIALIZING": entries.append(("INITIALISATION DU DISQUE…",":fork true"))
  else: entries.append(("AUCUN DISQUE DÉTECTÉ — Insérez un DVD, Blu-ray ou UHD compatible.",":fork true"))
  entries.append(("RETOUR",f":replace {install/'openhtpc-session-start'}"))

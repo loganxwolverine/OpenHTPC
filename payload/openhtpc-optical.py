@@ -190,6 +190,50 @@ def _bdmv_header(block):
             except OSError: pass
     return None,None
 
+def _protection_state(block):
+    """Classify protection from filesystem metadata only; never read key material."""
+    roots=_mountpoints(block)
+    if not roots:return "UNKNOWN"
+    for root in roots:
+        for relative in ("AACS","aacs","AACS/MKB_RO.inf","AACS/Unit_Key_RO.inf"):
+            try:
+                if (root/relative).lstat():return "PROTECTED"
+            except OSError:pass
+    for root in roots:
+        for relative in ("BDMV/index.bdmv","BDMV/INDEX.BDMV","bdmv/index.bdmv"):
+            try:
+                if (root/relative).is_file():return "UNPROTECTED"
+            except OSError:pass
+    return "UNKNOWN"
+
+def protected_capability(home):
+    try:
+        snapshot=json.loads((home/".config/openhtpc/runtime/capabilities.json").read_text(encoding="utf-8"))
+        value=snapshot.get("optical",{}).get("protected_media",{})
+        return value if isinstance(value,dict) else {}
+    except (OSError,json.JSONDecodeError,AttributeError):return {}
+
+def playback_decision(state,protected_media=None):
+    """Derive the UI/dispatcher gate from disc truth and canonical capabilities."""
+    canonical=canonical_state(state); protection=state.get("protection","UNKNOWN")
+    protected_media=protected_media if isinstance(protected_media,dict) else {}
+    support=protected_media.get("status","NOT_AVAILABLE")
+    dependencies=protected_media.get("dependencies") if isinstance(protected_media.get("dependencies"),dict) else {}
+    bluray=(dependencies.get("libbluray") or {}).get("status","NOT_AVAILABLE")
+    media_type={"DVD_VIDEO":"DVD","BLURAY_VIDEO":"BLURAY","UHD_BLURAY_VIDEO":"UHD_BLURAY"}.get(canonical,"UNKNOWN")
+    if canonical=="DVD_VIDEO":enabled,reason=True,"DVD_EXISTING_PATH"
+    elif canonical=="BLURAY_FAMILY":enabled,reason=False,"MEDIA_TYPE_INDETERMINATE"
+    elif canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO"}:enabled,reason=False,"MEDIA_NOT_PLAYABLE"
+    elif protection=="UNKNOWN":enabled,reason=False,"PROTECTION_UNKNOWN"
+    elif protection=="UNPROTECTED" and bluray=="AVAILABLE":enabled,reason=True,"UNPROTECTED_MEDIA"
+    elif protection=="UNPROTECTED":enabled,reason=False,"STRUCTURAL_SUPPORT_NOT_AVAILABLE"
+    elif protection=="PROTECTED" and support=="AVAILABLE":enabled,reason=True,"PROTECTED_SUPPORT_AVAILABLE"
+    elif protection=="PROTECTED":enabled,reason=False,f"PROTECTED_SUPPORT_{support}"
+    else:enabled,reason=False,"PROTECTION_STATE_INVALID"
+    return {"media_type":media_type,"protection":protection,"protected_media_support":support,
+            "playback_action":"ENABLED" if enabled else "DISABLED","playback_reason":reason,
+            "playable":enabled,"playback_provider":"core" if canonical=="DVD_VIDEO" else "protected-optical-provider"}
+
 def _playback_fields(canonical):
     if canonical=="DVD_VIDEO":
         return {"detected":True,"playback_provider":"core","playable":True,"playback_status":"AVAILABLE"}
@@ -206,7 +250,7 @@ def _state(canonical,device,legacy,**fields):
            "identity_status":"UNAVAILABLE"}
     value.update(_playback_fields(canonical)); value.update(fields); return value
 
-def probe_device(device,runner=run,header_reader=_bdmv_header):
+def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=_protection_state):
     result=runner(["lsblk","-J","-o","NAME,TYPE,FSTYPE,LABEL,MOUNTPOINTS",str(device)])
     if result.returncode!=0:
         return _state("DETECTION_INDETERMINATE",device,"UNKNOWN_DISC",detection_reason="LSBLK_FAILED")
@@ -242,7 +286,8 @@ def probe_device(device,runner=run,header_reader=_bdmv_header):
     else:
         canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","UNKNOWN"
     value=_state(canonical,device,legacy,volume_label=label,disc_title=None,
-                 uhd_status=uhd_status,detection_evidence=evidence)
+                 uhd_status=uhd_status,detection_evidence=evidence,
+                 protection="UNPROTECTED" if canonical=="DVD_VIDEO" else protection_reader(block) if canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} else "UNKNOWN")
     if header: value["bdmv_index_version"]=header[4:] if header.startswith("INDX") else "UNRECOGNIZED"
     if header_path: value["bdmv_index_path"]=header_path
     if info.returncode==0 and text.strip():
@@ -312,7 +357,7 @@ def cached_state(home):
 
 def ui_state(value):
     """Return only fields whose change is meaningful to the couch UI."""
-    keys=("state","canonical_state","device","volume_label","disc_title","disc_id","playable","playback_status","uhd_status")
+    keys=("state","canonical_state","device","volume_label","disc_title","disc_id","playable","playback_status","uhd_status","protection")
     return {key:value.get(key) for key in keys if value.get(key) is not None}
 
 def ui_state_hash(value):

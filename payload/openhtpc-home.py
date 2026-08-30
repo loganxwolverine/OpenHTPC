@@ -46,9 +46,13 @@ def disc_presentation_signature():
     except Exception:
         return f"{identity}:ERR"
 
+def protected_capability_signature():
+    value = optical.protected_capability(home)
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
 def full_state_key():
     st = optical_state()
-    return (int(st.get("generation", 0) or 0), optical_key(), disc_presentation_signature())
+    return (int(st.get("generation", 0) or 0), optical_key(), disc_presentation_signature(), protected_capability_signature())
 
 def regenerate():
     state = engine.evaluate(home)

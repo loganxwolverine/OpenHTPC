@@ -35,6 +35,8 @@ STATUS_FR = {
     "NOT_CONFIGURED": "Non configuré",
     "NOT_AVAILABLE": "Non disponible",
     "BLOCKED": "Bloqué",
+    "ENABLED": "Activé",
+    "DISABLED": "Désactivé",
     "NOT_INSTALLED": "Non installé",
     "NOT_GENERATED": "Non généré",
     "SKIPPED_UNSUPPORTED_ENVIRONMENT": "Non applicable",
@@ -51,6 +53,7 @@ CHECK_LABELS_FR = {
     "Capability snapshot": "Instantané des capacités",
     "Protected optical media": "Médias optiques protégés",
     "External key database": "Base de clés externe",
+    "Protected optical playback": "Lecture optique protégée",
 }
 
 

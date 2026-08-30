@@ -346,3 +346,12 @@ R1 did not claim final `1.1.0` status.
   external configuration is unavailable or incomplete.
 - Preserve all RC2 playback dispatch, MPV, Hardware Passport, and GPU runtime
   behavior.
+
+# OPENHTPC Protected Optical Provider Phase 2 — 1.1.4-dev2
+
+- Classify Blu-ray/UHD protection independently from media type and external
+  capability state.
+- Gate the Flex Play action from canonical optical and capability truth, while
+  preserving unprotected media and the existing DVD path.
+- Revalidate generation, device, media type, and capability in a bounded
+  optical dispatcher without implementing protected playback.
