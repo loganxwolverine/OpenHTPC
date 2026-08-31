@@ -143,5 +143,8 @@ class AntigravityReadonlyHeadless(unittest.TestCase):
   self.assertGreaterEqual(self.pilot.planner_timeout,300);self.assertGreaterEqual(self.pilot.reviewer_timeout,300)
   self.assertEqual(self.pilot.antigravity_doctor_timeout,90);self.assertEqual(self.pilot.codex_doctor_timeout,90);self.assertGreater(self.pilot.executor_timeout,self.pilot.planner_timeout)
  def test_44_print_timeout_is_explicit(self):self.assertEqual(self.plan_command[self.plan_command.index("--print-timeout")+1],"300s")
+ def test_45_codex_online_doctor_is_read_only_without_approval_routing(self):
+  command=self.pilot._codex_doctor_command(pathlib.Path("/tmp/schema.json"),pathlib.Path("/tmp/output.json"))
+  self.assertEqual(command[command.index("--sandbox")+1],"read-only");self.assertNotIn("--approve-for-me",command);self.assertIn("--ephemeral",command)
 
 if __name__=="__main__":unittest.main()
