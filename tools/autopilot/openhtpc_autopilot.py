@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe local Gemini-planner / Codex-executor orchestration for OPENHTPC.
+"""Safe local Antigravity-planner / Codex-executor orchestration for OPENHTPC.
 
 Copyright 2026 Steve Dehanne
 SPDX-License-Identifier: Apache-2.0
@@ -9,7 +9,7 @@ Original project by Steve Dehanne.
 """
 from __future__ import annotations
 
-import argparse, datetime, fnmatch, json, os, pathlib, re, shutil, subprocess, sys, tempfile, uuid
+import argparse, datetime, fnmatch, hashlib, json, os, pathlib, re, shutil, subprocess, sys, tempfile, uuid
 from typing import Any
 
 SCHEMA_VERSION=1
@@ -83,14 +83,15 @@ def validate_schema(value:Any,schema:dict[str,Any],where:str="$")->None:
 def schema_path(root:pathlib.Path,name:str)->pathlib.Path:return root/"tools/autopilot/schemas"/name
 def validate_document(root:pathlib.Path,value:Any,name:str)->Any:validate_schema(value,load_json(schema_path(root,name)));return value
 
-def parse_gemini_outer(text:str)->dict[str,Any]:
+def parse_antigravity_outer(text:str,require_structured:bool=True)->dict[str,Any]:
  try:outer=json.loads(text)
- except json.JSONDecodeError as exc:raise AutopilotError("GEMINI_OUTER_JSON_INVALID") from exc
- if not isinstance(outer,dict) or not isinstance(outer.get("response"),str):raise AutopilotError("GEMINI_OUTER_JSON_INVALID")
- try:value=json.loads(outer["response"])
- except json.JSONDecodeError as exc:raise AutopilotError("GEMINI_RESPONSE_JSON_INVALID") from exc
- if not isinstance(value,dict):raise AutopilotError("GEMINI_RESPONSE_JSON_INVALID")
- return value
+ except json.JSONDecodeError as exc:raise AutopilotError("ANTIGRAVITY_OUTER_JSON_INVALID") from exc
+ if not isinstance(outer,dict) or outer.get("status")!="SUCCESS":raise AutopilotError("ANTIGRAVITY_STATUS_INVALID")
+ if require_structured:
+  value=outer.get("structured_output")
+  if not isinstance(value,dict):raise AutopilotError("ANTIGRAVITY_STRUCTURED_OUTPUT_INVALID")
+  return value
+ return outer
 
 def sanitize_commit_message(value:str)->str:
  if not isinstance(value,str) or "\n" in value or "\r" in value or len(value)>120 or len(value)<5 or value.startswith("-"):raise AutopilotError("COMMIT_MESSAGE_INVALID")
@@ -129,6 +130,26 @@ def changed_paths(root:pathlib.Path)->list[str]:
 
 def scope_violations(paths:list[str],allowed:list[str])->list[str]:return [path for path in paths if not path_allowed(path,allowed)]
 def head_unchanged(before:str,after:str)->bool:return bool(before==after)
+
+def workspace_fingerprint(root:pathlib.Path)->dict[str,Any]:
+ status=git(root,"status","--porcelain");paths=changed_paths(root);digest=hashlib.sha256()
+ for value in (git(root,"rev-parse","HEAD"),status,git(root,"diff","--binary"),git(root,"diff","--cached","--binary")):
+  digest.update(value.encode("utf-8",errors="surrogateescape"));digest.update(b"\0")
+ untracked=set(filter(None,git(root,"ls-files","--others","--exclude-standard").splitlines()))
+ for relative in sorted(untracked):
+  path=root/relative;digest.update(relative.encode());digest.update(b"\0")
+  try:
+   metadata=path.lstat();digest.update(f"{metadata.st_mode}:{metadata.st_size}".encode());digest.update(b"\0")
+   if path.is_symlink():digest.update(b"SYMLINK\0"+os.readlink(path).encode())
+   elif path.is_file():
+    with path.open("rb") as stream:
+     for block in iter(lambda:stream.read(1024*1024),b""):digest.update(block)
+   else:digest.update(b"NONREGULAR")
+  except OSError:digest.update(b"UNREADABLE")
+ return {"head":git(root,"rev-parse","HEAD"),"status":status,"paths":paths,"digest":digest.hexdigest()}
+
+def require_workspace_unchanged(before:dict[str,Any],after:dict[str,Any])->None:
+ if before!=after:raise AutopilotError("ANTIGRAVITY_MUTATED_WORKSPACE")
 
 def secret_findings(text:str)->list[dict[str,str]]:
  findings=[]
@@ -170,9 +191,8 @@ class Autopilot:
   self.planner_timeout=max(300,int(os.environ.get("OPENHTPC_AUTOPILOT_PLANNER_TIMEOUT","300")))
   self.reviewer_timeout=max(300,int(os.environ.get("OPENHTPC_AUTOPILOT_REVIEWER_TIMEOUT","300")))
   self.executor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_EXECUTOR_TIMEOUT","1800"))
-  self.gemini_doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_GEMINI_DOCTOR_TIMEOUT","90"))
+  self.antigravity_doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_ANTIGRAVITY_DOCTOR_TIMEOUT","90"))
   self.codex_doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_CODEX_DOCTOR_TIMEOUT","90"))
-  self.gemini_policy=self.root/"tools/autopilot/policies/gemini-readonly.toml"
  def ensure_runtime(self)->None:self.runs.mkdir(parents=True,exist_ok=True)
  def write_json(self,path:pathlib.Path,value:Any)->None:path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value,indent=2,sort_keys=True)+"\n",encoding="utf-8")
  def update_state(self,**fields:Any)->None:
@@ -184,27 +204,32 @@ class Autopilot:
   context=git_context(self.root);context["architecture_documents"]=["AGENTS.md","PLUGIN_FRAMEWORK_P2_ARCHITECTURE.md","PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md","OPENHTPC-PROTECTED-OPTICAL-ROADMAP.md"]
   state=self.runtime/"state.json";context["previous_state"]=load_json(state) if state.is_file() else None
   return context
- def _validated_gemini_policy(self)->pathlib.Path:
-  try:policy=self.gemini_policy.resolve(strict=True)
-  except OSError as exc:raise AutopilotError("GEMINI_READONLY_POLICY_INVALID") from exc
-  expected=(self.root/"tools/autopilot/policies").resolve()
-  if not policy.is_file() or policy.parent!=expected:raise AutopilotError("GEMINI_READONLY_POLICY_INVALID")
-  return policy
- def _gemini_command(self,prompt:str)->list[str]:
-  command=["gemini","--skip-trust","--approval-mode","default","--policy",str(self._validated_gemini_policy()),"-p",prompt,"--output-format","json"]
-  model=os.environ.get("OPENHTPC_GEMINI_MODEL");command.extend(["--model",model] if model else [])
+ def _agy_command(self,prompt:str,schema:pathlib.Path|None,timeout:int)->list[str]:
+  command=["agy","--mode=plan","-p",prompt,"--output-format","json","--print-timeout",f"{timeout}s"]
+  if schema is not None:
+   resolved=schema.resolve(strict=True);expected=(self.root/"tools/autopilot/schemas").resolve()
+   if not resolved.is_file() or resolved.parent!=expected:raise AutopilotError("ANTIGRAVITY_SCHEMA_PATH_INVALID")
+   command.extend(["--json-schema",str(resolved)])
+  model=os.environ.get("OPENHTPC_AGY_MODEL")
+  if model:
+   if not re.fullmatch(r"[A-Za-z0-9._:/-]{1,120}",model):raise AutopilotError("ANTIGRAVITY_MODEL_INVALID")
+   command.extend(["--model",model])
+  effort=os.environ.get("OPENHTPC_AGY_EFFORT")
+  if effort:
+   if effort not in {"low","medium","high"}:raise AutopilotError("ANTIGRAVITY_EFFORT_INVALID")
+   command.extend(["--effort",effort])
   return command
- def _gemini(self,prompt:str,timeout:int)->subprocess.CompletedProcess[str]:
-  command=self._gemini_command(prompt)
-  return run_command(command,self.root,timeout)
+ def _agy(self,prompt:str,schema:pathlib.Path|None,timeout:int)->subprocess.CompletedProcess[str]:
+  return run_command(self._agy_command(prompt,schema,timeout),self.root,timeout+15)
  def plan(self,run_id:str|None=None)->tuple[pathlib.Path,dict[str,Any],dict[str,Any]]:
   self.ensure_runtime();context=self.context();run_id=run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8];run_dir=self.runs/run_id;run_dir.mkdir()
   context["run_id"]=run_id;self.write_json(run_dir/"context.json",context)
-  prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text()+"\n\nCONTEXT:\n"+json.dumps(context,indent=2)+"\nSCHEMA:\n"+schema_path(self.root,"plan.schema.json").read_text()
-  result=self._gemini(prompt,self.planner_timeout)
-  (run_dir/"gemini-planner.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"gemini-planner.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
+  prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text()+"\n\nCONTEXT:\n"+json.dumps(context,indent=2)
+  before=workspace_fingerprint(self.root);result=self._agy(prompt,schema_path(self.root,"plan.schema.json"),self.planner_timeout)
+  (run_dir/"antigravity-planner.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"antigravity-planner.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
+  require_workspace_unchanged(before,workspace_fingerprint(self.root))
   if result.returncode:raise AutopilotError("PLANNER_FAILED")
-  plan=validate_document(self.root,parse_gemini_outer(result.stdout),"plan.schema.json")
+  plan=validate_document(self.root,parse_antigravity_outer(result.stdout),"plan.schema.json")
   if plan["run_id"]!=run_id or plan["expected_branch"]!=context["branch"] or plan["expected_head"]!=context["head"]:raise AutopilotError("PLAN_CONTEXT_MISMATCH")
   policy=policy_evaluate(plan);self.write_json(run_dir/"plan.json",plan);self.write_json(run_dir/"policy.json",policy)
   (run_dir/"summary.txt").write_text(f"PLAN: {plan['title']}\nRISK: {plan['risk_class']}\nPOLICY: {policy['decision']}\n",encoding="utf-8")
@@ -229,10 +254,11 @@ class Autopilot:
   return report
  def reviewer(self,run_dir:pathlib.Path,plan:dict[str,Any],report:dict[str,Any])->dict[str,Any]:
   payload={"plan":plan,"executor_report":report,"branch":git(self.root,"branch","--show-current"),"head":git(self.root,"rev-parse","HEAD"),"git_status":git(self.root,"status","--porcelain"),"changed_paths":changed_paths(self.root),"diff_check":"PASS"}
-  prompt=(self.root/"tools/autopilot/prompts/reviewer.md").read_text()+"\n\nREVIEW INPUT:\n"+json.dumps(payload,indent=2)+"\nSCHEMA:\n"+schema_path(self.root,"review.schema.json").read_text()
-  result=self._gemini(prompt,self.reviewer_timeout);(run_dir/"gemini-reviewer.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"gemini-reviewer.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
+  prompt=(self.root/"tools/autopilot/prompts/reviewer.md").read_text()+"\n\nREVIEW INPUT:\n"+json.dumps(payload,indent=2)
+  before=workspace_fingerprint(self.root);result=self._agy(prompt,schema_path(self.root,"review.schema.json"),self.reviewer_timeout);(run_dir/"antigravity-reviewer.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"antigravity-reviewer.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
+  require_workspace_unchanged(before,workspace_fingerprint(self.root))
   if result.returncode:raise AutopilotError("REVIEWER_FAILED")
-  review=validate_document(self.root,parse_gemini_outer(result.stdout),"review.schema.json");self.write_json(run_dir/"review.json",review);return review
+  review=validate_document(self.root,parse_antigravity_outer(result.stdout),"review.schema.json");self.write_json(run_dir/"review.json",review);return review
  def review_saved(self)->dict[str,Any]:
   state=load_json(self.runtime/"state.json");run_id=state.get("last_run_id")
   if not isinstance(run_id,str):raise AutopilotError("NO_ACTIVE_RUN")
@@ -259,19 +285,21 @@ class Autopilot:
   status="AWAITING_PHYSICAL_VALIDATION" if after_gate and (policy["reason"]=="PHYSICAL_VALIDATION" or review["gate_reason"]=="PHYSICAL_VALIDATION") else "AWAITING_HUMAN_GATE" if after_gate else "ACCEPTED"
   self.update_state(status=status,last_accepted_commit=commit,head=commit,current_gate="AFTER_IMPLEMENTATION" if after_gate else "NONE",gate_reason=policy["reason"] if after_gate else "NONE");return status
  def doctor(self,online:bool=False)->int:
-  checks={"repository_root":self.root.is_dir(),"git_repository":(self.root/".git").exists(),"python":sys.version_info>=(3,10),"gemini":bool(shutil.which("gemini")),"codex":bool(shutil.which("codex")),"agents":(self.root/"AGENTS.md").is_file(),"gemini_md":(self.root/"GEMINI.md").is_file()}
+  checks={"repository_root":self.root.is_dir(),"git_repository":(self.root/".git").exists(),"python":sys.version_info>=(3,10),"antigravity":bool(shutil.which("agy")),"codex":bool(shutil.which("codex")),"agents":(self.root/"AGENTS.md").is_file(),"gemini_md":(self.root/"GEMINI.md").is_file(),"policy":True}
   try:context=git_context(self.root,require_clean=False);checks["git_status"]="CLEAN" if not context["status"] else "DIRTY";checks["branch"]=context["branch"]
   except AutopilotError:checks["git_status"]="ERROR"
   for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
-  try:checks["gemini_readonly_policy"]=self._validated_gemini_policy().is_file()
-  except AutopilotError:checks["gemini_readonly_policy"]=False
   try:self.ensure_runtime();probe=self.runtime/".write-test";probe.write_text("ok");probe.unlink();checks["runtime_writable"]=True
   except OSError:checks["runtime_writable"]=False
-  for executable in ("gemini","codex"):
-   if checks[executable]:
-    result=run_command([executable,"--version"],self.root,30);checks[executable+"_version"]=result.stdout.strip() or result.stderr.strip()
+  for key,executable in (("antigravity","agy"),("codex","codex")):
+   if checks[key]:
+    result=run_command([executable,"--version"],self.root,30);checks[key+"_version"]=result.stdout.strip() or result.stderr.strip()
   if online:
-   gemini=self._gemini("Return exactly GEMINI_OK and do nothing else.",self.gemini_doctor_timeout);checks["gemini_online"]=gemini.returncode==0 and "GEMINI_OK" in gemini.stdout
+   before=workspace_fingerprint(self.root);antigravity=self._agy("Return exactly ANTIGRAVITY_OK and do nothing else.",None,self.antigravity_doctor_timeout);after=workspace_fingerprint(self.root)
+   require_workspace_unchanged(before,after)
+   try:envelope=parse_antigravity_outer(antigravity.stdout,require_structured=False)
+   except AutopilotError:envelope={}
+   checks["antigravity_online"]=antigravity.returncode==0 and str(envelope.get("response","")).strip()=="ANTIGRAVITY_OK"
    schema={"type":"object","additionalProperties":False,"required":["status"],"properties":{"status":{"const":"CODEX_OK"}}}
    with tempfile.TemporaryDirectory() as raw:
     schema_file=pathlib.Path(raw)/"smoke.json";schema_file.write_text(json.dumps(schema));output=pathlib.Path(raw)/"out.json"

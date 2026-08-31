@@ -1,8 +1,7 @@
 # OPENHTPC Autopilot
 
-OPENHTPC Autopilot is a local, bounded orchestration layer. Gemini CLI plans
-and independently reviews in normal headless mode under the tracked,
-deny-by-default `tools/autopilot/policies/gemini-readonly.toml` policy. Codex CLI executes one
+OPENHTPC Autopilot is a local, bounded orchestration layer. Google Antigravity
+CLI plans and independently reviews in headless `--mode=plan`. Codex CLI executes one
 validated plan in a workspace-write sandbox without committing. The Python
 orchestrator validates policy, Git state, paths, schemas, tests and secrets,
 and is the only component allowed to make an accepted local commit. It never
@@ -20,30 +19,33 @@ pushes.
 ```
 
 `doctor` checks local prerequisites without agent calls. `doctor --online`
-adds short read-only Gemini and Codex smoke tests. `plan` invokes only Gemini,
+adds short read-only Antigravity and Codex smoke tests. `plan` invokes only Antigravity,
 validates and saves one plan, and never invokes Codex. `run` performs one safe
 step. `--until-gate` replans after each accepted local commit, has a hard limit
 of five, and stops at every failure, rejection, gate, dirty tree or no-work
 decision. Press Ctrl-C to stop; subprocess timeouts also fail closed.
 
-The installed default models are used unless `OPENHTPC_GEMINI_MODEL` or
+The installed default models are used unless `OPENHTPC_AGY_MODEL` or
 `OPENHTPC_CODEX_MODEL` is set. Planner, reviewer and executor timeouts may be
 set through `OPENHTPC_AUTOPILOT_PLANNER_TIMEOUT`,
 `OPENHTPC_AUTOPILOT_REVIEWER_TIMEOUT`, and
-`OPENHTPC_AUTOPILOT_EXECUTOR_TIMEOUT`. Online smoke-test timeouts use
-`OPENHTPC_AUTOPILOT_GEMINI_DOCTOR_TIMEOUT` and
+`OPENHTPC_AUTOPILOT_EXECUTOR_TIMEOUT`. Antigravity reasoning effort may be
+set to `low`, `medium`, or `high` with `OPENHTPC_AGY_EFFORT`. Online smoke-test timeouts use
+`OPENHTPC_AUTOPILOT_ANTIGRAVITY_DOCTOR_TIMEOUT` and
 `OPENHTPC_AUTOPILOT_CODEX_DOCTOR_TIMEOUT`. Authentication remains entirely owned
 by the installed CLIs; Autopilot never reads or changes their credential
 stores.
 
-Gemini is invoked with `--approval-mode default` and an explicit absolute
-`--policy` path. The policy allows only bounded local read/search tools and
-denies all other tools, including mutation, shell, network, MCP, and Plan Mode
-transition tools. Autopilot intentionally does not use Gemini Plan Mode: its
-interactive plan lifecycle is not the security boundary required for a
-headless planner/reviewer. The deterministic policy, not prompt compliance,
-enforces read-only operation. The online Gemini doctor uses this same command
-architecture.
+Antigravity is invoked non-interactively with explicit `--mode=plan`, JSON
+output, bounded print/subprocess timeouts, and native `--json-schema` for plans
+and reviews. Python independently validates every `structured_output`; native
+schema enforcement never replaces deterministic policy. Before and after each
+planner/reviewer call, Autopilot compares HEAD, porcelain status, changed paths,
+tracked diffs, and untracked content. Any mutation stops safely without reset.
+Antigravity authentication, including the locally authenticated Google AI Pro
+session, remains external: Autopilot neither reads nor modifies credentials or
+global settings. Runtime artifacts use `antigravity-planner.*` and
+`antigravity-reviewer.*`; older ignored runs need no migration.
 
 ## Runtime and inspection
 

@@ -3,13 +3,13 @@
 AI recommendation is not policy authority. The Python policy gates are
 authoritative over planner, executor and reviewer output.
 
-Gemini planner and reviewer processes run headlessly in normal approval mode
-with the explicit tracked `gemini-readonly.toml` policy. That deny-by-default
-allowlist permits only local repository read/search tools. Mutation, shell,
-network, arbitrary MCP, and Plan Mode transition tools are denied. Gemini Plan
-Mode is deliberately not used because its own interactive lifecycle is not a
-deterministic headless security boundary. Prompt instructions are defense in
-depth; the supplied policy is the tool-access boundary.
+Antigravity planner and reviewer processes run headlessly with explicit
+`--mode=plan`, native JSON-schema output, and bounded timeouts. Prompt-level
+read-only instructions are reinforced by deterministic before/after workspace
+fingerprints covering HEAD, status, tracked diffs, changed paths, and untracked
+content. Any mutation is a safe stop and is never automatically reset.
+Antigravity authentication and global settings remain outside repository and
+Autopilot authority.
 
 Autopilot accepts only strict JSON contracts and one bounded task per plan.
 Risk classes are `DOCS_ONLY`, `SOFTWARE_NO_PHYSICAL`,
@@ -30,7 +30,7 @@ code test evidence, and pass `git diff --check`. New diff text is scanned for
 plausible credentials before review. Secrets are redacted from retained agent
 output and prohibited from bounded state metadata.
 
-Only an independent Gemini `ACCEPT`, complete deterministic checks and explicit
+Only an independent Antigravity `ACCEPT`, complete deterministic checks and explicit
 test evidence permit a local commit. `REJECT` preserves the workspace without
 commit or reset. An after-implementation physical gate may permit an accepted
 local commit, then must stop as `AWAITING_PHYSICAL_VALIDATION`; software tests

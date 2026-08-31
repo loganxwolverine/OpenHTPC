@@ -1,6 +1,6 @@
 """Unit tests for the deterministic OPENHTPC Autopilot policy layer."""
 from __future__ import annotations
-import contextlib,importlib.util,io,json,pathlib,sys,tempfile,time,tomllib,unittest
+import contextlib,importlib.util,io,json,os,pathlib,sys,tempfile,time,unittest
 from unittest import mock
 
 MODULE_PATH=pathlib.Path(__file__).resolve().parents[1]/"openhtpc_autopilot.py"
@@ -36,11 +36,13 @@ class Contracts(unittest.TestCase):
   with self.assertRaises(A.AutopilotError):A.validate_document(self.root,{"status":"PASS"},"executor-report.schema.json")
  def test_05_malformed_review_rejected(self):
   with self.assertRaises(A.AutopilotError):A.validate_document(self.root,{"verdict":"ACCEPT"},"review.schema.json")
- def test_06_malformed_gemini_outer_rejected(self):
-  for value in ("not-json",'{}','{"response":{}}'):
-   with self.assertRaises(A.AutopilotError):A.parse_gemini_outer(value)
- def test_07_malformed_gemini_response_rejected(self):
-  with self.assertRaisesRegex(A.AutopilotError,"GEMINI_RESPONSE"):A.parse_gemini_outer(json.dumps({"response":"not-json"}))
+ def test_06_malformed_antigravity_outer_rejected(self):
+  for value in ("not-json",'{}','{"status":"SUCCESS"}'):
+   with self.assertRaises(A.AutopilotError):A.parse_antigravity_outer(value)
+ def test_07_antigravity_status_and_structured_output(self):
+  value={"status":"SUCCESS","response":"ok","structured_output":plan()};self.assertEqual(A.parse_antigravity_outer(json.dumps(value)),plan())
+  for status in ("ERROR","WAITING","CANCELED","INTERRUPTED","INVALID"):
+   with self.assertRaisesRegex(A.AutopilotError,"STATUS"):A.parse_antigravity_outer(json.dumps({"status":status,"structured_output":plan()}))
 
 class Policy(unittest.TestCase):
  def test_08_before_execution_gate_stops(self):self.assertEqual(A.policy_evaluate(plan(human_gate_stage="BEFORE_EXECUTION",gate_reason="OTHER"))["stage"],"BEFORE_EXECUTION")
@@ -81,48 +83,65 @@ class ProcessAndPreflight(unittest.TestCase):
  def test_25_dirty_preflight_rejected(self):
   with mock.patch.object(A,"git",side_effect=[str(pathlib.Path.cwd().resolve())," M file"]):
    with self.assertRaisesRegex(A.AutopilotError,"DIRTY_PREFLIGHT"):A.git_context(pathlib.Path.cwd())
- def test_26_missing_gemini_executable(self):
+ def test_26_missing_antigravity_executable(self):
   with tempfile.TemporaryDirectory() as raw:
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root)
-   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="gemini" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
+   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="agy" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
     self.assertEqual(pilot.doctor(False),1)
  def test_27_missing_codex_executable(self):
   with tempfile.TemporaryDirectory() as raw:
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root)
    with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="codex" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
     self.assertEqual(pilot.doctor(False),1)
+ def test_28_gemini_executable_is_not_required(self):
+  with tempfile.TemporaryDirectory() as raw:
+   root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root);calls=[]
+   def lookup(name):
+    calls.append(name);return "/bin/true"
+   with mock.patch.object(A.shutil,"which",side_effect=lookup),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):pilot.doctor(False)
+   self.assertNotIn("gemini",calls);self.assertIn("agy",calls)
 
-class GeminiReadonlyHeadless(unittest.TestCase):
+class AntigravityReadonlyHeadless(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.root=MODULE_PATH.parents[2];cls.pilot=A.Autopilot(cls.root)
-  cls.command=cls.pilot._gemini_command("bounded prompt")
-  cls.policy_path=cls.root/"tools/autopilot/policies/gemini-readonly.toml"
-  cls.policy=tomllib.loads(cls.policy_path.read_text(encoding="utf-8"))
-  cls.rules=cls.policy["rule"]
-  cls.allowed={name for rule in cls.rules if rule.get("decision")=="allow" for name in ([rule["toolName"]] if isinstance(rule["toolName"],str) else rule["toolName"])}
- def test_28_planner_command_does_not_use_plan_mode(self):
-  self.assertNotIn("plan",self.command[self.command.index("--approval-mode")+1:self.command.index("--approval-mode")+2])
- def test_29_reviewer_command_does_not_use_plan_mode(self):
-  self.assertEqual(self.pilot._gemini_command("review")[self.command.index("--approval-mode")+1],"default")
- def test_30_explicit_default_approval_mode(self):
-  index=self.command.index("--approval-mode");self.assertEqual(self.command[index+1],"default")
- def test_31_command_includes_absolute_policy(self):
-  index=self.command.index("--policy");self.assertEqual(pathlib.Path(self.command[index+1]),self.policy_path.resolve());self.assertTrue(pathlib.Path(self.command[index+1]).is_absolute())
- def test_32_policy_file_exists(self):self.assertTrue(self.policy_path.is_file())
- def test_33_policy_has_catch_all_deny(self):
-  self.assertTrue(any(rule.get("toolName")=="*" and rule.get("decision")=="deny" and rule.get("priority")==900 and rule.get("interactive") is False for rule in self.rules))
- def test_34_read_only_tools_allowed(self):
-  self.assertEqual(self.allowed,{"read_file","read_many_files","list_directory","glob","grep_search"})
- def test_35_mutation_and_shell_tools_not_allowed(self):
-  self.assertTrue({"write_file","replace","run_shell_command"}.isdisjoint(self.allowed))
- def test_36_network_tools_not_allowed(self):
-  self.assertTrue({"web_fetch","google_web_search"}.isdisjoint(self.allowed))
- def test_37_plan_transitions_not_allowed(self):
-  self.assertTrue({"enter_plan_mode","exit_plan_mode"}.isdisjoint(self.allowed))
- def test_38_arbitrary_mcp_not_allowed(self):self.assertFalse(any(name.startswith("mcp_") or name.startswith("discovered_tool_") for name in self.allowed))
- def test_39_timeout_defaults_are_bounded_and_sane(self):
+  cls.plan_command=cls.pilot._agy_command("plan",A.schema_path(cls.root,"plan.schema.json"),cls.pilot.planner_timeout)
+  cls.review_command=cls.pilot._agy_command("review",A.schema_path(cls.root,"review.schema.json"),cls.pilot.reviewer_timeout)
+ def test_29_commands_use_antigravity(self):self.assertEqual(self.plan_command[0],"agy");self.assertEqual(self.review_command[0],"agy")
+ def test_30_commands_force_plan_mode(self):self.assertIn("--mode=plan",self.plan_command);self.assertIn("--mode=plan",self.review_command)
+ def test_31_commands_exclude_dangerous_modes(self):
+  for command in (self.plan_command,self.review_command):self.assertNotIn("--mode=accept-edits",command);self.assertNotIn("--dangerously-skip-permissions",command)
+ def test_32_commands_use_json_and_native_schema(self):
+  for command,schema in ((self.plan_command,"plan.schema.json"),(self.review_command,"review.schema.json")):
+   self.assertEqual(command[command.index("--output-format")+1],"json");self.assertEqual(pathlib.Path(command[command.index("--json-schema")+1]).name,schema)
+ def test_33_missing_structured_output_rejected(self):
+  with self.assertRaisesRegex(A.AutopilotError,"STRUCTURED_OUTPUT"):A.parse_antigravity_outer(json.dumps({"status":"SUCCESS","response":"text"}))
+ def test_34_doctor_envelope_without_schema(self):self.assertEqual(A.parse_antigravity_outer(json.dumps({"status":"SUCCESS","response":"ANTIGRAVITY_OK"}),False)["response"],"ANTIGRAVITY_OK")
+ def test_35_doctor_command_uses_antigravity_plan_mode(self):
+  command=self.pilot._agy_command("doctor",None,90);self.assertEqual(command[0],"agy");self.assertIn("--mode=plan",command);self.assertNotIn("--json-schema",command)
+ def test_36_planner_workspace_mutation_detected(self):
+  before={"head":"a","status":"","paths":[],"digest":"1"};after={**before,"digest":"2"}
+  with self.assertRaisesRegex(A.AutopilotError,"ANTIGRAVITY_MUTATED_WORKSPACE"):A.require_workspace_unchanged(before,after)
+ def test_37_reviewer_workspace_mutation_detected(self):
+  before={"head":"a","status":" M x","paths":["x"],"digest":"1"};after={**before,"status":" M y","paths":["y"]}
+  with self.assertRaisesRegex(A.AutopilotError,"ANTIGRAVITY_MUTATED_WORKSPACE"):A.require_workspace_unchanged(before,after)
+ def test_38_workspace_unchanged_accepted(self):
+  value={"head":"a","status":" M x","paths":["x"],"digest":"1"};A.require_workspace_unchanged(value,dict(value))
+ def test_39_review_structured_output_is_locally_revalidated(self):
+  value=review();parsed=A.parse_antigravity_outer(json.dumps({"status":"SUCCESS","structured_output":value}));self.assertEqual(A.validate_document(self.root,parsed,"review.schema.json"),value)
+ def test_40_optional_model_and_effort(self):
+  with mock.patch.dict(os.environ,{"OPENHTPC_AGY_MODEL":"model-safe","OPENHTPC_AGY_EFFORT":"high"}):
+   command=self.pilot._agy_command("x",None,90);self.assertEqual(command[command.index("--model")+1],"model-safe");self.assertEqual(command[command.index("--effort")+1],"high")
+ def test_41_invalid_model_or_effort_rejected(self):
+  with mock.patch.dict(os.environ,{"OPENHTPC_AGY_MODEL":"bad value"}):
+   with self.assertRaises(A.AutopilotError):self.pilot._agy_command("x",None,90)
+  with mock.patch.dict(os.environ,{"OPENHTPC_AGY_EFFORT":"extreme"}):
+   with self.assertRaises(A.AutopilotError):self.pilot._agy_command("x",None,90)
+ def test_42_gemini_cli_not_in_runtime_command(self):
+  self.assertNotIn("gemini",self.plan_command);self.assertNotIn("gemini",self.review_command)
+ def test_43_timeout_defaults_are_bounded_and_sane(self):
   self.assertGreaterEqual(self.pilot.planner_timeout,300);self.assertGreaterEqual(self.pilot.reviewer_timeout,300)
-  self.assertEqual(self.pilot.gemini_doctor_timeout,90);self.assertEqual(self.pilot.codex_doctor_timeout,90);self.assertGreater(self.pilot.executor_timeout,self.pilot.planner_timeout)
+  self.assertEqual(self.pilot.antigravity_doctor_timeout,90);self.assertEqual(self.pilot.codex_doctor_timeout,90);self.assertGreater(self.pilot.executor_timeout,self.pilot.planner_timeout)
+ def test_44_print_timeout_is_explicit(self):self.assertEqual(self.plan_command[self.plan_command.index("--print-timeout")+1],"300s")
 
 if __name__=="__main__":unittest.main()
