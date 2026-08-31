@@ -148,8 +148,13 @@ def workspace_fingerprint(root:pathlib.Path)->dict[str,Any]:
   except OSError:digest.update(b"UNREADABLE")
  return {"head":git(root,"rev-parse","HEAD"),"status":status,"paths":paths,"digest":digest.hexdigest()}
 
-def require_workspace_unchanged(before:dict[str,Any],after:dict[str,Any])->None:
- if before!=after:raise AutopilotError("ANTIGRAVITY_MUTATED_WORKSPACE")
+def require_workspace_unchanged(before:dict[str,Any],after:dict[str,Any],error:str="ANTIGRAVITY_MUTATED_WORKSPACE")->None:
+ if before!=after:raise AutopilotError(error)
+
+def codex_doctor_success(result:subprocess.CompletedProcess[str],output:pathlib.Path)->bool:
+ if result.returncode!=0 or not output.is_file():return False
+ try:return output.read_text(encoding="utf-8").strip()=="CODEX_OK"
+ except (OSError,UnicodeError):return False
 
 def secret_findings(text:str)->list[dict[str,str]]:
  findings=[]
@@ -221,8 +226,8 @@ class Autopilot:
   return command
  def _agy(self,prompt:str,schema:pathlib.Path|None,timeout:int)->subprocess.CompletedProcess[str]:
   return run_command(self._agy_command(prompt,schema,timeout),self.root,timeout+15)
- def _codex_doctor_command(self,schema:pathlib.Path,output:pathlib.Path)->list[str]:
-  return ["codex","exec","--sandbox","read-only","--ephemeral","-C",str(self.root),"--output-schema",str(schema),"-o",str(output),"Return JSON with status CODEX_OK. Do not modify anything."]
+ def _codex_doctor_command(self,output:pathlib.Path)->list[str]:
+  return ["codex","exec","--sandbox","read-only","--ephemeral","-C",str(self.root),"-o",str(output),"Réponds exactement et uniquement : CODEX_OK"]
  def plan(self,run_id:str|None=None)->tuple[pathlib.Path,dict[str,Any],dict[str,Any]]:
   self.ensure_runtime();context=self.context();run_id=run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8];run_dir=self.runs/run_id;run_dir.mkdir()
   context["run_id"]=run_id;self.write_json(run_dir/"context.json",context)
@@ -302,11 +307,9 @@ class Autopilot:
    try:envelope=parse_antigravity_outer(antigravity.stdout,require_structured=False)
    except AutopilotError:envelope={}
    checks["antigravity_online"]=antigravity.returncode==0 and str(envelope.get("response","")).strip()=="ANTIGRAVITY_OK"
-   schema={"type":"object","additionalProperties":False,"required":["status"],"properties":{"status":{"const":"CODEX_OK"}}}
    with tempfile.TemporaryDirectory() as raw:
-    schema_file=pathlib.Path(raw)/"smoke.json";schema_file.write_text(json.dumps(schema));output=pathlib.Path(raw)/"out.json"
-    command=self._codex_doctor_command(schema_file,output)
-    codex=run_command(command,self.root,self.codex_doctor_timeout);checks["codex_online"]=codex.returncode==0 and output.is_file() and load_json(output).get("status")=="CODEX_OK"
+    output=pathlib.Path(raw)/"out.txt";command=self._codex_doctor_command(output);before=workspace_fingerprint(self.root)
+    codex=run_command(command,self.root,self.codex_doctor_timeout);require_workspace_unchanged(before,workspace_fingerprint(self.root),"CODEX_DOCTOR_MUTATED_WORKSPACE");checks["codex_online"]=codex_doctor_success(codex,output)
   print("OPENHTPC AUTOPILOT DOCTOR");[print(f"{key}={value}") for key,value in checks.items()]
   return 0 if all(value not in {False,"ERROR"} for value in checks.values()) else 1
 

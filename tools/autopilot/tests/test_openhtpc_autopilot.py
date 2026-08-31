@@ -144,7 +144,21 @@ class AntigravityReadonlyHeadless(unittest.TestCase):
   self.assertEqual(self.pilot.antigravity_doctor_timeout,90);self.assertEqual(self.pilot.codex_doctor_timeout,90);self.assertGreater(self.pilot.executor_timeout,self.pilot.planner_timeout)
  def test_44_print_timeout_is_explicit(self):self.assertEqual(self.plan_command[self.plan_command.index("--print-timeout")+1],"300s")
  def test_45_codex_online_doctor_is_read_only_without_approval_routing(self):
-  command=self.pilot._codex_doctor_command(pathlib.Path("/tmp/schema.json"),pathlib.Path("/tmp/output.json"))
-  self.assertEqual(command[command.index("--sandbox")+1],"read-only");self.assertNotIn("--approve-for-me",command);self.assertIn("--ephemeral",command)
+  command=self.pilot._codex_doctor_command(pathlib.Path("/tmp/output.txt"))
+  self.assertEqual(command[command.index("--sandbox")+1],"read-only");self.assertNotIn("--approve-for-me",command);self.assertNotIn("--ask-for-approval",command);self.assertIn("--ephemeral",command);self.assertIn("-o",command);self.assertNotIn("--output-schema",command)
+ def test_46_codex_doctor_exact_success(self):
+  with tempfile.TemporaryDirectory() as raw:
+   output=pathlib.Path(raw)/"out.txt";output.write_text("CODEX_OK\n");self.assertTrue(A.codex_doctor_success(mock.Mock(returncode=0),output))
+ def test_47_codex_doctor_wrong_or_missing_output(self):
+  with tempfile.TemporaryDirectory() as raw:
+   output=pathlib.Path(raw)/"out.txt";output.write_text("not ok");self.assertFalse(A.codex_doctor_success(mock.Mock(returncode=0),output));output.unlink();self.assertFalse(A.codex_doctor_success(mock.Mock(returncode=0),output))
+ def test_48_codex_doctor_nonzero_return(self):
+  with tempfile.TemporaryDirectory() as raw:
+   output=pathlib.Path(raw)/"out.txt";output.write_text("CODEX_OK");self.assertFalse(A.codex_doctor_success(mock.Mock(returncode=1),output))
+ def test_49_codex_doctor_workspace_mutation_detected(self):
+  before={"head":"a","status":"","paths":[],"digest":"1"};after={**before,"paths":["changed"],"digest":"2"}
+  with self.assertRaisesRegex(A.AutopilotError,"CODEX_DOCTOR_MUTATED_WORKSPACE"):A.require_workspace_unchanged(before,after,"CODEX_DOCTOR_MUTATED_WORKSPACE")
+ def test_50_normal_executor_keeps_structured_report_contract(self):
+  source=MODULE_PATH.read_text(encoding="utf-8");self.assertIn('"--sandbox","workspace-write","--approve-for-me"',source);self.assertIn('"--output-schema",str(schema_path(self.root,"executor-report.schema.json"))',source)
 
 if __name__=="__main__":unittest.main()

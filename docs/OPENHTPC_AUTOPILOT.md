@@ -25,6 +25,11 @@ step. `--until-gate` replans after each accepted local commit, has a hard limit
 of five, and stops at every failure, rejection, gate, dirty tree or no-work
 decision. Press Ctrl-C to stop; subprocess timeouts also fail closed.
 
+The Codex online doctor is a minimal read-only text heartbeat requiring the
+exact output `CODEX_OK`; it does not use a response schema. The real Codex
+executor remains a separate workspace-write path with its strict structured
+executor-report schema, test evidence, path checks, and HEAD guard.
+
 The installed default models are used unless `OPENHTPC_AGY_MODEL` or
 `OPENHTPC_CODEX_MODEL` is set. Planner, reviewer and executor timeouts may be
 set through `OPENHTPC_AUTOPILOT_PLANNER_TIMEOUT`,
