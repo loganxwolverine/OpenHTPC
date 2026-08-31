@@ -23,3 +23,6 @@ Phase 7 permits the enabled equivalent plugin to combine validated
 presentation and decision data into a declarative menu contribution. Core
 still validates, resolves assets, renders Flex, creates tokens and enforces the
 action.
+Phase 8 permits the enabled equivalent plugin to classify normalized probe
+facts. Core retains all device/library/filesystem acquisition and remains the
+only canonical optical-state publisher.

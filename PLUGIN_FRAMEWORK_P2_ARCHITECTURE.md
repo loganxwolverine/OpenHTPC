@@ -236,6 +236,32 @@ Plugin UI contribution is not UI execution. `plugin.bluray` remains disabled
 by default; invalid, mismatched or broken contributions retain the qualified
 Core UI builder.
 
+## Phase 8 deterministic classification ownership
+
+Phase 8 separates optical classification into four explicit stages: Core
+acquires physical facts, Core normalizes them into a closed data contract, the
+selected classifier produces a validated result, and Core alone publishes the
+canonical state.
+
+The raw contract contains only Blu-ray evidence, normalized index version and
+source, availability and boolean disc-info facts, AACS/BD+ detected and handled
+facts, structural protection and probe completeness. It contains no device,
+mountpoint, path, previous state, playback result, capability or key-database
+fact. Core continues to perform udev, libbluray and filesystem access,
+including all BDMV/INDX reads.
+
+The plugin classifier deterministically returns ownership, canonical and
+legacy state, media family, exact type, UHD status, protection mechanisms,
+source and confidence. UHD requires normalized index version `0300`; codec,
+resolution, HDR, labels and titles are outside the contract. Positive AACS or
+BD+ detection remains protected regardless of handled state. libbluray facts
+retain priority over the structural fallback.
+
+Core validates raw facts before explicit plugin invocation and validates exact
+A/B output equality before selection. Disabled, malformed, mismatched or
+broken cases use the retained Core classifier. Canonical persistence, monitor
+publication and generation remain exclusively Core-owned.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its

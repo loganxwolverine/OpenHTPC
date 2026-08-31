@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical Classification — 1.2.0-dev9
+
+- Transfers deterministic Blu-ray/UHD classification of normalized Core probe facts to enabled `plugin.bluray`.
+- Preserves the INDX0300-only UHD rule, AACS/BD+ detection semantics, source precedence and confidence policy.
+- Keeps all physical I/O, library calls, structural reads and canonical-state publication in Core with exact fallback.
+
 # OPENHTPC Plugin Framework P2 Optical UI Contribution — 1.2.0-dev8
 
 - Transfers only the declarative Blu-ray/UHD menu contribution to enabled `plugin.bluray`.

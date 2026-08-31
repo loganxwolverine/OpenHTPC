@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 7 UI CONTRIBUTION — CORE RENDER/SECURITY RETAINED`
+Status: `P2 PHASE 8 CLASSIFICATION — CORE PROBE/PUBLICATION RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -80,3 +80,11 @@ Core validates, resolves assets, creates generation-bound tokens, renders Flex
 and revalidates in the dispatcher. Physical/software probing, canonical
 classification, snapshot generation, `bd://`, MPV and protected-attempt
 recording remain Core-owned. Plugin UI contribution is not UI execution.
+
+Phase 8 transfers deterministic Blu-ray/UHD classification only. Core still
+acquires and normalizes udev, libbluray, AACS/BD+, structural BDMV and INDX
+facts; the plugin sees no location or I/O primitive. The selected classifier
+must exactly match the retained Core result, after which Core alone publishes
+canonical state. `0300` remains the only UHD index proof, and protection
+detection remains separate from handled/accessibility state. KEYDB capability
+does not affect media identity.

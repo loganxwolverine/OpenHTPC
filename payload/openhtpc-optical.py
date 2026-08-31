@@ -278,18 +278,87 @@ def _libbluray_disc_info(device,library_loader=ctypes.CDLL,library_finder=ctypes
             try:library.bd_close(handle)
             except (OSError,AttributeError):pass
 
-def _classification(libbluray_info,structural_protection):
-    """Merge primary library facts with a lower-priority structural fallback."""
-    if isinstance(libbluray_info,dict):
-        mechanisms=[name for name,key in (("AACS","aacs_detected"),("BDPLUS","bdplus_detected")) if libbluray_info.get(key) is True]
-        protection="PROTECTED" if mechanisms else "UNPROTECTED" if libbluray_info.get("bluray_detected") is True else structural_protection
-        return {"protection":protection,"protection_mechanisms":mechanisms or (["NONE"] if protection=="UNPROTECTED" else ["UNKNOWN"]),
-                "classification_source":"LIBBLURAY","classification_confidence":"CERTAIN" if libbluray_info.get("bluray_detected") else "PARTIAL",
-                "libbluray_disc_info":libbluray_info}
-    mechanism="AACS" if structural_protection=="PROTECTED" else "NONE" if structural_protection=="UNPROTECTED" else "UNKNOWN"
-    return {"protection":structural_protection,"protection_mechanisms":[mechanism],
-            "classification_source":"DISC_STRUCTURE" if structural_protection!="UNKNOWN" else "UNKNOWN",
-            "classification_confidence":"CERTAIN" if structural_protection!="UNKNOWN" else "PARTIAL"}
+RAW_PROBE_FACT_FIELDS={"bluray_detected","bluray_structure_present","index_version","index_source","libbluray_info_available",
+                       "libbluray_bluray_detected","aacs_detected","aacs_handled","bdplus_detected","bdplus_handled",
+                       "structural_protection","probe_incomplete"}
+CLASSIFICATION_FIELDS={"owned","canonical_state","legacy_state","media_family","exact_type","uhd_status","protection",
+                       "protection_mechanisms","classification_source","classification_confidence"}
+
+def normalized_bluray_probe_facts(*,bd_detected,header,header_source,libbluray_info,structural_protection):
+    """Normalize already-acquired probe data; this function performs no I/O."""
+    library=isinstance(libbluray_info,dict);raw_version=(header[4:] if isinstance(header,str) and header.startswith("INDX") else "NONE")
+    version=raw_version if raw_version in {"NONE","0100","0200","0300"} else "OTHER"
+    source=("LIBBLURAY" if header_source=="LIBBLURAY" else "DISC_STRUCTURE" if header_source=="DISC_STRUCTURE" else "NONE")
+    return {"bluray_detected":bool(bd_detected),"bluray_structure_present":version!="NONE","index_version":version,"index_source":source,
+            "libbluray_info_available":library,"libbluray_bluray_detected":bool(libbluray_info.get("bluray_detected")) if library else None,
+            "aacs_detected":bool(libbluray_info.get("aacs_detected")) if library else None,
+            "aacs_handled":bool(libbluray_info.get("aacs_handled")) if library else None,
+            "bdplus_detected":bool(libbluray_info.get("bdplus_detected")) if library else None,
+            "bdplus_handled":bool(libbluray_info.get("bdplus_handled")) if library else None,
+            "structural_protection":structural_protection if structural_protection in {"PROTECTED","UNPROTECTED","UNKNOWN"} else "UNKNOWN",
+            "probe_incomplete":not library and structural_protection=="UNKNOWN"}
+
+def valid_bluray_probe_facts(value):
+    if not isinstance(value,dict) or set(value)!=RAW_PROBE_FACT_FIELDS:return False
+    if any(not isinstance(value.get(key),bool) for key in ("bluray_detected","bluray_structure_present","libbluray_info_available","probe_incomplete")):return False
+    if value.get("index_version") not in {"NONE","0100","0200","0300","OTHER"} or value.get("index_source") not in {"NONE","LIBBLURAY","DISC_STRUCTURE"}:return False
+    if value.get("structural_protection") not in {"PROTECTED","UNPROTECTED","UNKNOWN"}:return False
+    library=value["libbluray_info_available"]
+    if any((not isinstance(value.get(key),bool)) if library else value.get(key) is not None for key in ("libbluray_bluray_detected","aacs_detected","aacs_handled","bdplus_detected","bdplus_handled")):return False
+    return value["bluray_structure_present"] is (value["index_version"]!="NONE") and ((value["index_version"]=="NONE") is (value["index_source"]=="NONE"))
+
+def classify_bluray_probe_facts(facts):
+    """Temporary Core classifier for normalized Blu-ray facts."""
+    if not valid_bluray_probe_facts(facts):raise ValueError("BLURAY_RAW_FACTS_INVALID")
+    if not facts["bluray_detected"]:
+        return {"owned":False,"canonical_state":"UNKNOWN_OPTICAL_MEDIA","legacy_state":"UNKNOWN_DISC","media_family":"UNKNOWN","exact_type":"UNKNOWN",
+                "uhd_status":"NOT_APPLICABLE","protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"}
+    version=facts["index_version"]
+    if version=="0300":canonical,legacy,exact,uhd="UHD_BLURAY_VIDEO","UHD","UHD_BLURAY","CONFIRMED"
+    elif version in {"0100","0200"}:canonical,legacy,exact,uhd="BLURAY_VIDEO","BLURAY","BLURAY","NOT_UHD"
+    else:canonical,legacy,exact,uhd="BLURAY_FAMILY","BLURAY","UNKNOWN","UNKNOWN"
+    if facts["libbluray_info_available"]:
+        mechanisms=[name for name,key in (("AACS","aacs_detected"),("BDPLUS","bdplus_detected")) if facts[key]]
+        protection="PROTECTED" if mechanisms else "UNPROTECTED" if facts["libbluray_bluray_detected"] else facts["structural_protection"]
+        source="LIBBLURAY";confidence="CERTAIN" if facts["libbluray_bluray_detected"] else "PARTIAL"
+    else:
+        protection=facts["structural_protection"];mechanisms=["AACS"] if protection=="PROTECTED" else ["NONE"] if protection=="UNPROTECTED" else ["UNKNOWN"]
+        source="DISC_STRUCTURE" if protection!="UNKNOWN" else "UNKNOWN";confidence="CERTAIN" if protection!="UNKNOWN" else "PARTIAL"
+    if facts["libbluray_info_available"] and not mechanisms:mechanisms=["NONE"] if protection=="UNPROTECTED" else ["UNKNOWN"]
+    if canonical=="BLURAY_FAMILY" and confidence=="CERTAIN":confidence="PARTIAL"
+    return {"owned":True,"canonical_state":canonical,"legacy_state":legacy,"media_family":"BLURAY","exact_type":exact,"uhd_status":uhd,
+            "protection":protection,"protection_mechanisms":mechanisms,"classification_source":source,"classification_confidence":confidence}
+
+def valid_bluray_classification(value):
+    if not isinstance(value,dict) or set(value)!=CLASSIFICATION_FIELDS or not isinstance(value.get("owned"),bool):return False
+    if value.get("canonical_state") not in {"UNKNOWN_OPTICAL_MEDIA","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:return False
+    if value.get("legacy_state") not in {"UNKNOWN_DISC","BLURAY","UHD"} or value.get("media_family") not in {"UNKNOWN","BLURAY"}:return False
+    if value.get("exact_type") not in {"UNKNOWN","BLURAY","UHD_BLURAY"} or value.get("uhd_status") not in {"NOT_APPLICABLE","NOT_UHD","CONFIRMED","UNKNOWN"}:return False
+    if value.get("protection") not in {"UNKNOWN","UNPROTECTED","PROTECTED"} or value.get("classification_source") not in {"UNKNOWN","LIBBLURAY","DISC_STRUCTURE"}:return False
+    if value.get("classification_confidence") not in {"UNKNOWN","PARTIAL","CERTAIN"}:return False
+    mechanisms=value.get("protection_mechanisms")
+    if not isinstance(mechanisms,list) or not mechanisms or any(item not in {"UNKNOWN","NONE","AACS","BDPLUS"} for item in mechanisms) or len(mechanisms)!=len(set(mechanisms)):return False
+    return ((value["owned"] and value["media_family"]=="BLURAY" and value["canonical_state"]!="UNKNOWN_OPTICAL_MEDIA") or
+            (not value["owned"] and value==classify_bluray_probe_facts(normalized_bluray_probe_facts(bd_detected=False,header=None,header_source=None,libbluray_info=None,structural_protection="UNKNOWN"))))
+
+def selected_bluray_classification(home,install,facts):
+    """Select a validated equivalent classifier; canonical publication remains Core."""
+    if not valid_bluray_probe_facts(facts):
+        neutral=normalized_bluray_probe_facts(bd_detected=False,header=None,header_source=None,libbluray_info=None,structural_protection="UNKNOWN")
+        return "CORE_FALLBACK",classify_bluray_probe_facts(neutral)
+    fallback=classify_bluray_probe_facts(facts)
+    if home is None:return "CORE_FALLBACK",fallback
+    try:
+        path=install/"openhtpc-plugin-registry.py";spec=importlib.util.spec_from_file_location("openhtpc_optical_plugin_registry",path)
+        if spec is None or spec.loader is None:return "CORE_FALLBACK",fallback
+        registry=importlib.util.module_from_spec(spec);spec.loader.exec_module(registry);status=registry.registry(home,install)
+        plugin=next((item for item in status.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+        if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+        loaded=registry.load_entrypoint(home,install,"plugin.bluray")
+        value=loaded["module"].classify_probe_facts(facts) if loaded.get("state")=="AVAILABLE" else None
+        if valid_bluray_classification(value) and value==fallback:return "PLUGIN_P2",value
+    except (Exception,SystemExit):pass
+    return "CORE_FALLBACK",fallback
 
 def protected_capability(home):
     try:
@@ -343,7 +412,7 @@ def _state(canonical,device,legacy,**fields):
            "identity_status":"UNAVAILABLE"}
     value.update(_playback_fields(canonical)); value.update(fields); return value
 
-def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=_protection_state,libbluray_reader=_libbluray_disc_info):
+def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=_protection_state,libbluray_reader=_libbluray_disc_info,*,home=None,install=None):
     result=runner(["lsblk","-J","-o","NAME,TYPE,FSTYPE,LABEL,MOUNTPOINTS",str(device)])
     if result.returncode!=0:
         return _state("DETECTION_INDETERMINATE",device,"UNKNOWN_DISC",detection_reason="LSBLK_FAILED")
@@ -364,33 +433,31 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
     info=(subprocess.CompletedProcess([],1,"","") if bd_detected else runner(["lsdvd","-x","-Ox",str(device)])); text=info.stdout if info.returncode==0 else ""
     dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
     header,header_path=header_reader(block)
+    header_source="DISC_STRUCTURE" if header else None
     if not header and isinstance(libbluray_info,dict) and libbluray_info.get("bdmv_index_header"):
-        header,header_path=libbluray_info["bdmv_index_header"],"libbluray:BDMV/index.bdmv"
+        header,header_path,header_source=libbluray_info["bdmv_index_header"],"libbluray:BDMV/index.bdmv","LIBBLURAY"
     evidence=[]
     if bd_medium: evidence.append("UDEV_MMC_BD_MEDIA")
     if isinstance(libbluray_info,dict) and libbluray_info.get("bluray_detected"): evidence.append("LIBBLURAY_DISC_INFO")
     if header and header.startswith("INDX"): evidence.append("BDMV_INDEX_HEADER")
     if dvd_video:
-        canonical,legacy,uhd_status="DVD_VIDEO","DVD","NOT_APPLICABLE"
-        evidence.append("LSDVD_DVD_VIDEO")
-    elif bd_detected and header=="INDX0300": canonical,legacy,uhd_status="UHD_BLURAY_VIDEO","UHD","CONFIRMED"
-    elif bd_detected and header in {"INDX0100","INDX0200"}: canonical,legacy,uhd_status="BLURAY_VIDEO","BLURAY","NOT_UHD"
-    elif bd_detected and header and header.startswith("INDX"):
-        canonical,legacy,uhd_status="BLURAY_FAMILY","BLURAY","UNKNOWN"
+        canonical,legacy,uhd_status="DVD_VIDEO","DVD","NOT_APPLICABLE";evidence.append("LSDVD_DVD_VIDEO")
+        classification={"protection":"UNPROTECTED","protection_mechanisms":["NONE"],"classification_source":"DISC_STRUCTURE","classification_confidence":"CERTAIN"};authority="CORE_FALLBACK"
     elif bd_detected:
-        canonical,legacy,uhd_status="BLURAY_FAMILY","BLURAY","UNKNOWN"
+        facts=normalized_bluray_probe_facts(bd_detected=bd_detected,header=header,header_source=header_source,
+                                           libbluray_info=libbluray_info,structural_protection=protection_reader(block))
+        install=install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR",pathlib.Path(__file__).parent))
+        authority,result=selected_bluray_classification(home,install,facts);canonical,legacy,uhd_status=result["canonical_state"],result["legacy_state"],result["uhd_status"]
+        classification={key:result[key] for key in ("protection","protection_mechanisms","classification_source","classification_confidence")}
     elif fstype not in {"iso9660","udf"}:
-        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","NOT_APPLICABLE"
+        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","NOT_APPLICABLE";authority="CORE_FALLBACK"
+        classification={"protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"}
     else:
-        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","UNKNOWN"
-    classification=({"protection":"UNPROTECTED","protection_mechanisms":["NONE"],"classification_source":"DISC_STRUCTURE","classification_confidence":"CERTAIN"}
-                    if canonical=="DVD_VIDEO" else _classification(libbluray_info,protection_reader(block))
-                    if canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} else
-                    {"protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"})
+        canonical,legacy,uhd_status="UNKNOWN_OPTICAL_MEDIA","UNKNOWN_DISC","UNKNOWN";authority="CORE_FALLBACK"
+        classification={"protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"}
     value=_state(canonical,device,legacy,volume_label=label,disc_title=None,
-                 uhd_status=uhd_status,detection_evidence=evidence,**classification)
-    if canonical=="BLURAY_FAMILY" and value.get("classification_confidence")=="CERTAIN":
-        value["classification_confidence"]="PARTIAL"
+                 uhd_status=uhd_status,detection_evidence=evidence,classification_authority=authority,**classification)
+    if isinstance(libbluray_info,dict) and canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:value["libbluray_disc_info"]=libbluray_info
     if header: value["bdmv_index_version"]=header[4:] if header.startswith("INDX") else "UNRECOGNIZED"
     if header_path: value["bdmv_index_path"]=header_path
     if info.returncode==0 and text.strip():
@@ -417,7 +484,7 @@ def current_state(runner=run,sys_block=pathlib.Path("/sys/class/block"),home=Non
     guard=eject_guard(home) if home else None; states=[]
     for device in drives:
         if not guard or str(device)!=guard.get("device"):
-            states.append(probe_device(device,runner)); continue
+            states.append(probe_device(device,runner,home=home)); continue
         basic=runner(["lsblk","-J","-o","NAME,TYPE,FSTYPE,LABEL",str(device)])
         try: fstype=(json.loads(basic.stdout)["blockdevices"][0].get("fstype") or "").lower()
         except (json.JSONDecodeError,KeyError,IndexError,TypeError): fstype=""
@@ -429,7 +496,7 @@ def current_state(runner=run,sys_block=pathlib.Path("/sys/class/block"),home=Non
             states.append(_state("DRIVE_PRESENT_NO_MEDIA",device,"EMPTY",identity_status="EJECTING")); continue
         try: (home/".local/state/openhtpc/optical-ejecting.json").unlink()
         except OSError: pass
-        states.append(probe_device(device,runner))
+        states.append(probe_device(device,runner,home=home))
     priority={"DVD":0,"BLURAY":1,"UHD":1,"UNSUPPORTED_IN_V1":2,"UNKNOWN_DISC":3,"EMPTY":4}
     chosen=min(states,key=lambda x:(priority[x["state"]],x["device"])); chosen["drives"]=[str(d) for d in drives]; return chosen
 

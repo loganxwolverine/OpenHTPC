@@ -84,3 +84,23 @@ def ui_contribution(presentation:dict[str,Any],decision:dict[str,Any])->dict[str
  return {"owned":True,"item_kind":"OPTICAL_PLAYBACK","visible":True,"display_label":presentation.get("display_label",""),
          "badge_key":presentation.get("badge_key","NONE"),"enabled":enabled,"disabled_reason":"NONE" if enabled else decision.get("playback_reason","MEDIA_NOT_PLAYABLE"),
          "action_intent":"PLAY_CURRENT_OPTICAL_MEDIA" if enabled else "NONE"}
+
+def classify_probe_facts(facts:dict[str,Any])->dict[str,Any]:
+ if not facts["bluray_detected"]:
+  return {"owned":False,"canonical_state":"UNKNOWN_OPTICAL_MEDIA","legacy_state":"UNKNOWN_DISC","media_family":"UNKNOWN","exact_type":"UNKNOWN","uhd_status":"NOT_APPLICABLE",
+          "protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"}
+ version=facts["index_version"]
+ if version=="0300":canonical,legacy,exact,uhd="UHD_BLURAY_VIDEO","UHD","UHD_BLURAY","CONFIRMED"
+ elif version in {"0100","0200"}:canonical,legacy,exact,uhd="BLURAY_VIDEO","BLURAY","BLURAY","NOT_UHD"
+ else:canonical,legacy,exact,uhd="BLURAY_FAMILY","BLURAY","UNKNOWN","UNKNOWN"
+ if facts["libbluray_info_available"]:
+  mechanisms=[name for name,key in (("AACS","aacs_detected"),("BDPLUS","bdplus_detected")) if facts[key]]
+  protection="PROTECTED" if mechanisms else "UNPROTECTED" if facts["libbluray_bluray_detected"] else facts["structural_protection"]
+  source="LIBBLURAY";confidence="CERTAIN" if facts["libbluray_bluray_detected"] else "PARTIAL"
+ else:
+  protection=facts["structural_protection"];mechanisms=["AACS"] if protection=="PROTECTED" else ["NONE"] if protection=="UNPROTECTED" else ["UNKNOWN"]
+  source="DISC_STRUCTURE" if protection!="UNKNOWN" else "UNKNOWN";confidence="CERTAIN" if protection!="UNKNOWN" else "PARTIAL"
+ if facts["libbluray_info_available"] and not mechanisms:mechanisms=["NONE"] if protection=="UNPROTECTED" else ["UNKNOWN"]
+ if canonical=="BLURAY_FAMILY" and confidence=="CERTAIN":confidence="PARTIAL"
+ return {"owned":True,"canonical_state":canonical,"legacy_state":legacy,"media_family":"BLURAY","exact_type":exact,"uhd_status":uhd,"protection":protection,
+         "protection_mechanisms":mechanisms,"classification_source":source,"classification_confidence":confidence}
