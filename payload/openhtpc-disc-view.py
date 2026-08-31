@@ -74,6 +74,21 @@ MEDIA_PROFILES = {
 }
 BADGE_ASSETS={"BLURAY":"assets/ui/bluray-media-badge.png","UHD_BLURAY":"assets/ui/uhd-bluray-media-badge.png"}
 
+def resolve_badge_asset(home,install,badge_key,plugin_authority):
+ """Core validates, equivalence-guards and selects a local badge resource."""
+ core_relative=BADGE_ASSETS.get(badge_key)
+ if not core_relative:return None,"CORE_FALLBACK"
+ core_path=install/core_relative
+ if plugin_authority!="PLUGIN_P2":return core_relative,"CORE_FALLBACK"
+ try:
+  registry=load(install/"openhtpc-plugin-registry.py","disc_view_p2_resource_registry")
+  selected=registry.resolve_resource(home,install,"plugin.bluray",badge_key)
+  candidate=selected.get("path") if selected.get("authority")=="PLUGIN_P2" else None
+  if not isinstance(candidate,pathlib.Path):return core_relative,"CORE_FALLBACK"
+  if hashlib.sha256(candidate.read_bytes()).digest()!=hashlib.sha256(core_path.read_bytes()).digest():return core_relative,"CORE_FALLBACK"
+  return str(candidate),"PLUGIN_P2"
+ except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return core_relative,"CORE_FALLBACK"
+
 def presentation_profile(home,install,state):
  """Core-owned key resolution and rendering profile; plugin supplies data only."""
  canonical=optical_model.canonical_state(state);fallback=MEDIA_PROFILES.get(canonical,MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"])
@@ -83,9 +98,9 @@ def presentation_profile(home,install,state):
   core=load(core_path,"disc_view_p2_core");registry=core.plugin_status(home,install)
   authority,descriptor=core.optical_presentation_descriptor(home,install,registry,state)
   if not descriptor["owned"]:return fallback,authority
-  logo=BADGE_ASSETS.get(descriptor["badge_key"])
+  logo,resource_authority=resolve_badge_asset(home,install,descriptor["badge_key"],authority)
   if not logo:return fallback,"CORE_FALLBACK"
-  return {**fallback,"badge":descriptor["display_label"],"logo":logo},authority
+  return {**fallback,"badge":descriptor["display_label"],"logo":logo},resource_authority
  except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return fallback,"CORE_FALLBACK"
 
 # ─── Task A: Physical-media logo overlay — top-right corner of poster ────────

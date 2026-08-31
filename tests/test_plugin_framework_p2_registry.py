@@ -10,7 +10,7 @@ def manifest(plugin_id="plugin.sample",api=2,minimum="1.2.0",maximum=None,entryp
  return {"schema":"openhtpc-plugin-v2","id":plugin_id,"name":"Sample Plugin","version":"0.1.0","plugin_api":api,
          "openhtpc":{"minimum":minimum,"maximum":maximum},"category":"media","entrypoint":entrypoint,
          "capabilities":["capability","doctor"],"dependencies":{"plugins":[],"capabilities":[]},
-         "system_dependencies":["sample-runtime"],"enabled_by_default":enabled,"doctor":{"label":"Sample Plugin","capability":"sample-ready"}}
+         "system_dependencies":["sample-runtime"],"enabled_by_default":enabled,"resources":{},"doctor":{"label":"Sample Plugin","capability":"sample-ready"}}
 
 class RegistryFixture(unittest.TestCase):
  def setUp(self):

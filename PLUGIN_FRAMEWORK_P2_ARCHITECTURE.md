@@ -304,6 +304,24 @@ alone publishes canonical state. Disabled, invalid, mismatched or broken
 contributions use the exact Core normalizer. Plugin structural normalization
 is not filesystem probing.
 
+## Phase 11 static Blu-ray/UHD asset ownership
+
+The qualified Blu-ray and Ultra HD Blu-ray 4K badge PNGs are shipped inside
+`plugin.bluray/assets` as byte-identical copies of the retained Core fallback.
+The manifest declares only `BLURAY` and `UHD_BLURAY`; presentation and UI
+contracts continue to exchange keys and never receive physical paths.
+
+Core validates that each declaration is a local regular PNG under the
+validated plugin asset root, with no absolute path, traversal, URI or symlink
+escape. Selection requires an enabled compatible plugin and exact SHA-256
+equivalence with the qualified fallback. Missing, invalid, broken or changed
+resources select the Core asset without affecting media state or health.
+
+Core remains the sole resource reader, Flex renderer, layout and generated
+file authority. Plugin asset ownership is not Flex rendering ownership. No
+meaningful media-state pure/declarative responsibility is currently known to
+remain after this phase.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its

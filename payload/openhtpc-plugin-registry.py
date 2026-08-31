@@ -9,13 +9,14 @@ SCHEMA="openhtpc-plugin-v2"
 PLUGIN_API=2
 PLUGIN_STATES={"INSTALLED","NOT_INSTALLED","DISABLED","AVAILABLE","INCOMPATIBLE","BROKEN"}
 FIELDS={"schema","id","name","version","plugin_api","openhtpc","category","entrypoint","capabilities",
-        "dependencies","system_dependencies","enabled_by_default","doctor"}
+        "dependencies","system_dependencies","enabled_by_default","doctor","resources"}
 CATEGORIES={"optical","media","service","presentation","system"}
 HOOKS={"capability","doctor","ui_menu","media_handler","dispatcher"}
 ID_RE=re.compile(r"^plugin\.[a-z0-9]+(?:-[a-z0-9]+)*$")
 NAME_RE=re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,79}$")
 VERSION_RE=re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$")
 TOKEN_RE=re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+RESOURCE_KEYS={"BLURAY","UHD_BLURAY"}
 
 class PluginError(ValueError):pass
 
@@ -51,6 +52,17 @@ def _safe_entrypoint(plugin_dir:pathlib.Path,value:Any)->bool:
   return candidate.is_relative_to(root) and candidate.is_file() and not (plugin_dir/pathlib.Path(*relative.parts)).is_symlink()
  except OSError:return False
 
+def _safe_resource(plugin_dir:pathlib.Path,value:Any)->pathlib.Path|None:
+ if not isinstance(value,str) or not value or "\\" in value or "://" in value:return None
+ relative=pathlib.PurePosixPath(value)
+ if relative.is_absolute() or ".." in relative.parts or len(relative.parts)!=2 or relative.parts[0]!="assets" or relative.suffix.lower()!=".png":return None
+ unresolved=plugin_dir/pathlib.Path(*relative.parts)
+ try:
+  root=plugin_dir.resolve(strict=True);asset_root=(plugin_dir/"assets").resolve(strict=True);candidate=unresolved.resolve(strict=True)
+  if unresolved.is_symlink() or (plugin_dir/relative.parts[0]).is_symlink():return None
+  return candidate if candidate.is_relative_to(root) and candidate.is_relative_to(asset_root) and candidate.is_file() and not candidate.is_symlink() else None
+ except OSError:return None
+
 def validate_manifest(value:Any,plugin_dir:pathlib.Path,core_version:str)->tuple[bool,str,bool]:
  if not isinstance(value,dict) or set(value)!=FIELDS or value.get("schema")!=SCHEMA:return False,"PLUGIN_SCHEMA_INVALID",False
  if not isinstance(value.get("id"),str) or not ID_RE.fullmatch(value["id"]) or plugin_dir.name!=value["id"]:return False,"PLUGIN_ID_INVALID",False
@@ -73,6 +85,8 @@ def validate_manifest(value:Any,plugin_dir:pathlib.Path,core_version:str)->tuple
  system=value.get("system_dependencies")
  if not isinstance(system,list) or len(system)!=len(set(system)) or any(not isinstance(item,str) or not TOKEN_RE.fullmatch(item) for item in system):return False,"PLUGIN_SYSTEM_DEPENDENCIES_INVALID",False
  if not isinstance(value.get("enabled_by_default"),bool):return False,"PLUGIN_ENABLEMENT_INVALID",False
+ resources=value.get("resources")
+ if not isinstance(resources,dict) or any(key not in RESOURCE_KEYS or _safe_resource(plugin_dir,path) is None for key,path in resources.items()):return False,"PLUGIN_RESOURCES_INVALID",False
  doctor=value.get("doctor")
  if doctor is not None and (not isinstance(doctor,dict) or set(doctor)!={"label","capability"} or
                             not isinstance(doctor.get("label"),str) or not NAME_RE.fullmatch(doctor["label"]) or
@@ -148,3 +162,13 @@ def load_entrypoint(home:pathlib.Path,install:pathlib.Path,plugin_id:str,shadow:
   if not callable(getattr(module,"observe",None)):return {"state":"BROKEN","reason":"PLUGIN_CONTRACT_INVALID"}
   return {"state":"SHADOW" if shadow and plugin["state"]=="DISABLED" else "AVAILABLE","plugin":plugin,"module":module}
  except (Exception,SystemExit):return {"state":"BROKEN","reason":"PLUGIN_LOAD_FAILED"}
+
+def resolve_resource(home:pathlib.Path,install:pathlib.Path,plugin_id:str,resource_key:str)->dict[str,Any]:
+ """Resolve one allowlisted local resource; callers retain all file-reading authority."""
+ if resource_key not in RESOURCE_KEYS:return {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_KEY_INVALID"}
+ value=registry(home,install);plugin=next((item for item in value["plugins"] if item["id"]==plugin_id),None)
+ if not plugin or plugin.get("state")!="AVAILABLE":return {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_UNAVAILABLE"}
+ relative=(plugin.get("resources") or {}).get(resource_key);root=paths(home,install)["available"][0 if plugin["origin"]=="project" else 1]/plugin_id
+ target=_safe_resource(root,relative)
+ return ({"authority":"PLUGIN_P2","resource_key":resource_key,"path":target} if target else
+         {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_INVALID"})

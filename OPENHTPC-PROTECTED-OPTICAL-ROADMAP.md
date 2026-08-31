@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 10 STRUCTURAL NORMALIZATION — CORE FILESYSTEM I/O RETAINED`
+Status: `P2 PHASE 11 STATIC ASSETS — CORE VALIDATION/RENDERING RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -109,3 +109,16 @@ Core performs every filesystem operation and error handler, retains the
 separate Phase 9 libbluray fragment, validates and merges both fragments into
 the Phase 8 raw contract, and alone publishes canonical state. Plugin
 structural normalization is not filesystem probing.
+
+Phase 11 transfers ownership of the qualified Blu-ray and Ultra HD Blu-ray 4K
+badge PNGs to `plugin.bluray` as exact byte copies. The manifest exposes only
+the closed `BLURAY` and `UHD_BLURAY` keys. Core rejects absolute, traversing,
+remote, unsupported, missing and symlink-escaping resources, verifies exact
+SHA-256 equality with its retained fallback, reads the selected image and
+continues to own all Flex layout and rendering.
+
+Plugin asset ownership is not Flex rendering ownership. After Phase 11 no
+meaningful media-state pure/declarative responsibility is currently known to
+remain in Core. Probe acquisition, security enforcement, playback execution
+and rendering orchestration remain separate architectural decisions rather
+than automatic migration targets.

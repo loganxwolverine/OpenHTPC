@@ -41,6 +41,7 @@ class Authority(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir()
   (self.install/"VERSION").write_text("1.2.0-dev5\n");shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py")
+  shutil.copytree(PAYLOAD/"assets",self.install/"assets")
   self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def registry(self):return REGISTRY.registry(self.home,self.install)
  def test_disabled_uses_core(self):self.assertEqual(CORE.optical_presentation_descriptor(self.home,self.install,self.registry(),state("UHD_BLURAY_VIDEO"))[0],"CORE_FALLBACK")
@@ -51,7 +52,7 @@ class Authority(unittest.TestCase):
   registry=self.registry();authority,value=CORE.optical_presentation_descriptor(self.home,self.install,registry,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,value["badge_key"]),("CORE_FALLBACK","UHD_BLURAY"));self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
  def test_renderer_resolves_enabled_descriptor_without_plugin_path(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);shutil.copy2(PAYLOAD/"openhtpc-core.py",self.install/"openhtpc-core.py")
-  profile,authority=VIEW.presentation_profile(self.home,self.install,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,profile["logo"],profile["badge"]),("PLUGIN_P2","assets/ui/uhd-bluray-media-badge.png","ULTRA HD BLU-RAY 4K"))
+  profile,authority=VIEW.presentation_profile(self.home,self.install,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,pathlib.Path(profile["logo"]).name,profile["badge"]),("PLUGIN_P2","uhd-bluray-media-badge.png","ULTRA HD BLU-RAY 4K"))
 
 class Boundaries(unittest.TestCase):
  def test_plugin_is_data_only_without_render_io_or_execution(self):

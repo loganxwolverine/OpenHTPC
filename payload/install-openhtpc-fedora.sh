@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.2.0-dev11"
+readonly OPENHTPC_VERSION="1.2.0-dev12"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -580,8 +580,11 @@ install -m 0644 "$SCRIPT_DIR/version.json" "$INSTALL_DIR/version.json"
 install -Dm 0644 "$SCRIPT_DIR/plugins/README.md" "$INSTALL_DIR/plugins/README.md"
 install -d -m 0755 "$INSTALL_DIR/plugins/available"
 install -d -m 0755 "$INSTALL_DIR/plugins/available/plugin.bluray"
+install -d -m 0755 "$INSTALL_DIR/plugins/available/plugin.bluray/assets"
 install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/plugin.json" "$INSTALL_DIR/plugins/available/plugin.bluray/plugin.json"
 install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/shadow.py" "$INSTALL_DIR/plugins/available/plugin.bluray/shadow.py"
+install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/assets/bluray-media-badge.png" "$INSTALL_DIR/plugins/available/plugin.bluray/assets/bluray-media-badge.png"
+install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/assets/uhd-bluray-media-badge.png" "$INSTALL_DIR/plugins/available/plugin.bluray/assets/uhd-bluray-media-badge.png"
 install -Dm 0755 "$SOURCE_FLEX/bin/flex-launcher" "$INSTALL_DIR/flex/bin/flex-launcher"
 install -Dm 0644 "$SOURCE_FLEX/BUILD-METADATA.json" "$INSTALL_DIR/flex/BUILD-METADATA.json"
 install -Dm 0644 "$SOURCE_FLEX/assets/fonts/OpenSans-Regular.ttf" "$INSTALL_DIR/flex/assets/fonts/OpenSans-Regular.ttf"

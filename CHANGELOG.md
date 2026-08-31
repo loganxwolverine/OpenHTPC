@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical Static Assets — 1.2.0-dev12
+
+- Moves byte-identical qualified Blu-ray and Ultra HD Blu-ray 4K badge resources into the disabled first-party plugin.
+- Adds allowlisted, in-root, regular-PNG resource declarations with traversal, URI and symlink-escape rejection.
+- Keeps exact Core assets as fallback and retains all asset loading, equivalence checking and Flex rendering in Core.
+
 # OPENHTPC Plugin Framework P2 Structural Fact Normalization — 1.2.0-dev11
 
 - Transfers only deterministic normalization of Core-acquired BDMV/INDX and structural protection primitives to enabled `plugin.bluray`.

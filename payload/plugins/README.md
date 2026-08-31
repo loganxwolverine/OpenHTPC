@@ -34,3 +34,7 @@ Phase 10 permits the enabled equivalent plugin to normalize Core-acquired
 structural INDX and protection primitives. No path or I/O object crosses the
 contract; Core retains every filesystem operation, merges the separate Phase
 9/10 fragments and remains the canonical-state publisher.
+Phase 11 owns byte-identical static Blu-ray/UHD badge resources through a
+closed manifest mapping. Core validates confinement and equivalence, reads the
+selected PNG and renders Flex; plugin asset ownership is not rendering
+ownership.

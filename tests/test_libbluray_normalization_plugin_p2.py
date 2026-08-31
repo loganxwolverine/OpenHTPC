@@ -50,7 +50,7 @@ class ContractAndEquivalence(unittest.TestCase):
 
 class AuthorityAndFailureIsolation(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev11\n")
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev12\n")
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def test_disabled_selects_core(self):self.assertEqual(OPTICAL.selected_libbluray_normalization(self.home,self.install,primitive())[0],"CORE_FALLBACK")
  def test_enabled_selects_exact_plugin_equivalent(self):
@@ -83,7 +83,7 @@ class BoundariesAndRegressions(unittest.TestCase):
  def test_phase3_through_phase8_contracts_still_exist(self):
   for name in ("doctor_rows","presentation_descriptor","capability_contribution","playback_decision","ui_contribution","classify_probe_facts"):self.assertTrue(callable(getattr(PLUGIN,name)))
  def test_non_optical_production_sources_unchanged(self):
-  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-session-engine.py","openhtpc-disc-sheet.py","openhtpc-disc-view.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-session-engine.py","openhtpc-disc-sheet.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
 
