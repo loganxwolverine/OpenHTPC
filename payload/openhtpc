@@ -21,9 +21,16 @@ if command in (["doctor"],["doctor","--json"]):
     print("\n".join(lines))
     raise SystemExit(1 if status == "BLOCKED" else 0)
 if command == ["plugins"]:
-    plugins, errors = core.installed_plugins(home, install)
-    print(json.dumps({"plugins": plugins, "errors": errors}, ensure_ascii=False, indent=2))
-    raise SystemExit(1 if errors else 0)
+    print(json.dumps(core.plugin_status(home,install),ensure_ascii=False,indent=2,sort_keys=True))
+    raise SystemExit(0)
+if command == ["plugins","--refresh"]:
+    print(json.dumps(core.plugin_registry(install).publish(home,install),ensure_ascii=False,indent=2,sort_keys=True))
+    raise SystemExit(0)
+if len(command)==3 and command[:2] in (["plugin","enable"],["plugin","disable"]):
+    registry=core.plugin_registry(install)
+    try:value=registry.set_enabled(home,install,command[2],command[1]=="enable")
+    except registry.PluginError as error:print(str(error),file=sys.stderr);raise SystemExit(2)
+    print(json.dumps(value,ensure_ascii=False,indent=2,sort_keys=True));raise SystemExit(0)
 if command == ["version"]:
     print((install / "VERSION").read_text().strip())
     raise SystemExit(0)
@@ -65,7 +72,7 @@ if command == ["start"]:
     raise SystemExit(0)
 if command == ["stop"]:
     os.execv(install / "openhtpc-quit", [str(install / "openhtpc-quit")])
-print("Usage: openhtpc [start|stop|setup|doctor|plugins|version|capabilities|rebuild-passport|read-ahead|video-benchmark|recipe-benchmark|visual-review|calibrate|cinema-auto|video-profile|support-bundle]", file=sys.stderr)
+print("Usage: openhtpc [start|stop|setup|doctor|plugins|plugin enable|plugin disable|version|capabilities|rebuild-passport|read-ahead|video-benchmark|recipe-benchmark|visual-review|calibrate|cinema-auto|video-profile|support-bundle]", file=sys.stderr)
 
 
 

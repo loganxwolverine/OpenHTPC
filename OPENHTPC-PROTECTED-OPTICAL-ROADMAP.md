@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `PLANNED — PLUGIN FRAMEWORK P2`
+Status: `P2 REGISTRY FOUNDATION IN PROGRESS — MIGRATION NOT STARTED`
 
 Protected optical support remains experimental and integrated into the
 development branch. Future Blu-ray/UHD plugins have not been extracted, so
@@ -36,5 +36,8 @@ and diagnostics.
 
 Stable boundaries to preserve are the canonical optical state, capability
 snapshot/provider statuses, generation-bound action token, dispatcher request
-contract, last-attempt record and Doctor/plugin registry interfaces. Dev5 is
-an audit only: no file is moved and Plugin Framework P2 is not started.
+contract, last-attempt record and Doctor/plugin registry interfaces. The Dev5
+audit moved no file and did not start Plugin Framework P2.
+
+P2 Phase 1 establishes only the current-tree declarative registry and stable
+hook vocabulary. Protected Optical remains Core-integrated throughout Phase 1.

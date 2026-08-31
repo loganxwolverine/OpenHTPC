@@ -129,6 +129,7 @@ class ProtectedOpticalDoctor(unittest.TestCase):
                 "VIDEO_RUNTIME_READY":True, "AUDIO_RUNTIME_READY":True, "VIDEO_RUNTIME_PROVENANCE":"CURRENT",
                 "FLEX_READY":True, "MEDIA_BROWSER_READY":True, "AUTOSTART_READY":True,
                 "PLUGIN_REGISTRY_READY":True, "OPTICAL_STATE_INITIALIZED":False,
+                "PLUGIN_REGISTRY":{"plugin_api":2,"errors":[],"plugins":[{"id":"plugin.example","name":"ExamplePlugin","state":"INCOMPATIBLE"}]},
                 "OPTICAL_DRIVE_PRESENT":False, "DVD_READY":False, "TMDB_CONFIGURED":False,
                 "plugins":[], "PROTECTED_OPTICAL_SUPPORT":{
                     "status":"NOT_CONFIGURED",
@@ -161,6 +162,7 @@ class ProtectedOpticalDoctor(unittest.TestCase):
             optional = {item["label"]:item["status"] for item in report["optional"]}
             self.assertEqual(optional["Blu-ray"], "NOT_INSTALLED")
             self.assertEqual(optional["UHD"], "NOT_INSTALLED")
+            self.assertEqual(optional["ExamplePlugin"], "INCOMPATIBLE")
 
 
 class RuntimeNonRegression(unittest.TestCase):

@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Registry Foundation — 1.2.0-dev2
+
+- Replaces the competing legacy manifest model with one strict declarative V2 schema and explicit plugin API compatibility.
+- Adds safe, deterministic project/user discovery, enablement state, provider hooks and a canonical registry snapshot without plugin execution or network access.
+- Modernizes non-blocking Doctor plugin states while keeping qualified Protected Optical Dev5 temporarily integrated into Core.
+
 # OPENHTPC Protected Optical Provider Phase 5 — 1.1.4-dev5
 
 - Consolidates physical gates for protected Blu-ray, DVD regression and protected UHD opening while recording UHD dropped frames as a deferred limitation.

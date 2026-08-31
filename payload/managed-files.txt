@@ -124,6 +124,7 @@ openhtpc-gpu-policy.py
 openhtpc-cinema-auto.py
 openhtpc-configure-tmdb
 openhtpc-core.py
+openhtpc-plugin-registry.py
 openhtpc-desktop-restore.py
 openhtpc-disc-sheet.py
 openhtpc-disc-view.py

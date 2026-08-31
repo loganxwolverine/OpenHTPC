@@ -2,6 +2,7 @@
 """Read-only OPENHTPC Basic capability and plugin registry model."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import pathlib
@@ -9,12 +10,6 @@ import shutil
 import subprocess
 import ctypes.util
 from typing import Any
-
-PLUGIN_FIELDS = {
-    "plugin_id", "plugin_version", "capability", "dependencies",
-    "hardware_requirements", "menu_entries", "install", "verify", "remove", "doctor",
-}
-
 
 def read_json(path: pathlib.Path) -> dict[str, Any] | None:
     try:
@@ -44,43 +39,36 @@ def runtime_provenance_state(profile: dict[str, Any], passport_state: str) -> st
     return "CURRENT" if source == profile.get("capability_source") else "STALE"
 
 
-def plugin_roots(home: pathlib.Path, install: pathlib.Path) -> list[pathlib.Path]:
-    return [install / "plugins", home / ".local/share/openhtpc/plugins"]
+def plugin_registry(install: pathlib.Path):
+    path=install/"openhtpc-plugin-registry.py"
+    spec=importlib.util.spec_from_file_location("openhtpc_plugin_registry",path)
+    if spec is None or spec.loader is None:raise ImportError("PLUGIN_REGISTRY_UNAVAILABLE")
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
 
-def validate_plugin(value: dict[str, Any]) -> tuple[bool, str]:
-    if set(value) != PLUGIN_FIELDS:
-        return False, "PLUGIN_SCHEMA_INVALID"
-    if not all(isinstance(value[key], str) and value[key] for key in ("plugin_id", "plugin_version", "capability")):
-        return False, "PLUGIN_IDENTITY_INVALID"
-    if not value["plugin_id"].startswith("plugin."):
-        return False, "PLUGIN_ID_INVALID"
-    for key in ("dependencies", "hardware_requirements", "menu_entries"):
-        if not isinstance(value[key], list):
-            return False, "PLUGIN_SCHEMA_INVALID"
-    for key in ("install", "verify", "remove", "doctor"):
-        if not isinstance(value[key], str) or not value[key]:
-            return False, "PLUGIN_LIFECYCLE_INVALID"
-    return True, "PASS"
+def plugin_status(home:pathlib.Path,install:pathlib.Path)->dict[str,Any]:
+    try:return plugin_registry(install).registry(home,install)
+    except (OSError,ImportError,AttributeError,TypeError,ValueError):
+        return {"schema":2,"plugin_api":2,"plugins":[],"errors":[{"id":"core.registry","state":"BROKEN","reason":"PLUGIN_REGISTRY_UNAVAILABLE"}],"providers":{},"core_integrity":"BROKEN"}
 
 
-def installed_plugins(home: pathlib.Path, install: pathlib.Path) -> tuple[list[dict[str, Any]], list[str]]:
-    plugins, errors, seen = [], [], set()
-    for root in plugin_roots(home, install):
-        if not root.is_dir():
-            continue
-        for manifest in sorted(root.glob("*.json")):
-            value = read_json(manifest)
-            valid, reason = validate_plugin(value or {})
-            if not valid:
-                errors.append(f"{manifest.name}:{reason}")
-                continue
-            if value["plugin_id"] in seen:
-                errors.append(f"{manifest.name}:PLUGIN_DUPLICATE")
-                continue
-            seen.add(value["plugin_id"])
-            plugins.append(value)
-    return plugins, errors
+def installed_plugins(home:pathlib.Path,install:pathlib.Path)->tuple[list[dict[str,Any]],list[str]]:
+    """Compatibility view for existing Core consumers; V2 manifests contain no commands."""
+    value=plugin_status(home,install)
+    plugins=[{"plugin_id":item["id"],"plugin_version":item["version"],"capability":item["capabilities"],"menu_entries":[]}
+             for item in value["plugins"] if item["state"]=="AVAILABLE"]
+    errors=[f"{item.get('id','plugin')}:{item['reason']}" for item in value["errors"]]
+    return plugins,errors
+
+
+def optional_plugin_states(registry:dict[str,Any])->list[dict[str,str]]:
+    plugins={item["id"]:item for item in registry.get("plugins",[]) if isinstance(item,dict) and isinstance(item.get("id"),str)}
+    result=[];known=set()
+    for name,label in (("bluray","Blu-ray"),("uhd","UHD"),("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming")):
+        plugin_id="plugin."+name;known.add(plugin_id);item=plugins.get(plugin_id)
+        result.append({"label":label,"status":item.get("state","NOT_INSTALLED") if item else "NOT_INSTALLED"})
+    result.extend({"label":item["name"],"status":item["state"]} for item in sorted(plugins.values(),key=lambda value:value["id"]) if item["id"] not in known)
+    return result
 
 
 def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any]:
@@ -96,7 +84,7 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
     pure = profiles.get("profiles", {}).get("PURE", {}) if isinstance(profiles.get("profiles"), dict) else {}
     pure_path = pure.get("config_path")
     sources = user.get("local_media_sources") if isinstance(user.get("local_media_sources"), list) else []
-    plugins, plugin_errors = installed_plugins(home, install)
+    registry=plugin_status(home,install);plugins,plugin_errors=installed_plugins(home,install)
     optical_initialized = (home / ".local/state/openhtpc/optical-current.json").is_file()
     optical_state = optical.get("state", "NOT_INITIALIZED" if not optical_initialized else "NO_DRIVE")
     detected = profile.get("detected") if isinstance(profile.get("detected"), dict) else {}
@@ -116,7 +104,8 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
         "FLEX_READY": (install / "flex/bin/flex-launcher").is_file(),
         "MEDIA_BROWSER_READY": (install / "openhtpc-media-browser.py").is_file(),
         "AUTOSTART_READY": (home / ".config/autostart/openhtpc.desktop").is_file(),
-        "PLUGIN_REGISTRY_READY": not plugin_errors,
+        "PLUGIN_REGISTRY_READY": registry.get("core_integrity")!="BROKEN",
+        "PLUGIN_REGISTRY": registry,
         "DISC_MONITOR_ACTIVE": _process_active("openhtpc-optical-monitor"),
         "PROTECTED_OPTICAL_SUPPORT": protected,
         "optical_state": optical_state,
@@ -184,6 +173,8 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("TMDb", "PASS" if state["TMDB_CONFIGURED"] else "NOT_CONFIGURED"),
         ("Autostart", state["AUTOSTART_READY"]),
         ("Plugin Registry", state["PLUGIN_REGISTRY_READY"]),
+        ("Plugin API", str(state.get("PLUGIN_REGISTRY",{}).get("plugin_api",2))),
+        ("Plugin diagnostics", (state.get("PLUGIN_REGISTRY",{}).get("errors") or [{"reason":"PASS"}])[0]["reason"]),
         ("Capability snapshot", "AVAILABLE" if read_json(home / ".config/openhtpc/runtime/capabilities.json") else "NOT_GENERATED"),
     ]
     protected = state.get("PROTECTED_OPTICAL_SUPPORT") or {}
@@ -249,10 +240,7 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         blocking |= status in {"FAIL", "STALE", "REBUILD_REQUIRED"} and label != "Plasma optical suppression"
         blocking |= label == "Desktop restore" and status.startswith("FAILED")
         blocking |= label == "Protected optical media" and status == "BLOCKED"
-    installed = {item["plugin_id"] for item in state["plugins"]}
-    optional=[]
-    for name, label in (("bluray", "Blu-ray"), ("uhd", "UHD"), ("jellyfin", "Jellyfin"), ("plex", "Plex"), ("streaming", "Streaming")):
-        optional.append({"label":label,"status":"PASS" if 'plugin.'+name in installed else "NOT_INSTALLED"})
+    optional=optional_plugin_states(state.get("PLUGIN_REGISTRY",{}))
     overall = "BLOCKED" if blocking else ("READY" if state["VIDEO_RUNTIME_READY"] else "DEGRADED")
     lifecycle=_runtime_lifecycle(home,install)
     if state["OPTICAL_DRIVE_PRESENT"] and lifecycle.get("appliance_state")=="RUNNING" and lifecycle.get("monitor_instances",0)!=1: overall="DEGRADED"
