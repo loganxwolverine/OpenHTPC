@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
+    "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+    "current_phase": {"const": "P2_PHASE12_COMPLETE"},
+    "default_behavior_change_expected": {"type": "boolean"},
+    "hardware_io_ownership_change": {"type": "boolean"},
+    "next_action": {"const": "BOUNDED_PRODUCTION_PLUGIN_CUTOVER"},
+    "next_action_context": {
+      "additionalProperties": false,
+      "properties": {
+        "broken": {"type": "string"},
+        "disabled": {"type": "string"},
+        "enabled_valid": {"type": "string"},
+        "plugin_absent": {"type": "string"}
+      },
+      "required": ["plugin_absent", "disabled", "enabled_valid", "broken"],
+      "type": "object"
+    },
+    "next_action_kind": {"const": "SOFTWARE"},
+    "next_step_after_software": {"const": "STOP_FOR_PHYSICAL_VALIDATION"},
+    "ownership_migration_status": {"const": "COMPLETE"},
+    "physical_validation_required_after_implementation": {"type": "boolean"},
+    "plugin_cutover_status": {"const": "INCOMPLETE"},
+    "plugin_policy_feature_owner": {"const": "plugin.bluray"},
+    "required_gate_reason": {"const": "PHYSICAL_VALIDATION"},
+    "required_human_gate_stage": {"const": "AFTER_IMPLEMENTATION"},
+    "schema_version": {"const": 1},
+    "security_boundary_change": {"type": "boolean"},
+    "software_implementation_allowed": {"type": "boolean"},
+    "workstream": {"const": "PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2"}
+  },
+  "required": [
+    "schema_version", "workstream", "current_phase", "architectural_boundary",
+    "ownership_migration_status", "plugin_cutover_status", "next_action",
+    "next_action_kind", "software_implementation_allowed",
+    "physical_validation_required_after_implementation", "required_human_gate_stage",
+    "required_gate_reason", "default_behavior_change_expected",
+    "hardware_io_ownership_change", "security_boundary_change",
+    "next_step_after_software", "plugin_policy_feature_owner",
+    "core_remains_owner_of", "next_action_context"
+  ],
+  "type": "object"
+}

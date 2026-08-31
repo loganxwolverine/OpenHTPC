@@ -83,6 +83,23 @@ def validate_schema(value:Any,schema:dict[str,Any],where:str="$")->None:
 def schema_path(root:pathlib.Path,name:str)->pathlib.Path:return root/"tools/autopilot/schemas"/name
 def validate_document(root:pathlib.Path,value:Any,name:str)->Any:validate_schema(value,load_json(schema_path(root,name)));return value
 
+def load_canonical_state(root:pathlib.Path)->dict[str,Any]:
+ value=load_json(root/"OPENHTPC_CURRENT_STATE.json")
+ return validate_document(root,value,"project-state.schema.json")
+
+def validate_plan_against_state(state:dict[str,Any],plan:dict[str,Any])->None:
+ expected={"default_behavior_change":state["default_behavior_change_expected"],
+           "hardware_io_ownership_change":state["hardware_io_ownership_change"],
+           "security_boundary_change":state["security_boundary_change"]}
+ if any(plan.get(key)!=value for key,value in expected.items()):raise AutopilotError("PLAN_CONTRADICTS_CANONICAL_STATE")
+ if state["software_implementation_allowed"] and state["physical_validation_required_after_implementation"]:
+  required={"risk_class":"SOFTWARE_PHYSICAL_GATE","human_gate_stage":state["required_human_gate_stage"],
+            "gate_reason":state["required_gate_reason"],"physical_validation_required":True,"next_step_policy":"STOP"}
+  if any(plan.get(key)!=value for key,value in required.items()):raise AutopilotError("PLAN_CONTRADICTS_CANONICAL_STATE")
+
+def plan_has_executable_step(plan:dict[str,Any])->bool:
+ return plan["next_step_policy"]!="STOP" or (plan["risk_class"]=="SOFTWARE_PHYSICAL_GATE" and plan["human_gate_stage"]=="AFTER_IMPLEMENTATION")
+
 def parse_antigravity_outer(text:str,require_structured:bool=True)->dict[str,Any]:
  try:outer=json.loads(text)
  except json.JSONDecodeError as exc:raise AutopilotError("ANTIGRAVITY_OUTER_JSON_INVALID") from exc
@@ -207,6 +224,7 @@ class Autopilot:
   value.update(fields,updated_at=now());self.write_json(path,safe_state(value))
  def context(self)->dict[str,Any]:
   context=git_context(self.root);context["architecture_documents"]=["AGENTS.md","PLUGIN_FRAMEWORK_P2_ARCHITECTURE.md","PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md","OPENHTPC-PROTECTED-OPTICAL-ROADMAP.md"]
+  context["canonical_project_state"]=load_canonical_state(self.root)
   state=self.runtime/"state.json";context["previous_state"]=load_json(state) if state.is_file() else None
   return context
  def _agy_command(self,prompt:str,schema:pathlib.Path|None,timeout:int)->list[str]:
@@ -231,13 +249,14 @@ class Autopilot:
  def plan(self,run_id:str|None=None)->tuple[pathlib.Path,dict[str,Any],dict[str,Any]]:
   self.ensure_runtime();context=self.context();run_id=run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8];run_dir=self.runs/run_id;run_dir.mkdir()
   context["run_id"]=run_id;self.write_json(run_dir/"context.json",context)
-  prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text()+"\n\nCONTEXT:\n"+json.dumps(context,indent=2)
+  prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text()+"\n\nCANONICAL_PROJECT_STATE:\n"+json.dumps(context["canonical_project_state"],indent=2)+"\n\nCONTEXT:\n"+json.dumps(context,indent=2)
   before=workspace_fingerprint(self.root);result=self._agy(prompt,schema_path(self.root,"plan.schema.json"),self.planner_timeout)
   (run_dir/"antigravity-planner.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"antigravity-planner.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
   require_workspace_unchanged(before,workspace_fingerprint(self.root))
   if result.returncode:raise AutopilotError("PLANNER_FAILED")
   plan=validate_document(self.root,parse_antigravity_outer(result.stdout),"plan.schema.json")
   if plan["run_id"]!=run_id or plan["expected_branch"]!=context["branch"] or plan["expected_head"]!=context["head"]:raise AutopilotError("PLAN_CONTEXT_MISMATCH")
+  validate_plan_against_state(context["canonical_project_state"],plan)
   policy=policy_evaluate(plan);self.write_json(run_dir/"plan.json",plan);self.write_json(run_dir/"policy.json",policy)
   (run_dir/"summary.txt").write_text(f"PLAN: {plan['title']}\nRISK: {plan['risk_class']}\nPOLICY: {policy['decision']}\n",encoding="utf-8")
   self.update_state(status="PLANNED",last_run_id=run_id,branch=context["branch"],head=context["head"],current_gate=policy["stage"],gate_reason=policy["reason"])
@@ -281,7 +300,7 @@ class Autopilot:
   return git(self.root,"rev-parse","HEAD")
  def run_once(self)->str:
   run_dir,plan,policy=self.plan()
-  if plan["next_step_policy"]=="STOP":self.update_state(status="NO_USEFUL_WORK",current_gate="NONE",gate_reason="NONE");return "NO_USEFUL_WORK"
+  if not plan_has_executable_step(plan):self.update_state(status="NO_USEFUL_WORK",current_gate="NONE",gate_reason="NONE");return "NO_USEFUL_WORK"
   if policy["decision"] in {"FORBIDDEN","HUMAN_GATE"}:self.update_state(status="AWAITING_HUMAN_GATE",current_gate=policy["stage"],gate_reason=policy["reason"]);return "AWAITING_HUMAN_GATE"
   report=self.execute(run_dir,plan);review=self.reviewer(run_dir,plan,report)
   if review["verdict"]=="REJECT":self.update_state(status="REVIEW_REJECTED",current_gate="NONE",gate_reason="NONE");return "REVIEW_REJECTED"
@@ -295,7 +314,9 @@ class Autopilot:
   checks={"repository_root":self.root.is_dir(),"git_repository":(self.root/".git").exists(),"python":sys.version_info>=(3,10),"antigravity":bool(shutil.which("agy")),"codex":bool(shutil.which("codex")),"agents":(self.root/"AGENTS.md").is_file(),"gemini_md":(self.root/"GEMINI.md").is_file(),"policy":True}
   try:context=git_context(self.root,require_clean=False);checks["git_status"]="CLEAN" if not context["status"] else "DIRTY";checks["branch"]=context["branch"]
   except AutopilotError:checks["git_status"]="ERROR"
-  for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
+  for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json","project-state.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
+  try:load_canonical_state(self.root);checks["canonical_state"]=True
+  except AutopilotError:checks["canonical_state"]=False
   try:self.ensure_runtime();probe=self.runtime/".write-test";probe.write_text("ok");probe.unlink();checks["runtime_writable"]=True
   except OSError:checks["runtime_writable"]=False
   for key,executable in (("antigravity","agy"),("codex","codex")):

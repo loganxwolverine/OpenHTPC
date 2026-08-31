@@ -65,6 +65,20 @@ Autopilot preserves the workspace and stops. Inspect the run directory and
 After manual resolution, begin again from a clean authorized HEAD. A saved
 plan is evidence, not permission to bypass a fresh preflight.
 
+## Canonical project state
+
+`OPENHTPC_CURRENT_STATE.json`, validated by the strict
+`project-state.schema.json`, describes where the current workstream is and what
+next action is approved. The planner decides how to implement that action
+safely. It may not erase an approved software action merely because physical
+validation is required later. Code, tests, and artifacts remain higher
+authority than canonical state.
+
+Autopilot explicitly supplies canonical state to the planner and rejects a
+returned plan that contradicts its risk and gate facts. An architecture freeze
+means ownership migration is frozen; it does not mean feature cutover is
+complete.
+
 ## Physical validation
 
 For `SOFTWARE_PHYSICAL_GATE`, implementation, software tests, independent
@@ -72,6 +86,12 @@ review and a local commit may complete. Autopilot then stops at
 `AWAITING_PHYSICAL_VALIDATION`. It does not deploy, operate validators, invent
 results or start a subsequent phase. A human records physical qualification
 through the normal OPENHTPC process.
+
+This is implement-then-gate semantics: future physical validation does not
+require stopping before bounded software implementation. Tasks that themselves
+perform physical interaction, transfer hardware I/O or security authority,
+change system configuration, or cross another protected boundary retain their
+before-execution gate.
 
 The stable rules are defined independently in
 `docs/OPENHTPC_AUTOPILOT_POLICY.md`. AI recommendation is not policy authority.

@@ -1,8 +1,9 @@
 # OPENHTPC agent guidance
 
-Authority precedence is: code/tests/artifacts; current qualification and
-architecture documents; current roadmap/state documents; historical
-conversation only as background.
+Authority precedence is: code/tests/artifacts; `OPENHTPC_CURRENT_STATE.json`
+for the current workstream and approved next action; current qualification and
+architecture documents; roadmap documents; historical conversation only as
+background. Canonical project state never overrides code truth.
 
 Always inspect Git status first and work only on the authorized branch. Unless
 a human explicitly authorizes it, never push, tag, release, merge, rebase,

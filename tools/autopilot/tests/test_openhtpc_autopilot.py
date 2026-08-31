@@ -161,4 +161,53 @@ class AntigravityReadonlyHeadless(unittest.TestCase):
  def test_50_normal_executor_keeps_structured_report_contract(self):
   source=MODULE_PATH.read_text(encoding="utf-8");self.assertIn('"--sandbox","workspace-write","--approve-for-me"',source);self.assertIn('"--output-schema",str(schema_path(self.root,"executor-report.schema.json"))',source)
 
+class CanonicalProjectState(unittest.TestCase):
+ @classmethod
+ def setUpClass(cls):
+  cls.root=MODULE_PATH.parents[2];cls.state=A.load_canonical_state(cls.root)
+ def cutover_plan(self,**updates):
+  value=plan(risk_class="SOFTWARE_PHYSICAL_GATE",human_gate_stage="AFTER_IMPLEMENTATION",gate_reason="PHYSICAL_VALIDATION",
+             physical_validation_required=True,default_behavior_change=True,hardware_io_ownership_change=False,
+             security_boundary_change=False,next_step_policy="STOP")
+  value.update(updates);return value
+ def test_51_canonical_state_parses(self):self.assertEqual(self.state["schema_version"],1)
+ def test_52_malformed_state_rejected(self):
+  value=dict(self.state);value.pop("next_action")
+  with self.assertRaises(A.AutopilotError):A.validate_document(self.root,value,"project-state.schema.json")
+ def test_53_unknown_state_schema_rejected(self):
+  value=dict(self.state);value["schema_version"]=2
+  with self.assertRaises(A.AutopilotError):A.validate_document(self.root,value,"project-state.schema.json")
+ def test_54_planner_context_receives_canonical_state(self):
+  with mock.patch.object(A,"git_context",return_value={"root":str(self.root),"branch":"x","head":"a"*40,"status":"","log":""}):
+   self.assertEqual(A.Autopilot(self.root).context()["canonical_project_state"],self.state)
+ def test_55_architecture_freeze_is_not_development_stop(self):
+  prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text(encoding="utf-8")
+  self.assertIn("does not mean all protected-optical development is finished",prompt)
+  self.assertEqual((self.state["architectural_boundary"],self.state["plugin_cutover_status"]),("FROZEN_AFTER_PHASE11","INCOMPLETE"))
+ def test_56_implement_then_gate_policy_executes(self):
+  decision=A.policy_evaluate(self.cutover_plan());self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("EXECUTE","AFTER_IMPLEMENTATION","PHYSICAL_VALIDATION"))
+ def test_57_future_physical_validation_is_after_implementation(self):
+  value=self.cutover_plan();A.validate_plan_against_state(self.state,value);self.assertTrue(A.plan_has_executable_step(value))
+ def test_58_physical_task_can_require_before_execution(self):
+  value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="SYSTEM_CONFIGURATION")
+  self.assertEqual(A.policy_evaluate(value)["stage"],"BEFORE_EXECUTION")
+ def test_59_current_state_rejects_docs_only_stop(self):
+  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
+   A.validate_plan_against_state(self.state,plan(next_step_policy="STOP",objective="No further automated work"))
+ def test_60_current_state_rejects_missing_physical_validation(self):
+  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
+   A.validate_plan_against_state(self.state,self.cutover_plan(physical_validation_required=False))
+ def test_61_current_state_rejects_default_behavior_downgrade(self):
+  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
+   A.validate_plan_against_state(self.state,self.cutover_plan(default_behavior_change=False))
+ def test_62_current_state_rejects_hardware_ownership_change(self):
+  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
+   A.validate_plan_against_state(self.state,self.cutover_plan(hardware_io_ownership_change=True))
+ def test_63_current_state_rejects_security_boundary_change(self):
+  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
+   A.validate_plan_against_state(self.state,self.cutover_plan(security_boundary_change=True))
+ def test_64_current_state_accepts_software_physical_gate(self):A.validate_plan_against_state(self.state,self.cutover_plan())
+ def test_65_stop_policy_is_post_implementation(self):self.assertTrue(A.plan_has_executable_step(self.cutover_plan()))
+ def test_66_ordinary_stop_plan_has_no_executable_step(self):self.assertFalse(A.plan_has_executable_step(plan(next_step_policy="STOP")))
+
 if __name__=="__main__":unittest.main()
