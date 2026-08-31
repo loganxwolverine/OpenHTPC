@@ -2,7 +2,7 @@
 
 ## UHD optical playback performance / dropped output frames
 
-Status: `DEFERRED / OBSERVE`
+Status: `KNOWN_LIMITATION — DEFER / OBSERVE`
 
 Physical context: ZimaBoard 2, external USB optical drive, real protected UHD
 4K media and HEVC Main10. Playback opened successfully and produced video and
@@ -13,6 +13,10 @@ display refresh, Vulkan, VA-API, tone mapping, HDR, USB behavior or MPV
 options. No ZimaBoard-specific workaround is introduced. If the same problem
 is reproduced on AMD or NVIDIA, raise its priority and open a dedicated
 performance project.
+
+Dev5 physical qualification confirms protected UHD opening, video, audio,
+quit/return and the dedicated UHD badge. It does not qualify playback fluidity
+as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
