@@ -19,7 +19,7 @@ def authorize(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,a
     if state.get("device")!=device or not device.startswith("/dev/"):raise ValueError("OPTICAL_DEVICE_MISMATCH")
     if not device_exists(device):raise ValueError("OPTICAL_DEVICE_REMOVED")
     canonical=optical.canonical_state(state)
-    if canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO"}:raise ValueError("OPTICAL_MEDIA_NOT_SUPPORTED")
+    if canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:raise ValueError("OPTICAL_MEDIA_NOT_SUPPORTED")
     capability=optical.protected_capability(home);expected=optical.playback_action_token(state,capability)
     if not hmac.compare_digest(action_token or "",expected):raise ValueError("OPTICAL_ACTION_TOKEN_INVALID")
     decision=optical.playback_decision(state,capability)

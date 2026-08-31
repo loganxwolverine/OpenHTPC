@@ -197,6 +197,16 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("External key database", key_database.get("status", "NOT_CONFIGURED")),
         ("Protected optical playback", "ENABLED" if protected.get("status") == "AVAILABLE" else "DISABLED"),
     ])
+    optical_disc = read_json(state_root / "optical-current.json") or {}
+    optical_canonical = optical_disc.get("canonical_state", "UNKNOWN")
+    if optical_canonical in {"BLURAY_VIDEO", "UHD_BLURAY_VIDEO", "BLURAY_FAMILY"}:
+        checks_raw.extend([
+            ("Optical media family", "BLURAY"),
+            ("Optical exact type", {"BLURAY_VIDEO":"BLURAY", "UHD_BLURAY_VIDEO":"UHD_BLURAY"}.get(optical_canonical, "UNKNOWN")),
+            ("Optical protection", optical_disc.get("protection", "UNKNOWN")),
+            ("Protection mechanism", "+".join(optical_disc.get("protection_mechanisms") or ["UNKNOWN"])),
+            ("Classification source", optical_disc.get("classification_source", "UNKNOWN")),
+        ])
     last_protected_attempt = read_json(state_root / "protected-optical-last-attempt.json")
     if last_protected_attempt:
         checks_raw.append(("Last protected disc attempt", last_protected_attempt.get("status", "UNKNOWN")))

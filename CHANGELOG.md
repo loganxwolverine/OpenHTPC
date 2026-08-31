@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Protected Optical Provider Phase 4 — 1.1.4-dev4
+
+- Classifies physical Blu-ray, AACS and BD+ facts from libbluray's public disc-information API, with a structural read-only fallback.
+- Keeps exact Blu-ray/UHD identity conservative and accepts `BLURAY_FAMILY` for the generic gated `bd://` attempt.
+- Reports classification source, confidence, protection mechanisms and handled status without acquiring or directly reading key material.
+
 # OPENHTPC 1.1.3 Release Candidate 2 — 1.1.3-rc2
 
 - Promotes the physically qualified Dev19 NVIDIA stabilization baseline without additional functional changes.

@@ -26,7 +26,7 @@ def runner(*,fstype="udf",media=True,bd=False,dvd=False,bdinfo=False):
 
 class Detection(unittest.TestCase):
     def probe(self,*,header=None,**values):
-        return optical.probe_device(pathlib.Path("/dev/fixture"),runner(**values),lambda block:(header,"BDMV/index.bdmv") if header else (None,None))
+        return optical.probe_device(pathlib.Path("/dev/fixture"),runner(**values),lambda block:(header,"BDMV/index.bdmv") if header else (None,None),libbluray_reader=lambda _device:None)
 
     def test_drive_no_media(self):
         state=self.probe(fstype="",media=False)

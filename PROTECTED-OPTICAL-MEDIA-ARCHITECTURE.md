@@ -32,12 +32,27 @@ boundary. They deliberately expose no acquisition or decryption operation.
 
 ## Phase 2 playback gating
 
-The canonical optical state classifies the disc as `UNPROTECTED`, `PROTECTED`,
-or `UNKNOWN` from mounted-disc filesystem metadata. An unprotected Blu-ray or
-UHD Blu-ray does not require a key database; its action depends only on the
+The canonical optical state separates the Blu-ray media family from its exact
+variant. Public libbluray disc information is the primary source for Blu-ray,
+AACS and BD+ detection. Mounted, non-secret BDMV/AACS structure is a lower
+priority fallback. The published `classification_source` and
+`classification_confidence` explain the result. A disc may truthfully remain
+`BLURAY_FAMILY` when standard versus UHD is not proven; this is not a globally
+unknown media type.
+
+Protection is independently classified as `UNPROTECTED`, `PROTECTED`, or
+`UNKNOWN`. `aacs_detected` or `bdplus_detected` means `PROTECTED`, regardless of
+the corresponding `handled` value. Handled status describes access capability,
+not the presence of protection. An unprotected Blu-ray or UHD Blu-ray does not
+require a key database; its action depends only on the
 structural `libbluray` capability. A protected disc requires the external
 protected-media capability to be `AVAILABLE`. Unknown protection is disabled
 conservatively and never presented as playable.
+
+UHD is claimed only from BDMV index version 0300 evidence. HEVC, 3840x2160,
+BDXL/media capacity, disc labels and titles are not UHD classifiers. Without
+that proof the exact variant remains unknown while the Blu-ray family stays
+known.
 
 The Flex Play action is derived from the current optical generation and the
 current capability snapshot. A capability refresh changes the presentation
@@ -63,3 +78,7 @@ does not change `PROTECTED_OPTICAL_SUPPORT` from `AVAILABLE`. Unprotected
 Blu-ray and UHD Blu-ray use the same libbluray path without requiring libaacs
 or an external key database. OPENHTPC still never reads, parses, copies,
 changes, supplies, or acquires key material.
+
+`BLURAY_FAMILY` uses that same generic `bd://` backend when protection and
+provider gating authorize an attempt. Protection, provider capability and the
+recorded `OPEN_SUCCESS`/`OPEN_FAILED` result remain three separate facts.
