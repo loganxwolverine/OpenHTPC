@@ -26,3 +26,7 @@ action.
 Phase 8 permits the enabled equivalent plugin to classify normalized probe
 facts. Core retains all device/library/filesystem acquisition and remains the
 only canonical optical-state publisher.
+Phase 9 permits the enabled equivalent plugin to normalize already-acquired
+libbluray primitive values into the Phase 8 library-fact fragment. Core keeps
+all handles and calls, structural fallback, final raw-fact merge and canonical
+publication. Plugin normalization is not libbluray probing or classification.

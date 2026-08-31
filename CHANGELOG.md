@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 libbluray Fact Normalization — 1.2.0-dev10
+
+- Transfers only deterministic normalization of Core-acquired libbluray primitive facts to enabled `plugin.bluray`.
+- Preserves independent AACS/BD+ detected and handled facts plus normalized INDX versions without performing classification.
+- Keeps device handles, every libbluray/BDMV call, structural fallback, raw-fact merge and canonical publication in Core with exact fallback.
+
 # OPENHTPC Plugin Framework P2 Optical Classification — 1.2.0-dev9
 
 - Transfers deterministic Blu-ray/UHD classification of normalized Core probe facts to enabled `plugin.bluray`.

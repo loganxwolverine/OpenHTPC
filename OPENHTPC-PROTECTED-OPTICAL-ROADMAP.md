@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 8 CLASSIFICATION — CORE PROBE/PUBLICATION RETAINED`
+Status: `P2 PHASE 9 LIBBLURAY NORMALIZATION — CORE ACQUISITION RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -88,3 +88,12 @@ must exactly match the retained Core result, after which Core alone publishes
 canonical state. `0300` remains the only UHD index proof, and protection
 detection remains separate from handled/accessibility state. KEYDB capability
 does not affect media identity.
+
+Phase 9 transfers only deterministic normalization of primitive libbluray
+results already acquired by Core. The plugin receives bounded booleans and an
+optional INDX header value; it receives no device path, handle, pointer, file
+descriptor or callable. It preserves detected and handled AACS/BD+ facts as
+independent values and normalizes the INDX version without classifying media.
+Core still owns every libbluray call and BDMV/INDX read, the structural
+fallback, validation and merge of the complete Phase 8 facts, and canonical
+state publication. Plugin normalization is not libbluray probing.

@@ -12,7 +12,7 @@ TOOL = ROOT / "tools/openhtpc_release_metadata.py"
 SPEC = importlib.util.spec_from_file_location("release_metadata", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC); assert SPEC.loader; SPEC.loader.exec_module(MODULE)
 BUILD_ID = "amd-codec-release-metadata-consistency-dev5"
-CURRENT_BUILD_ID = "plugin-framework-p2-protected-optical-classification-dev9"
+CURRENT_BUILD_ID = "plugin-framework-p2-protected-optical-libbluray-normalization-dev10"
 
 
 def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
@@ -65,7 +65,7 @@ class ReleaseMetadataConsistency(unittest.TestCase):
 
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
-        self.assertEqual(values["top_version"], "1.2.0-dev9")
+        self.assertEqual(values["top_version"], "1.2.0-dev10")
 
     def test_unchanged_flex_binary_retains_rc2_build_provenance(self):
         metadata = json.loads((ROOT / "payload/flex/BUILD-METADATA.json").read_text())

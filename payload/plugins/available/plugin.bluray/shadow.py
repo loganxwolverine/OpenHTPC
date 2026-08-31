@@ -104,3 +104,17 @@ def classify_probe_facts(facts:dict[str,Any])->dict[str,Any]:
  if canonical=="BLURAY_FAMILY" and confidence=="CERTAIN":confidence="PARTIAL"
  return {"owned":True,"canonical_state":canonical,"legacy_state":legacy,"media_family":"BLURAY","exact_type":exact,"uhd_status":uhd,"protection":protection,
          "protection_mechanisms":mechanisms,"classification_source":source,"classification_confidence":confidence}
+
+def normalize_libbluray_primitives(value:dict[str,Any]|None)->dict[str,Any]:
+ """Normalize Core-acquired primitive values without probing or classification."""
+ if value is None:
+  return {"libbluray_info_available":False,"libbluray_bluray_detected":None,"aacs_detected":None,"aacs_handled":None,
+          "bdplus_detected":None,"bdplus_handled":None,"libbluray_index_version":"NONE","libbluray_index_available":False,
+          "libbluray_probe_complete":False}
+ header=value.get("bdmv_index_header");version="NONE"
+ if isinstance(header,str) and header:
+  raw=header[4:] if header.startswith("INDX") and len(header)==8 else "OTHER";version=raw if raw in {"0100","0200","0300"} else "OTHER"
+ return {"libbluray_info_available":True,"libbluray_bluray_detected":value["bluray_detected"],"aacs_detected":value["aacs_detected"],
+         "aacs_handled":value["aacs_handled"],"bdplus_detected":value["bdplus_detected"],"bdplus_handled":value["bdplus_handled"],
+         "libbluray_index_version":version,"libbluray_index_available":version!="NONE",
+         "libbluray_probe_complete":value.get("probe_open_succeeded",False)}

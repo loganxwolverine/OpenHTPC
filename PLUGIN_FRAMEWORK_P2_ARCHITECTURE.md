@@ -262,6 +262,27 @@ A/B output equality before selection. Disabled, malformed, mismatched or
 broken cases use the retained Core classifier. Canonical persistence, monitor
 publication and generation remain exclusively Core-owned.
 
+## Phase 9 libbluray primitive-fact normalization ownership
+
+Phase 9 inserts a pure normalization boundary between Core libbluray
+acquisition and the Phase 8 raw-fact merge. Core validates and supplies only
+immutable primitive data: disc-info availability, Blu-ray detection, separate
+AACS/BD+ detected and handled booleans, probe completion and an optional INDX
+header value already read through the public libbluray file API.
+
+The enabled plugin may translate those values into the closed libbluray fact
+fragment. It does not return family, exact type, protection, source or
+confidence; those remain Phase 8 classification outputs. It receives no live
+handle, ctypes pointer, descriptor, device or mount path, callable, or object
+capable of I/O. It performs no libbluray/libaacs/libbdplus call, filesystem
+probe, BDMV/INDX read, KEYDB access, network access or execution.
+
+Core retains exact normalization fallback and accepts plugin authority only
+after output validation and exact A/B equality. Core then merges the fragment
+with independently acquired structural facts, validates the complete Phase 8
+contract and remains the sole canonical-state publisher. Plugin normalization
+is not libbluray probing.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its
