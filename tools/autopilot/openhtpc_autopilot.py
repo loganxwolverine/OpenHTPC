@@ -167,7 +167,12 @@ def safe_state(value:dict[str,Any])->dict[str,Any]:
 class Autopilot:
  def __init__(self,root:pathlib.Path):
   self.root=root.resolve();self.runtime=self.root/".openhtpc-autopilot";self.runs=self.runtime/"runs"
-  self.planner_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_PLANNER_TIMEOUT","300"));self.executor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_EXECUTOR_TIMEOUT","1800"));self.doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_DOCTOR_TIMEOUT","30"))
+  self.planner_timeout=max(300,int(os.environ.get("OPENHTPC_AUTOPILOT_PLANNER_TIMEOUT","300")))
+  self.reviewer_timeout=max(300,int(os.environ.get("OPENHTPC_AUTOPILOT_REVIEWER_TIMEOUT","300")))
+  self.executor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_EXECUTOR_TIMEOUT","1800"))
+  self.gemini_doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_GEMINI_DOCTOR_TIMEOUT","90"))
+  self.codex_doctor_timeout=int(os.environ.get("OPENHTPC_AUTOPILOT_CODEX_DOCTOR_TIMEOUT","90"))
+  self.gemini_policy=self.root/"tools/autopilot/policies/gemini-readonly.toml"
  def ensure_runtime(self)->None:self.runs.mkdir(parents=True,exist_ok=True)
  def write_json(self,path:pathlib.Path,value:Any)->None:path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value,indent=2,sort_keys=True)+"\n",encoding="utf-8")
  def update_state(self,**fields:Any)->None:
@@ -179,9 +184,18 @@ class Autopilot:
   context=git_context(self.root);context["architecture_documents"]=["AGENTS.md","PLUGIN_FRAMEWORK_P2_ARCHITECTURE.md","PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md","OPENHTPC-PROTECTED-OPTICAL-ROADMAP.md"]
   state=self.runtime/"state.json";context["previous_state"]=load_json(state) if state.is_file() else None
   return context
- def _gemini(self,prompt:str,timeout:int)->subprocess.CompletedProcess[str]:
-  command=["gemini","--skip-trust","--approval-mode","plan","-p",prompt,"--output-format","json"]
+ def _validated_gemini_policy(self)->pathlib.Path:
+  try:policy=self.gemini_policy.resolve(strict=True)
+  except OSError as exc:raise AutopilotError("GEMINI_READONLY_POLICY_INVALID") from exc
+  expected=(self.root/"tools/autopilot/policies").resolve()
+  if not policy.is_file() or policy.parent!=expected:raise AutopilotError("GEMINI_READONLY_POLICY_INVALID")
+  return policy
+ def _gemini_command(self,prompt:str)->list[str]:
+  command=["gemini","--skip-trust","--approval-mode","default","--policy",str(self._validated_gemini_policy()),"-p",prompt,"--output-format","json"]
   model=os.environ.get("OPENHTPC_GEMINI_MODEL");command.extend(["--model",model] if model else [])
+  return command
+ def _gemini(self,prompt:str,timeout:int)->subprocess.CompletedProcess[str]:
+  command=self._gemini_command(prompt)
   return run_command(command,self.root,timeout)
  def plan(self,run_id:str|None=None)->tuple[pathlib.Path,dict[str,Any],dict[str,Any]]:
   self.ensure_runtime();context=self.context();run_id=run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8];run_dir=self.runs/run_id;run_dir.mkdir()
@@ -216,7 +230,7 @@ class Autopilot:
  def reviewer(self,run_dir:pathlib.Path,plan:dict[str,Any],report:dict[str,Any])->dict[str,Any]:
   payload={"plan":plan,"executor_report":report,"branch":git(self.root,"branch","--show-current"),"head":git(self.root,"rev-parse","HEAD"),"git_status":git(self.root,"status","--porcelain"),"changed_paths":changed_paths(self.root),"diff_check":"PASS"}
   prompt=(self.root/"tools/autopilot/prompts/reviewer.md").read_text()+"\n\nREVIEW INPUT:\n"+json.dumps(payload,indent=2)+"\nSCHEMA:\n"+schema_path(self.root,"review.schema.json").read_text()
-  result=self._gemini(prompt,self.planner_timeout);(run_dir/"gemini-reviewer.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"gemini-reviewer.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
+  result=self._gemini(prompt,self.reviewer_timeout);(run_dir/"gemini-reviewer.raw.json").write_text(redact_text(result.stdout),encoding="utf-8");(run_dir/"gemini-reviewer.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
   if result.returncode:raise AutopilotError("REVIEWER_FAILED")
   review=validate_document(self.root,parse_gemini_outer(result.stdout),"review.schema.json");self.write_json(run_dir/"review.json",review);return review
  def review_saved(self)->dict[str,Any]:
@@ -249,18 +263,20 @@ class Autopilot:
   try:context=git_context(self.root,require_clean=False);checks["git_status"]="CLEAN" if not context["status"] else "DIRTY";checks["branch"]=context["branch"]
   except AutopilotError:checks["git_status"]="ERROR"
   for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
+  try:checks["gemini_readonly_policy"]=self._validated_gemini_policy().is_file()
+  except AutopilotError:checks["gemini_readonly_policy"]=False
   try:self.ensure_runtime();probe=self.runtime/".write-test";probe.write_text("ok");probe.unlink();checks["runtime_writable"]=True
   except OSError:checks["runtime_writable"]=False
   for executable in ("gemini","codex"):
    if checks[executable]:
-    result=run_command([executable,"--version"],self.root,self.doctor_timeout);checks[executable+"_version"]=result.stdout.strip() or result.stderr.strip()
+    result=run_command([executable,"--version"],self.root,30);checks[executable+"_version"]=result.stdout.strip() or result.stderr.strip()
   if online:
-   gemini=self._gemini("Return exactly GEMINI_OK and do nothing else.",self.doctor_timeout);checks["gemini_online"]=gemini.returncode==0 and "GEMINI_OK" in gemini.stdout
+   gemini=self._gemini("Return exactly GEMINI_OK and do nothing else.",self.gemini_doctor_timeout);checks["gemini_online"]=gemini.returncode==0 and "GEMINI_OK" in gemini.stdout
    schema={"type":"object","additionalProperties":False,"required":["status"],"properties":{"status":{"const":"CODEX_OK"}}}
    with tempfile.TemporaryDirectory() as raw:
     schema_file=pathlib.Path(raw)/"smoke.json";schema_file.write_text(json.dumps(schema));output=pathlib.Path(raw)/"out.json"
     command=["codex","exec","--sandbox","read-only","--approve-for-me","--ephemeral","-C",str(self.root),"--output-schema",str(schema_file),"-o",str(output),"Return JSON with status CODEX_OK. Do not modify anything."]
-    codex=run_command(command,self.root,self.doctor_timeout);checks["codex_online"]=codex.returncode==0 and output.is_file() and load_json(output).get("status")=="CODEX_OK"
+    codex=run_command(command,self.root,self.codex_doctor_timeout);checks["codex_online"]=codex.returncode==0 and output.is_file() and load_json(output).get("status")=="CODEX_OK"
   print("OPENHTPC AUTOPILOT DOCTOR");[print(f"{key}={value}") for key,value in checks.items()]
   return 0 if all(value not in {False,"ERROR"} for value in checks.values()) else 1
 

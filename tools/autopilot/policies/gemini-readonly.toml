@@ -1,0 +1,21 @@
+# OPENHTPC Autopilot Gemini planner/reviewer policy.
+# Deny by default; only bounded repository read/search tools are permitted.
+
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 900
+interactive = false
+denyMessage = "OPENHTPC Autopilot Gemini role is read-only."
+
+[[rule]]
+toolName = [
+  "read_file",
+  "read_many_files",
+  "list_directory",
+  "glob",
+  "grep_search"
+]
+decision = "allow"
+priority = 950
+interactive = false

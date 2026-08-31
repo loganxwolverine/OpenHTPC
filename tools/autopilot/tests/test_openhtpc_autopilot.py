@@ -1,6 +1,6 @@
 """Unit tests for the deterministic OPENHTPC Autopilot policy layer."""
 from __future__ import annotations
-import contextlib,importlib.util,io,json,pathlib,sys,tempfile,time,unittest
+import contextlib,importlib.util,io,json,pathlib,sys,tempfile,time,tomllib,unittest
 from unittest import mock
 
 MODULE_PATH=pathlib.Path(__file__).resolve().parents[1]/"openhtpc_autopilot.py"
@@ -91,5 +91,38 @@ class ProcessAndPreflight(unittest.TestCase):
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root)
    with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="codex" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
     self.assertEqual(pilot.doctor(False),1)
+
+class GeminiReadonlyHeadless(unittest.TestCase):
+ @classmethod
+ def setUpClass(cls):
+  cls.root=MODULE_PATH.parents[2];cls.pilot=A.Autopilot(cls.root)
+  cls.command=cls.pilot._gemini_command("bounded prompt")
+  cls.policy_path=cls.root/"tools/autopilot/policies/gemini-readonly.toml"
+  cls.policy=tomllib.loads(cls.policy_path.read_text(encoding="utf-8"))
+  cls.rules=cls.policy["rule"]
+  cls.allowed={name for rule in cls.rules if rule.get("decision")=="allow" for name in ([rule["toolName"]] if isinstance(rule["toolName"],str) else rule["toolName"])}
+ def test_28_planner_command_does_not_use_plan_mode(self):
+  self.assertNotIn("plan",self.command[self.command.index("--approval-mode")+1:self.command.index("--approval-mode")+2])
+ def test_29_reviewer_command_does_not_use_plan_mode(self):
+  self.assertEqual(self.pilot._gemini_command("review")[self.command.index("--approval-mode")+1],"default")
+ def test_30_explicit_default_approval_mode(self):
+  index=self.command.index("--approval-mode");self.assertEqual(self.command[index+1],"default")
+ def test_31_command_includes_absolute_policy(self):
+  index=self.command.index("--policy");self.assertEqual(pathlib.Path(self.command[index+1]),self.policy_path.resolve());self.assertTrue(pathlib.Path(self.command[index+1]).is_absolute())
+ def test_32_policy_file_exists(self):self.assertTrue(self.policy_path.is_file())
+ def test_33_policy_has_catch_all_deny(self):
+  self.assertTrue(any(rule.get("toolName")=="*" and rule.get("decision")=="deny" and rule.get("priority")==900 and rule.get("interactive") is False for rule in self.rules))
+ def test_34_read_only_tools_allowed(self):
+  self.assertEqual(self.allowed,{"read_file","read_many_files","list_directory","glob","grep_search"})
+ def test_35_mutation_and_shell_tools_not_allowed(self):
+  self.assertTrue({"write_file","replace","run_shell_command"}.isdisjoint(self.allowed))
+ def test_36_network_tools_not_allowed(self):
+  self.assertTrue({"web_fetch","google_web_search"}.isdisjoint(self.allowed))
+ def test_37_plan_transitions_not_allowed(self):
+  self.assertTrue({"enter_plan_mode","exit_plan_mode"}.isdisjoint(self.allowed))
+ def test_38_arbitrary_mcp_not_allowed(self):self.assertFalse(any(name.startswith("mcp_") or name.startswith("discovered_tool_") for name in self.allowed))
+ def test_39_timeout_defaults_are_bounded_and_sane(self):
+  self.assertGreaterEqual(self.pilot.planner_timeout,300);self.assertGreaterEqual(self.pilot.reviewer_timeout,300)
+  self.assertEqual(self.pilot.gemini_doctor_timeout,90);self.assertEqual(self.pilot.codex_doctor_timeout,90);self.assertGreater(self.pilot.executor_timeout,self.pilot.planner_timeout)
 
 if __name__=="__main__":unittest.main()

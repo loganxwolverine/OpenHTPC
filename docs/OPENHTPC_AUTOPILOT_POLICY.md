@@ -3,6 +3,14 @@
 AI recommendation is not policy authority. The Python policy gates are
 authoritative over planner, executor and reviewer output.
 
+Gemini planner and reviewer processes run headlessly in normal approval mode
+with the explicit tracked `gemini-readonly.toml` policy. That deny-by-default
+allowlist permits only local repository read/search tools. Mutation, shell,
+network, arbitrary MCP, and Plan Mode transition tools are denied. Gemini Plan
+Mode is deliberately not used because its own interactive lifecycle is not a
+deterministic headless security boundary. Prompt instructions are defense in
+depth; the supplied policy is the tool-access boundary.
+
 Autopilot accepts only strict JSON contracts and one bounded task per plan.
 Risk classes are `DOCS_ONLY`, `SOFTWARE_NO_PHYSICAL`,
 `SOFTWARE_PHYSICAL_GATE`, `HUMAN_APPROVAL_BEFORE_EXECUTION`, and `FORBIDDEN`.
