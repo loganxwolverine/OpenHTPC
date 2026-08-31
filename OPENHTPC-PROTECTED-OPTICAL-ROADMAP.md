@@ -22,6 +22,13 @@ as PASS and does not claim universal UHD compatibility.
 
 Status: `P2 PHASE 11 STATIC ASSETS — CORE VALIDATION/RENDERING RETAINED`
 
+Phase 12 freezes this ownership boundary without runtime changes. The detailed
+audit is `PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md`.
+Production plugin cutover is `INCOMPLETE` because absent, disabled and broken
+plugin states still select complete media-specific Core migration fallbacks.
+Low-level I/O, security, rendering and execution remain intentional Core
+platform-service candidates; they are not migration failures.
+
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
 shadow, so the Plugin Registry truthfully reports `Blu-ray/UHD DISABLED` even

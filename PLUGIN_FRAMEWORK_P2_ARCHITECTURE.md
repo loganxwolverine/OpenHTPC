@@ -324,6 +324,13 @@ remain after this phase.
 
 ## Protected Optical migration boundary
 
+The post-Phase-11 boundary and production cutover audit are frozen in
+`PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md`. The current cutover
+status is `INCOMPLETE`: absent, disabled or broken plugin states still select
+media-specific Core migration fallbacks. This is intentional safety behavior
+until a separately qualified production cutover; it is not evidence that
+generic Core I/O, security, execution or rendering services must migrate.
+
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its
 Doctor presentation; no media behavior changes. Generic optical state, provider contract, dispatcher
 security and Doctor hooks remain Core candidates. libbluray/AACS probing,
