@@ -1,6 +1,21 @@
 # OPENHTPC Plugin Framework P2 — Registry foundation
 
-## Phase 1 scope
+## Migration phases
+
+- P2 Phase 1 established the current-tree registry foundation.
+- P2 Phase 2 installs `plugin.bluray` as a disabled, read-only shadow. It may
+  be loaded only by an explicit development invocation and reflects a bounded
+  Core observation; it owns no production hook.
+- A future Phase 3 may transfer one bounded responsibility with a Core
+  fallback and direct A/B comparison.
+- Later phases may progressively extract diagnostics, classification,
+  presentation and finally dispatcher/backend ownership, only when each prior
+  boundary is proven equivalent.
+
+**SHADOW EQUIVALENCE IS REQUIRED BEFORE OWNERSHIP TRANSFER.** The phase count
+and extraction order remain evidence-driven.
+
+## Phase 1 registry scope
 
 P2 Phase 1 establishes one declarative registry for the current qualified
 OPENHTPC tree. It discovers and validates metadata, evaluates compatibility,
@@ -78,14 +93,36 @@ reported as `NOT_INSTALLED`. Invalid or incompatible optional plugins are
 diagnostic and do not block Overall READY. Failure of the Core registry module
 itself is a Core integrity failure and may block readiness.
 
-Doctor continues to report Blu-ray and UHD as `NOT_INSTALLED`: physically
-qualified Protected Optical Dev5 remains temporarily Core-integrated. An
-integrated capability being available does not fabricate a plugin installation.
+With no manifest Doctor reports Blu-ray and UHD as `NOT_INSTALLED`. Phase 2
+installs the combined `plugin.bluray` candidate, so Doctor truthfully reports
+`Blu-ray/UHD DISABLED`. Physically qualified Protected Optical Dev5 remains
+temporarily Core-integrated and can remain functional while this shadow is
+disabled. This temporary overlap must end before production ownership moves.
+
+## Phase 2 shadow contract
+
+Core owns the side-effect-free observation contract. Its input consists only
+of the canonical optical state, protected-media capability snapshot, canonical
+playback decision and last-attempt history. The output contains media family,
+exact type, protection and mechanism, classification source, provider state,
+playback state and last attempt.
+
+The shadow adapter receives that already-normalized mapping and publishes
+corresponding `observed_*` fields. It does not open state files, probe hardware,
+inspect disc structure, call libbluray/libaacs, inspect KEYDB metadata, write a
+snapshot, modify Doctor, register a handler/dispatcher, or launch playback.
+Tests compare every claimed field across no-disc, DVD, Blu-ray/UHD, provider,
+unknown-protection, history and eject scenarios.
+
+Registry discovery remains data-only. The bounded loader first requires a
+discovered, validated, API-compatible plugin and an in-root entrypoint. A
+disabled plugin requires explicit shadow invocation; an ordinary load requires
+enablement. Load failures are isolated as `BROKEN` results.
 
 ## Protected Optical migration boundary
 
-Protected Optical is the first intended P2 migration candidate, but Phase 1
-moves no implementation. Generic optical state, provider contract, dispatcher
+Protected Optical is the first P2 migration candidate, but Phases 1 and 2 move
+no production implementation. Generic optical state, provider contract, dispatcher
 security and Doctor hooks remain Core candidates. libbluray/AACS probing,
 Blu-ray/UHD classification, `bd://` launch semantics, badges and media-specific
 diagnostics are future plugin candidates. Migration must preserve the Dev5

@@ -2,7 +2,7 @@
 """OPENHTPC Plugin Framework P2: declarative registry foundation."""
 from __future__ import annotations
 
-import json,os,pathlib,re,tempfile
+import importlib.util,json,os,pathlib,re,tempfile
 from typing import Any
 
 SCHEMA="openhtpc-plugin-v2"
@@ -129,3 +129,22 @@ def set_enabled(home:pathlib.Path,install:pathlib.Path,plugin_id:str,enabled:boo
  else:selected.discard(plugin_id)
  _atomic_json(paths(home,install)["enabled"],{"schema":2,"plugins":sorted(selected)})
  return publish(home,install)
+
+def load_entrypoint(home:pathlib.Path,install:pathlib.Path,plugin_id:str,shadow:bool=False)->dict[str,Any]:
+ """Explicitly load one validated entrypoint; discovery remains data-only."""
+ value=registry(home,install);plugin=next((item for item in value["plugins"] if item["id"]==plugin_id),None)
+ if plugin is None:return {"state":"BROKEN","reason":"PLUGIN_NOT_FOUND"}
+ if plugin["state"] in {"BROKEN","INCOMPATIBLE"}:return {"state":"BROKEN","reason":"PLUGIN_NOT_LOADABLE"}
+ if plugin["state"]!="AVAILABLE" and not shadow:return {"state":"BROKEN","reason":"PLUGIN_DISABLED"}
+ entrypoint=plugin.get("entrypoint")
+ if not entrypoint:return {"state":"BROKEN","reason":"PLUGIN_ENTRYPOINT_MISSING"}
+ root=paths(home,install)["available"][0 if plugin["origin"]=="project" else 1]/plugin_id
+ if not _safe_entrypoint(root,entrypoint):return {"state":"BROKEN","reason":"PLUGIN_PATH_INVALID"}
+ try:
+  target=(root/entrypoint).resolve(strict=True)
+  spec=importlib.util.spec_from_file_location("openhtpc_p2_"+plugin_id.replace(".","_"),target)
+  if spec is None or spec.loader is None:return {"state":"BROKEN","reason":"PLUGIN_LOAD_FAILED"}
+  module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+  if not callable(getattr(module,"observe",None)):return {"state":"BROKEN","reason":"PLUGIN_CONTRACT_INVALID"}
+  return {"state":"SHADOW" if shadow and plugin["state"]=="DISABLED" else "AVAILABLE","plugin":plugin,"module":module}
+ except (Exception,SystemExit):return {"state":"BROKEN","reason":"PLUGIN_LOAD_FAILED"}

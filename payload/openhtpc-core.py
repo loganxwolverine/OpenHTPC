@@ -64,7 +64,11 @@ def installed_plugins(home:pathlib.Path,install:pathlib.Path)->tuple[list[dict[s
 def optional_plugin_states(registry:dict[str,Any])->list[dict[str,str]]:
     plugins={item["id"]:item for item in registry.get("plugins",[]) if isinstance(item,dict) and isinstance(item.get("id"),str)}
     result=[];known=set()
-    for name,label in (("bluray","Blu-ray"),("uhd","UHD"),("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming")):
+    if "plugin.bluray" in plugins:
+        item=plugins["plugin.bluray"];result.append({"label":"Blu-ray/UHD","status":item["state"]});known.update({"plugin.bluray","plugin.uhd"})
+        optional=(("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming"))
+    else:optional=(("bluray","Blu-ray"),("uhd","UHD"),("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming"))
+    for name,label in optional:
         plugin_id="plugin."+name;known.add(plugin_id);item=plugins.get(plugin_id)
         result.append({"label":label,"status":item.get("state","NOT_INSTALLED") if item else "NOT_INSTALLED"})
     result.extend({"label":item["name"],"status":item["state"]} for item in sorted(plugins.values(),key=lambda value:value["id"]) if item["id"] not in known)

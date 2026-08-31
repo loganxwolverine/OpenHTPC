@@ -128,7 +128,8 @@ class Dev14UpdateRuntimeRegeneration(unittest.TestCase):
             shutil.copy2(ROOT / name, candidate / name)
         for source in PAYLOAD.iterdir():
             if source.is_file(): shutil.copy2(source, payload / source.name)
-        for relative in ("plugins/README.md", "flex/bin/flex-launcher", "flex/BUILD-METADATA.json",
+        for relative in ("plugins/README.md", "plugins/available/plugin.bluray/plugin.json",
+                         "plugins/available/plugin.bluray/shadow.py", "flex/bin/flex-launcher", "flex/BUILD-METADATA.json",
                          "flex/assets/fonts/OpenSans-Regular.ttf", "flex/assets/icons/drive-empty.png",
                          "flex/assets/icons/dvd.png", "assets/branding/openhtpc-logo.png",
                          "assets/branding/openhtpc-wallpaper.png"):

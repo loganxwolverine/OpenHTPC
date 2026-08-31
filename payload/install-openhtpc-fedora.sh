@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.2.0-dev2"
+readonly OPENHTPC_VERSION="1.2.0-dev3"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ readonly SOURCE_OPTICAL="${SCRIPT_DIR}/openhtpc-optical.py"
 readonly SOURCE_DVD_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-dvd-dependencies.py"
 readonly SOURCE_FEDORA_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-fedora-dependencies.py"
 readonly SOURCE_DNF_TRANSACTION="${SCRIPT_DIR}/openhtpc-dnf-transaction.py"
-readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-plugin-registry.py openhtpc-capabilities.py openhtpc-protected-optical.py openhtpc-protected-optical-backend.py openhtpc-play-optical openhtpc-gpu-policy.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-runtime-generator.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
+readonly PRODUCT_FILES=(openhtpc openhtpc-validator openhtpc-core.py openhtpc-plugin-registry.py openhtpc-plugin-contracts.py openhtpc-capabilities.py openhtpc-protected-optical.py openhtpc-protected-optical-backend.py openhtpc-play-optical openhtpc-gpu-policy.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-runtime-generator.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
 
 
 readonly SOURCE_FLEX="${SCRIPT_DIR}/flex"
@@ -579,6 +579,9 @@ install -m 0644 "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
 install -m 0644 "$SCRIPT_DIR/version.json" "$INSTALL_DIR/version.json"
 install -Dm 0644 "$SCRIPT_DIR/plugins/README.md" "$INSTALL_DIR/plugins/README.md"
 install -d -m 0755 "$INSTALL_DIR/plugins/available"
+install -d -m 0755 "$INSTALL_DIR/plugins/available/plugin.bluray"
+install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/plugin.json" "$INSTALL_DIR/plugins/available/plugin.bluray/plugin.json"
+install -m 0644 "$SCRIPT_DIR/plugins/available/plugin.bluray/shadow.py" "$INSTALL_DIR/plugins/available/plugin.bluray/shadow.py"
 install -Dm 0755 "$SOURCE_FLEX/bin/flex-launcher" "$INSTALL_DIR/flex/bin/flex-launcher"
 install -Dm 0644 "$SOURCE_FLEX/BUILD-METADATA.json" "$INSTALL_DIR/flex/BUILD-METADATA.json"
 install -Dm 0644 "$SOURCE_FLEX/assets/fonts/OpenSans-Regular.ttf" "$INSTALL_DIR/flex/assets/fonts/OpenSans-Regular.ttf"

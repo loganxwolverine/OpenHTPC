@@ -125,6 +125,9 @@ openhtpc-cinema-auto.py
 openhtpc-configure-tmdb
 openhtpc-core.py
 openhtpc-plugin-registry.py
+openhtpc-plugin-contracts.py
+plugins/available/plugin.bluray/plugin.json
+plugins/available/plugin.bluray/shadow.py
 openhtpc-desktop-restore.py
 openhtpc-disc-sheet.py
 openhtpc-disc-view.py

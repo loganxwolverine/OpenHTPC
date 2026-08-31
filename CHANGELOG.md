@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Protected Optical Shadow — 1.2.0-dev3
+
+- Adds the disabled first-party `plugin.bluray` manifest and bounded loader.
+- Adds a side-effect-free Core observation contract and read-only equivalence adapter.
+- Preserves all qualified protected-optical, DVD, media and GPU runtime ownership in Core.
+
 # OPENHTPC Plugin Framework P2 Registry Foundation — 1.2.0-dev2
 
 - Replaces the competing legacy manifest model with one strict declarative V2 schema and explicit plugin API compatibility.

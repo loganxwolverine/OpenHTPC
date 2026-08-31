@@ -20,12 +20,12 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 REGISTRY FOUNDATION IN PROGRESS — MIGRATION NOT STARTED`
+Status: `P2 PHASE 2 SHADOW EQUIVALENCE — NO PRODUCTION OWNERSHIP`
 
-Protected optical support remains experimental and integrated into the
-development branch. Future Blu-ray/UHD plugins have not been extracted, so
-the Plugin Registry truthfully reports Blu-ray and UHD as `NOT_INSTALLED` even
-when the integrated protected-optical capability is `ENABLED`.
+Protected optical support remains integrated into the development branch.
+The first-party `plugin.bluray` manifest now exists as a disabled read-only
+shadow, so the Plugin Registry truthfully reports `Blu-ray/UHD DISABLED` even
+when the Core-integrated protected-optical capability is `ENABLED`.
 
 Core ownership should remain limited to canonical optical device detection,
 generic optical state, the generic provider contract, dispatcher security and
@@ -39,5 +39,7 @@ snapshot/provider statuses, generation-bound action token, dispatcher request
 contract, last-attempt record and Doctor/plugin registry interfaces. The Dev5
 audit moved no file and did not start Plugin Framework P2.
 
-P2 Phase 1 establishes only the current-tree declarative registry and stable
-hook vocabulary. Protected Optical remains Core-integrated throughout Phase 1.
+P2 Phase 1 established the registry and stable hook vocabulary. Phase 2 adds
+only a bounded observation/equivalence adapter. Protected Optical remains
+Core-integrated and authoritative; no ownership transfers until shadow
+equivalence is demonstrated for every claimed fact.
