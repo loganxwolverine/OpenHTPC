@@ -10,4 +10,6 @@ first-party P2 candidate and remains installed disabled by default. Phase 3
 allows an explicitly enabled plugin to own only protected-optical Doctor row
 projection after exact Core A/B equivalence. Qualified playback remains
 Core-owned, so Doctor truthfully reports `Blu-ray/UHD DISABLED` while Core
-functionality may remain available during this temporary overlap.
+functionality may remain available during this temporary overlap. Phase 4 also
+allows the enabled plugin to contribute only allowlisted Blu-ray/UHD badge
+descriptor data; Core retains every asset and all rendering.

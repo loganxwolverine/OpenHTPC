@@ -72,6 +72,21 @@ MEDIA_PROFILES = {
     "BLURAY_FAMILY":     {"badge": "BLU-RAY / UHD",     "icon": "assets/ui/optical-empty.png",  "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray / UHD"},
     "UNKNOWN_OPTICAL_MEDIA":{"badge":"MÉDIA OPTIQUE",  "icon": "assets/ui/optical-empty.png",  "logo": None,                                  "label": "Média optique"},
 }
+BADGE_ASSETS={"BLURAY":"assets/ui/bluray-media-badge.png","UHD_BLURAY":"assets/ui/uhd-bluray-media-badge.png"}
+
+def presentation_profile(home,install,state):
+ """Core-owned key resolution and rendering profile; plugin supplies data only."""
+ canonical=optical_model.canonical_state(state);fallback=MEDIA_PROFILES.get(canonical,MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"])
+ core_path=install/"openhtpc-core.py"
+ if not core_path.is_file():return fallback,"CORE_FALLBACK"
+ try:
+  core=load(core_path,"disc_view_p2_core");registry=core.plugin_status(home,install)
+  authority,descriptor=core.optical_presentation_descriptor(home,install,registry,state)
+  if not descriptor["owned"]:return fallback,authority
+  logo=BADGE_ASSETS.get(descriptor["badge_key"])
+  if not logo:return fallback,"CORE_FALLBACK"
+  return {**fallback,"badge":descriptor["display_label"],"logo":logo},authority
+ except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return fallback,"CORE_FALLBACK"
 
 # ─── Task A: Physical-media logo overlay — top-right corner of poster ────────
 #
@@ -221,7 +236,7 @@ def render(home,install,state,metadata,target):
  status=metadata.get("status")
  is_committed=(status=="PASS")
  media_type=optical_model.canonical_state(state); media=optical_model.presentation(state)
- media_prof=MEDIA_PROFILES.get(media_type,MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"])
+ media_prof,_presentation_authority=presentation_profile(home,install,state)
  if status=="AMBIGUOUS":
   title=safe_text(state.get("disc_title") or state.get("volume_label") or metadata.get("query"),media["media_label"])
  else:

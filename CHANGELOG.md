@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical Presentation — 1.2.0-dev5
+
+- Transfers only Blu-ray/UHD descriptor selection to enabled `plugin.bluray`.
+- Keeps a byte-equivalent Core mapping and requires exact A/B equality.
+- Keeps Flex rendering and allowlisted resolution of existing badge assets in Core.
+
 # OPENHTPC Plugin Framework P2 Protected Optical Doctor — 1.2.0-dev4
 
 - Transfers only protected-optical Doctor row projection to enabled `plugin.bluray`.

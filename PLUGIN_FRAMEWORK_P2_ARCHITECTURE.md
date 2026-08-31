@@ -8,8 +8,10 @@
   Core observation; it owns no production hook.
 - P2 Phase 3 transfers the protected-optical Doctor projection only, with a
   Core fallback and mandatory direct A/B comparison.
-- Later phases may progressively extract diagnostics, classification,
-  presentation and finally dispatcher/backend ownership, only when each prior
+- P2 Phase 4 transfers only the Blu-ray/UHD presentation descriptor mapping;
+  Core retains rendering and asset resolution.
+- Later phases may progressively extract classification and other bounded
+  responsibilities, only when each prior
   boundary is proven equivalent.
 
 **SHADOW EQUIVALENCE IS REQUIRED BEFORE OWNERSHIP TRANSFER.** The phase count
@@ -142,6 +144,27 @@ and broken states and at least one later physical validation confirms truthful
 Doctor output after a more significant ownership migration. Probing,
 classification, capability generation, UI, dispatcher and playback remain
 Core-owned.
+
+## Phase 4 presentation descriptor ownership
+
+The second transferred responsibility is the deterministic conversion from
+canonical current-disc classification into declarative presentation data:
+ownership, presentation key, badge key, display label and media kind. DVD,
+no-disc and ejected states are explicitly unowned. Historical playback attempt
+state is not an input and can never create a current badge.
+
+`BLURAY_VIDEO` selects the existing `BLURAY` badge, `BLURAY_FAMILY` selects
+the same generic badge with its existing family label, and
+`UHD_BLURAY_VIDEO` selects `UHD_BLURAY` with the physically qualified text
+`ULTRA HD BLU-RAY 4K`. Protection, HEVC, resolution, HDR, volume label and
+title do not influence the mapping.
+
+Core validates a closed set of descriptor and badge keys, performs exact A/B
+comparison, and selects `PLUGIN_P2` only for an enabled equivalent plugin.
+Disabled, invalid, mismatched or broken contributions use `CORE_FALLBACK`.
+Core alone resolves `BLURAY` and `UHD_BLURAY` to existing asset paths and
+continues to own Pillow/Flex rendering, layout, generated pages and all asset
+files. The plugin contains no paths or rendering primitives.
 
 ## Protected Optical migration boundary
 

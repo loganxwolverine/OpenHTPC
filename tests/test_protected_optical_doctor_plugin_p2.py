@@ -78,7 +78,7 @@ class Authority(unittest.TestCase):
 class Boundaries(unittest.TestCase):
  def test_plugin_has_no_probe_keydb_network_playback_ui_or_dispatcher(self):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
-  for marker in ("ctypes","find_library","keydb.cfg","indx0300","bd://","mpv","dispatcher","flex","badge","subprocess","socket","urlopen","read_text(","read_bytes(","stat(","open("):self.assertNotIn(marker,source)
+  for marker in ("ctypes","find_library","keydb.cfg","indx0300","bd://","mpv","dispatcher","flex","assets/",".png","subprocess","socket","urlopen","read_text(","read_bytes(","stat(","open("):self.assertNotIn(marker,source)
  def test_discovery_remains_data_only(self):
   source=(PAYLOAD/"openhtpc-plugin-registry.py").read_text().lower();self.assertNotIn("doctor_rows",source)
  def test_production_sources_unchanged(self):

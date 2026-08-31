@@ -156,6 +156,36 @@ def graphical_runtime() -> dict[str,str]:
 PROTECTED_OPTICAL_DOCTOR_LABELS=("Protected optical media","libbluray","libaacs","libbdplus",
  "External key database","Protected optical playback","Optical media family","Optical exact type",
  "Optical protection","Protection mechanism","Classification source","Last protected disc attempt")
+OPTICAL_PRESENTATION_KEYS={"NONE","BLURAY","BLURAY_FAMILY","UHD_BLURAY"}
+OPTICAL_BADGE_KEYS={"NONE","BLURAY","UHD_BLURAY"}
+
+def core_optical_presentation_descriptor(optical:dict[str,Any]|None)->dict[str,Any]:
+    """Temporary Core fallback for Blu-ray/UHD presentation selection."""
+    optical=optical if isinstance(optical,dict) else {};canonical=optical.get("canonical_state","UNKNOWN")
+    if canonical=="BLURAY_VIDEO":return {"owned":True,"presentation_key":"BLURAY","badge_key":"BLURAY","display_label":"BLU-RAY","media_kind":"BLURAY"}
+    if canonical=="BLURAY_FAMILY":return {"owned":True,"presentation_key":"BLURAY_FAMILY","badge_key":"BLURAY","display_label":"BLU-RAY / UHD","media_kind":"BLURAY"}
+    if canonical=="UHD_BLURAY_VIDEO":return {"owned":True,"presentation_key":"UHD_BLURAY","badge_key":"UHD_BLURAY","display_label":"ULTRA HD BLU-RAY 4K","media_kind":"BLURAY"}
+    return {"owned":False,"presentation_key":"NONE","badge_key":"NONE","display_label":"","media_kind":"NONE"}
+
+def _valid_optical_presentation_descriptor(value:Any)->bool:
+    return (isinstance(value,dict) and set(value)=={"owned","presentation_key","badge_key","display_label","media_kind"} and
+            isinstance(value.get("owned"),bool) and value.get("presentation_key") in OPTICAL_PRESENTATION_KEYS and
+            value.get("badge_key") in OPTICAL_BADGE_KEYS and isinstance(value.get("display_label"),str) and
+            value.get("media_kind") in {"NONE","BLURAY"} and
+            ((value["owned"] and value["badge_key"]!="NONE" and value["media_kind"]=="BLURAY" and bool(value["display_label"])) or
+             (not value["owned"] and value==core_optical_presentation_descriptor({}))))
+
+def optical_presentation_descriptor(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],optical:dict[str,Any]|None)->tuple[str,dict[str,Any]]:
+    """Select one declarative presentation authority with exact Core fallback."""
+    fallback=core_optical_presentation_descriptor(optical)
+    plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+    loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
+    try:value=loaded["module"].presentation_descriptor(optical or {}) if loaded.get("state")=="AVAILABLE" else None
+    except (Exception,SystemExit):value=None
+    if _valid_optical_presentation_descriptor(value) and value==fallback:return "PLUGIN_P2",value
+    plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PRESENTATION_BROKEN"})
+    return "CORE_FALLBACK",fallback
 
 def core_protected_optical_doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
     """Temporary Core fallback for the media-specific Doctor presentation."""

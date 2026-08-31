@@ -41,3 +41,10 @@ def doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
  attempt=inputs.get("last_attempt")
  if isinstance(attempt,dict):rows.append({"label":"Last protected disc attempt","status":attempt.get("status","UNKNOWN"),"blocking":False})
  return rows
+
+def presentation_descriptor(optical:dict[str,Any])->dict[str,Any]:
+ canonical=optical.get("canonical_state","UNKNOWN") if isinstance(optical,dict) else "UNKNOWN"
+ if canonical=="BLURAY_VIDEO":return {"owned":True,"presentation_key":"BLURAY","badge_key":"BLURAY","display_label":"BLU-RAY","media_kind":"BLURAY"}
+ if canonical=="BLURAY_FAMILY":return {"owned":True,"presentation_key":"BLURAY_FAMILY","badge_key":"BLURAY","display_label":"BLU-RAY / UHD","media_kind":"BLURAY"}
+ if canonical=="UHD_BLURAY_VIDEO":return {"owned":True,"presentation_key":"UHD_BLURAY","badge_key":"UHD_BLURAY","display_label":"ULTRA HD BLU-RAY 4K","media_kind":"BLURAY"}
+ return {"owned":False,"presentation_key":"NONE","badge_key":"NONE","display_label":"","media_kind":"NONE"}
