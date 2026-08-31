@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Protected Optical Doctor — 1.2.0-dev4
+
+- Transfers only protected-optical Doctor row projection to enabled `plugin.bluray`.
+- Retains exact Core fallback, runtime isolation and Core-owned Overall aggregation.
+- Requires live semantic A/B equality before selecting plugin authority.
+
 # OPENHTPC Plugin Framework P2 Protected Optical Shadow — 1.2.0-dev3
 
 - Adds the disabled first-party `plugin.bluray` manifest and bounded loader.

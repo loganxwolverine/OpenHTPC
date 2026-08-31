@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 2 SHADOW EQUIVALENCE — NO PRODUCTION OWNERSHIP`
+Status: `P2 PHASE 3 DOCTOR PROJECTION — CORE FALLBACK RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -39,7 +39,12 @@ snapshot/provider statuses, generation-bound action token, dispatcher request
 contract, last-attempt record and Doctor/plugin registry interfaces. The Dev5
 audit moved no file and did not start Plugin Framework P2.
 
-P2 Phase 1 established the registry and stable hook vocabulary. Phase 2 adds
-only a bounded observation/equivalence adapter. Protected Optical remains
-Core-integrated and authoritative; no ownership transfers until shadow
-equivalence is demonstrated for every claimed fact.
+P2 Phase 1 established the registry and stable hook vocabulary. Phase 2 added
+the bounded observation/equivalence adapter. Phase 3 transfers the first and
+only responsibility so far: media-specific Doctor row projection. Core keeps
+the canonical facts, generic health aggregation and an exact fallback.
+
+Probing, classification, capability generation, UI, dispatcher and playback
+remain Core-owned. The fallback remains until automated enabled/disabled/BROKEN
+equivalence is complete and a later, more significant migration receives at
+least one physical validation confirming truthful Doctor output.

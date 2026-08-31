@@ -6,8 +6,8 @@
 - P2 Phase 2 installs `plugin.bluray` as a disabled, read-only shadow. It may
   be loaded only by an explicit development invocation and reflects a bounded
   Core observation; it owns no production hook.
-- A future Phase 3 may transfer one bounded responsibility with a Core
-  fallback and direct A/B comparison.
+- P2 Phase 3 transfers the protected-optical Doctor projection only, with a
+  Core fallback and mandatory direct A/B comparison.
 - Later phases may progressively extract diagnostics, classification,
   presentation and finally dispatcher/backend ownership, only when each prior
   boundary is proven equivalent.
@@ -119,10 +119,34 @@ discovered, validated, API-compatible plugin and an in-root entrypoint. A
 disabled plugin requires explicit shadow invocation; an ordinary load requires
 enablement. Load failures are isolated as `BROKEN` results.
 
+## Phase 3 Doctor projection ownership
+
+The first transferred responsibility is the Protected Optical Doctor
+projection. Core still reads and owns the canonical optical state, capability
+snapshot and last-attempt history. It also remains the sole owner of the
+generic health engine, row validation, blocking policy and Overall result.
+
+When `plugin.bluray` is enabled, compatible and valid, Core asks its bounded
+`doctor_rows` contract to turn those read-only facts into the existing ordered
+diagnostic rows. Core accepts the contribution only when its labels, values,
+ordering and blocking metadata exactly equal the temporary Core fallback.
+Normal output therefore contains one projection, never both.
+
+Disabled, missing, incompatible or broken plugins select `CORE_FALLBACK`.
+Runtime failure or semantic mismatch marks the optional plugin `BROKEN`, keeps
+Doctor operational and preserves the non-blocking optional-plugin policy.
+`PLUGIN_P2` is selected only for an explicitly enabled equivalent plugin.
+
+The fallback must remain until automated equivalence covers enabled, disabled
+and broken states and at least one later physical validation confirms truthful
+Doctor output after a more significant ownership migration. Probing,
+classification, capability generation, UI, dispatcher and playback remain
+Core-owned.
+
 ## Protected Optical migration boundary
 
-Protected Optical is the first P2 migration candidate, but Phases 1 and 2 move
-no production implementation. Generic optical state, provider contract, dispatcher
+Protected Optical is the first P2 migration candidate. Phase 3 moves only its
+Doctor presentation; no media behavior changes. Generic optical state, provider contract, dispatcher
 security and Doctor hooks remain Core candidates. libbluray/AACS probing,
 Blu-ray/UHD classification, `bd://` launch semantics, badges and media-specific
 diagnostics are future plugin candidates. Migration must preserve the Dev5

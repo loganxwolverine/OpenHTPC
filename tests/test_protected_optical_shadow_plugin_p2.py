@@ -63,7 +63,7 @@ class Equivalence(ShadowFixture):
 class Boundaries(unittest.TestCase):
  def test_shadow_has_no_probe_keydb_playback_or_ownership_primitives(self):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
-  for marker in ("libbluray","libaacs","keydb","indx0300","bd://","mpv","dispatcher","subprocess","socket","urlopen","open("):self.assertNotIn(marker,source)
+  for marker in ("ctypes","find_library","keydb.cfg","indx0300","bd://","mpv","dispatcher","subprocess","socket","urlopen","read_text(","read_bytes(","stat(","open("):self.assertNotIn(marker,source)
  def test_registry_has_no_network_or_shell_loader(self):
   source=(PAYLOAD/"openhtpc-plugin-registry.py").read_text().lower()
   for marker in ("subprocess","shell=true","os.system","urlopen(","requests.","curl ","wget ","http://","https://","eval("):self.assertNotIn(marker,source)

@@ -153,6 +153,57 @@ def graphical_runtime() -> dict[str,str]:
             return {"status":"RUNNING","session":kind.capitalize(),"desktop":desktop,"pid":str(pid)}
     return {"status":"NOT_RUNNING","session":"UI runtime unavailable","desktop":"Unknown","pid":""}
 
+PROTECTED_OPTICAL_DOCTOR_LABELS=("Protected optical media","libbluray","libaacs","libbdplus",
+ "External key database","Protected optical playback","Optical media family","Optical exact type",
+ "Optical protection","Protection mechanism","Classification source","Last protected disc attempt")
+
+def core_protected_optical_doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
+    """Temporary Core fallback for the media-specific Doctor presentation."""
+    protected=inputs.get("protected") if isinstance(inputs.get("protected"),dict) else {}
+    dependencies=protected.get("dependencies") if isinstance(protected.get("dependencies"),dict) else {}
+    key_database=protected.get("external_key_database") if isinstance(protected.get("external_key_database"),dict) else {}
+    rows=[
+        {"label":"Protected optical media","status":protected.get("status","NOT_CONFIGURED"),"blocking":protected.get("status")=="BLOCKED"},
+        {"label":"libbluray","status":(dependencies.get("libbluray") or {}).get("status","NOT_AVAILABLE"),"blocking":False},
+        {"label":"libaacs","status":(dependencies.get("libaacs") or {}).get("status","NOT_AVAILABLE"),"blocking":False},
+        {"label":"libbdplus","status":(dependencies.get("libbdplus") or {}).get("status","NOT_AVAILABLE"),"blocking":False},
+        {"label":"External key database","status":key_database.get("status","NOT_CONFIGURED"),"blocking":False},
+        {"label":"Protected optical playback","status":"ENABLED" if protected.get("status")=="AVAILABLE" else "DISABLED","blocking":False},
+    ]
+    optical=inputs.get("optical") if isinstance(inputs.get("optical"),dict) else {};canonical=optical.get("canonical_state","UNKNOWN")
+    if canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+        rows.extend([
+            {"label":"Optical media family","status":"BLURAY","blocking":False},
+            {"label":"Optical exact type","status":{"BLURAY_VIDEO":"BLURAY","UHD_BLURAY_VIDEO":"UHD_BLURAY"}.get(canonical,"UNKNOWN"),"blocking":False},
+            {"label":"Optical protection","status":optical.get("protection","UNKNOWN"),"blocking":False},
+            {"label":"Protection mechanism","status":"+".join(optical.get("protection_mechanisms") or ["UNKNOWN"]),"blocking":False},
+            {"label":"Classification source","status":optical.get("classification_source","UNKNOWN"),"blocking":False},
+        ])
+    attempt=inputs.get("last_attempt")
+    if isinstance(attempt,dict):rows.append({"label":"Last protected disc attempt","status":attempt.get("status","UNKNOWN"),"blocking":False})
+    return rows
+
+def _valid_protected_optical_doctor_rows(rows:Any)->bool:
+    if not isinstance(rows,list) or len(rows)!=len({row.get("label") for row in rows if isinstance(row,dict)}):return False
+    allowed=set(PROTECTED_OPTICAL_DOCTOR_LABELS)
+    for row in rows:
+        if not isinstance(row,dict) or set(row)!={"label","status","blocking"} or row.get("label") not in allowed or not isinstance(row.get("status"),str):return False
+        expected=row["label"]=="Protected optical media" and row["status"]=="BLOCKED"
+        if row.get("blocking") is not expected:return False
+    return True
+
+def protected_optical_doctor_projection(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],inputs:dict[str,Any])->tuple[str,list[dict[str,Any]]]:
+    """Select one Doctor authority; optional plugin failures always fall back."""
+    plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",core_protected_optical_doctor_rows(inputs)
+    loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
+    try:rows=loaded["module"].doctor_rows(inputs) if loaded.get("state")=="AVAILABLE" else None
+    except (Exception,SystemExit):rows=None
+    fallback=core_protected_optical_doctor_rows(inputs)
+    if _valid_protected_optical_doctor_rows(rows) and rows==fallback:return "PLUGIN_P2",rows
+    plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_DOCTOR_BROKEN"})
+    return "CORE_FALLBACK",fallback
+
 
 def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
     state = capability_state(home, install)
@@ -182,29 +233,11 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
         ("Capability snapshot", "AVAILABLE" if read_json(home / ".config/openhtpc/runtime/capabilities.json") else "NOT_GENERATED"),
     ]
     protected = state.get("PROTECTED_OPTICAL_SUPPORT") or {}
-    dependencies = protected.get("dependencies") if isinstance(protected.get("dependencies"), dict) else {}
-    key_database = protected.get("external_key_database") if isinstance(protected.get("external_key_database"), dict) else {}
-    checks_raw.extend([
-        ("Protected optical media", protected.get("status", "NOT_CONFIGURED")),
-        ("libbluray", (dependencies.get("libbluray") or {}).get("status", "NOT_AVAILABLE")),
-        ("libaacs", (dependencies.get("libaacs") or {}).get("status", "NOT_AVAILABLE")),
-        ("libbdplus", (dependencies.get("libbdplus") or {}).get("status", "NOT_AVAILABLE")),
-        ("External key database", key_database.get("status", "NOT_CONFIGURED")),
-        ("Protected optical playback", "ENABLED" if protected.get("status") == "AVAILABLE" else "DISABLED"),
-    ])
     optical_disc = read_json(state_root / "optical-current.json") or {}
-    optical_canonical = optical_disc.get("canonical_state", "UNKNOWN")
-    if optical_canonical in {"BLURAY_VIDEO", "UHD_BLURAY_VIDEO", "BLURAY_FAMILY"}:
-        checks_raw.extend([
-            ("Optical media family", "BLURAY"),
-            ("Optical exact type", {"BLURAY_VIDEO":"BLURAY", "UHD_BLURAY_VIDEO":"UHD_BLURAY"}.get(optical_canonical, "UNKNOWN")),
-            ("Optical protection", optical_disc.get("protection", "UNKNOWN")),
-            ("Protection mechanism", "+".join(optical_disc.get("protection_mechanisms") or ["UNKNOWN"])),
-            ("Classification source", optical_disc.get("classification_source", "UNKNOWN")),
-        ])
     last_protected_attempt = read_json(state_root / "protected-optical-last-attempt.json")
-    if last_protected_attempt:
-        checks_raw.append(("Last protected disc attempt", last_protected_attempt.get("status", "UNKNOWN")))
+    doctor_authority,doctor_rows=protected_optical_doctor_projection(home,install,state.get("PLUGIN_REGISTRY",{}),
+        {"protected":protected,"optical":optical_disc,"last_attempt":last_protected_attempt})
+    checks_raw.extend((row["label"],row["status"]) for row in doctor_rows)
     runtime_lifecycle = _runtime_lifecycle(home, install)
     version=read_json(install/"version.json") or {"product":"OPENHTPC Basic V1","version":(install/"VERSION").read_text().strip() if (install/"VERSION").is_file() else "UNKNOWN","build_id":"UNKNOWN","build_date":"UNKNOWN"}
     flex_metadata = read_json(install / "flex/BUILD-METADATA.json") or {}
@@ -248,7 +281,7 @@ def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:
     overall = "BLOCKED" if blocking else ("READY" if state["VIDEO_RUNTIME_READY"] else "DEGRADED")
     lifecycle=_runtime_lifecycle(home,install)
     if state["OPTICAL_DRIVE_PRESENT"] and lifecycle.get("appliance_state")=="RUNNING" and lifecycle.get("monitor_instances",0)!=1: overall="DEGRADED"
-    return {"schema":1,"overall":overall,"checks":checks,"optional":optional,"capabilities":state,"runtime":lifecycle,"graphics":graphics,"first_run":first_run}
+    return {"schema":1,"overall":overall,"checks":checks,"optional":optional,"capabilities":state,"runtime":lifecycle,"graphics":graphics,"first_run":first_run,"protected_optical_doctor_authority":doctor_authority}
 
 
 def _dvdcss_status(install: pathlib.Path) -> str:
