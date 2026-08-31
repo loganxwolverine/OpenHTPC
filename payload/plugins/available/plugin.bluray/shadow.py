@@ -59,3 +59,20 @@ def capability_contribution(snapshot:dict[str,Any])->dict[str,Any]:
          "playback_capability_state":status,"available":ready,"ready_to_attempt":ready,
          "supported_media_kinds":["BLURAY","UHD_BLURAY"],"dependency_states":dependency_states,
          "external_key_database_state":key_database.get("status","NOT_CONFIGURED"),"blocking":status=="BLOCKED"}
+
+def playback_decision(optical:dict[str,Any],snapshot:dict[str,Any])->dict[str,Any]:
+ optical=optical if isinstance(optical,dict) else {};canonical=optical.get("canonical_state")
+ if not canonical:canonical={"DVD":"DVD_VIDEO","BLURAY":"BLURAY_VIDEO","UHD":"UHD_BLURAY_VIDEO","EMPTY":"DRIVE_PRESENT_NO_MEDIA","NO_DRIVE":"NO_OPTICAL_DRIVE","UNKNOWN_DISC":"UNKNOWN_OPTICAL_MEDIA"}.get(optical.get("state"),"DETECTION_INDETERMINATE")
+ protection=optical.get("protection","UNKNOWN");snapshot=snapshot if isinstance(snapshot,dict) else {};support=snapshot.get("status","NOT_AVAILABLE")
+ dependencies=snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"),dict) else {};bluray=(dependencies.get("libbluray") or {}).get("status","NOT_AVAILABLE")
+ media_type={"DVD_VIDEO":"DVD","BLURAY_VIDEO":"BLURAY","BLURAY_FAMILY":"BLURAY","UHD_BLURAY_VIDEO":"UHD_BLURAY"}.get(canonical,"UNKNOWN");owned=canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}
+ if canonical=="DVD_VIDEO":enabled,reason=True,"DVD_EXISTING_PATH"
+ elif not owned:enabled,reason=False,"MEDIA_NOT_PLAYABLE"
+ elif protection=="UNKNOWN":enabled,reason=False,"PROTECTION_UNKNOWN"
+ elif protection=="UNPROTECTED" and bluray=="AVAILABLE":enabled,reason=True,"UNPROTECTED_MEDIA"
+ elif protection=="UNPROTECTED":enabled,reason=False,"STRUCTURAL_SUPPORT_NOT_AVAILABLE"
+ elif protection=="PROTECTED" and support=="AVAILABLE":enabled,reason=True,"PROTECTED_SUPPORT_AVAILABLE"
+ elif protection=="PROTECTED":enabled,reason=False,f"PROTECTED_SUPPORT_{support}"
+ else:enabled,reason=False,"PROTECTION_STATE_INVALID"
+ return {"owned":owned,"media_type":media_type,"protection":protection,"protected_media_support":support,"playback_action":"ENABLED" if enabled else "DISABLED",
+         "playback_reason":reason,"playable":enabled,"playback_provider":"core" if canonical=="DVD_VIDEO" else "protected-optical-provider"}

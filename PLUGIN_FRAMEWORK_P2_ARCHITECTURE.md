@@ -188,6 +188,30 @@ snapshot. The plugin receives the resulting dictionary only. Selection follows
 the same disabled/enabled/BROKEN and exact A/B fallback policy as Doctor and
 presentation, while all three contributions remain independently bounded.
 
+## Phase 6 playback-decision projection ownership
+
+The fourth transferred responsibility is the deterministic projection from
+the current canonical optical state and Core-generated protected capability
+snapshot to the existing playback decision fields. The contribution adds only
+an `owned` fact: no disc and DVD are not owned by `plugin.bluray`; Blu-ray,
+UHD Blu-ray and the conservative Blu-ray family are owned.
+
+The contract preserves every existing action and reason, including the
+unprotected structural path, conservative unknown-protection behavior and all
+four provider states. `AVAILABLE` continues to mean ready to attempt, never
+guaranteed decryption or playback success. Last-attempt history is not a
+decision input and cannot enable an action after ejection.
+
+An enabled contribution is selected only after validation and exact A/B
+equality with the retained Core function. Disabled, invalid, mismatched or
+broken contributions use `CORE_FALLBACK`. Core publishes the selected
+projection without rewriting either canonical input.
+
+Plugin decision is not playback authority. Core still owns Flex/button
+generation, action tokens, dispatcher enforcement and immediate canonical
+revalidation, the `bd://` backend, MPV execution and last-attempt recording.
+The plugin remains disabled by default, preserving the qualified normal path.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its

@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 5 CAPABILITY PROJECTION — CORE PROBE/SNAPSHOT RETAINED`
+Status: `P2 PHASE 6 PLAYBACK-DECISION PROJECTION — CORE ENFORCEMENT RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -63,3 +63,12 @@ probing, KEYDB metadata detection, snapshot generation, classification,
 playback decision, Flex rendering/assets, dispatcher, `bd://` and MPV remain
 Core-owned. `AVAILABLE` continues to mean ready to attempt, not guaranteed
 per-disc success.
+
+Phase 6 transfers only the deterministic protected playback-decision
+projection. The plugin consumes current canonical disc classification and the
+Core-generated capability snapshot, with exact Core/plugin A/B equality and a
+retained Core fallback. `AVAILABLE` still means ready to attempt; historical
+`OPEN_SUCCESS`/`OPEN_FAILED` is not an input. Probing, snapshot generation,
+classification, Flex rendering, action tokens, dispatcher/revalidation,
+`bd://`, MPV and result recording remain Core-owned. Plugin decision is not
+playback authority.

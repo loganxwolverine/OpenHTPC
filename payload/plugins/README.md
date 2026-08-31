@@ -16,3 +16,6 @@ descriptor data; Core retains every asset and all rendering.
 Phase 5 additionally permits an enabled equivalent plugin to project the
 already-generated protected-optical capability facts. Core remains the sole
 probe and snapshot writer.
+Phase 6 additionally permits an enabled equivalent plugin to project the
+bounded playback decision. Core still gates UI, creates action tokens,
+revalidates in the dispatcher and executes playback.

@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical Playback Decision — 1.2.0-dev7
+
+- Transfers only the deterministic protected-optical playback-decision projection to enabled `plugin.bluray`.
+- Retains exact Core fallback and Core ownership of UI gating, action tokens, dispatcher revalidation and playback execution.
+- Preserves `AVAILABLE` as ready-to-attempt and keeps per-disc history outside the decision.
+
 # OPENHTPC Plugin Framework P2 Optical Capability — 1.2.0-dev6
 
 - Transfers only protected-optical capability projection to enabled `plugin.bluray`.
