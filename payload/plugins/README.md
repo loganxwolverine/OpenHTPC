@@ -19,3 +19,7 @@ probe and snapshot writer.
 Phase 6 additionally permits an enabled equivalent plugin to project the
 bounded playback decision. Core still gates UI, creates action tokens,
 revalidates in the dispatcher and executes playback.
+Phase 7 permits the enabled equivalent plugin to combine validated
+presentation and decision data into a declarative menu contribution. Core
+still validates, resolves assets, renders Flex, creates tokens and enforces the
+action.

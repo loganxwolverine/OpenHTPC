@@ -91,6 +91,8 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
     registry=plugin_status(home,install);plugins,plugin_errors=installed_plugins(home,install)
     capability_authority,protected_contribution=protected_optical_capability_projection(home,install,registry,protected)
     decision_authority,protected_decision=protected_optical_playback_decision_projection(home,install,registry,optical,protected)
+    presentation_authority,presentation=optical_presentation_descriptor(home,install,registry,optical)
+    ui_authority,ui_contribution=protected_optical_ui_contribution(home,install,registry,presentation,protected_decision)
     optical_initialized = (home / ".local/state/openhtpc/optical-current.json").is_file()
     optical_state = optical.get("state", "NOT_INITIALIZED" if not optical_initialized else "NO_DRIVE")
     detected = profile.get("detected") if isinstance(profile.get("detected"), dict) else {}
@@ -118,6 +120,10 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
         "PROTECTED_OPTICAL_CAPABILITY_AUTHORITY": capability_authority,
         "PROTECTED_OPTICAL_PLAYBACK_DECISION": protected_decision,
         "PROTECTED_OPTICAL_PLAYBACK_DECISION_AUTHORITY": decision_authority,
+        "PROTECTED_OPTICAL_PRESENTATION": presentation,
+        "PROTECTED_OPTICAL_PRESENTATION_AUTHORITY": presentation_authority,
+        "PROTECTED_OPTICAL_UI_CONTRIBUTION": ui_contribution,
+        "PROTECTED_OPTICAL_UI_CONTRIBUTION_AUTHORITY": ui_authority,
         "optical_state": optical_state,
         "plugins": plugins,
         "plugin_errors": plugin_errors,
@@ -168,6 +174,8 @@ PROTECTED_CAPABILITY_STATES={"AVAILABLE","NOT_CONFIGURED","NOT_AVAILABLE","BLOCK
 PROTECTED_PLAYBACK_REASONS={"MEDIA_NOT_PLAYABLE","PROTECTION_UNKNOWN","UNPROTECTED_MEDIA","STRUCTURAL_SUPPORT_NOT_AVAILABLE",
  "PROTECTED_SUPPORT_AVAILABLE","PROTECTED_SUPPORT_NOT_CONFIGURED","PROTECTED_SUPPORT_NOT_AVAILABLE","PROTECTED_SUPPORT_BLOCKED",
  "PROTECTION_STATE_INVALID"}
+OPTICAL_UI_ITEM_KINDS={"NONE","OPTICAL_PLAYBACK"}
+OPTICAL_UI_ACTION_INTENTS={"NONE","PLAY_CURRENT_OPTICAL_MEDIA"}
 
 def _canonical_optical_state(value:dict[str,Any]|None)->str:
     value=value if isinstance(value,dict) else {};canonical=value.get("canonical_state")
@@ -214,6 +222,44 @@ def protected_optical_playback_decision_projection(home:pathlib.Path,install:pat
     except (Exception,SystemExit):value=None
     if _valid_protected_optical_playback_decision(value) and value==fallback:return "PLUGIN_P2",value
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PLAYBACK_DECISION_BROKEN"})
+    return "CORE_FALLBACK",fallback
+
+def core_protected_optical_ui_contribution(presentation:dict[str,Any]|None,decision:dict[str,Any]|None)->dict[str,Any]:
+    """Build declarative Blu-ray/UHD UI data without rendering or execution."""
+    if not _valid_optical_presentation_descriptor(presentation) or not _valid_protected_optical_playback_decision(decision):
+        return {"owned":False,"item_kind":"NONE","visible":False,"display_label":"","badge_key":"NONE","enabled":False,
+                "disabled_reason":"NONE","action_intent":"NONE"}
+    if not presentation["owned"] or not decision["owned"]:
+        return {"owned":False,"item_kind":"NONE","visible":False,"display_label":"","badge_key":"NONE","enabled":False,
+                "disabled_reason":"NONE","action_intent":"NONE"}
+    enabled=decision["playback_action"]=="ENABLED"
+    return {"owned":True,"item_kind":"OPTICAL_PLAYBACK","visible":True,"display_label":presentation["display_label"],
+            "badge_key":presentation["badge_key"],"enabled":enabled,
+            "disabled_reason":"NONE" if enabled else decision["playback_reason"],
+            "action_intent":"PLAY_CURRENT_OPTICAL_MEDIA" if enabled else "NONE"}
+
+def _valid_protected_optical_ui_contribution(value:Any)->bool:
+    fields={"owned","item_kind","visible","display_label","badge_key","enabled","disabled_reason","action_intent"}
+    if not isinstance(value,dict) or set(value)!=fields or not all(isinstance(value.get(key),bool) for key in ("owned","visible","enabled")):return False
+    if value.get("item_kind") not in OPTICAL_UI_ITEM_KINDS or value.get("badge_key") not in OPTICAL_BADGE_KEYS or value.get("action_intent") not in OPTICAL_UI_ACTION_INTENTS:return False
+    if not isinstance(value.get("display_label"),str) or value.get("disabled_reason") not in PROTECTED_PLAYBACK_REASONS|{"NONE"}:return False
+    if not value["owned"]:return value==core_protected_optical_ui_contribution(None,None)
+    if not value["visible"] or value["item_kind"]!="OPTICAL_PLAYBACK" or value["badge_key"]=="NONE" or not value["display_label"]:return False
+    return ((value["enabled"] and value["action_intent"]=="PLAY_CURRENT_OPTICAL_MEDIA" and value["disabled_reason"]=="NONE") or
+            (not value["enabled"] and value["action_intent"]=="NONE" and value["disabled_reason"]!="NONE"))
+
+def protected_optical_ui_contribution(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],
+                                      presentation:dict[str,Any]|None,decision:dict[str,Any]|None)->tuple[str,dict[str,Any]]:
+    """Select declarative UI authority; Core alone secures and renders it."""
+    fallback=core_protected_optical_ui_contribution(presentation,decision)
+    plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+    if (not _valid_optical_presentation_descriptor(presentation) or not _valid_protected_optical_playback_decision(decision) or
+            not plugin or plugin.get("state")!="AVAILABLE"):return "CORE_FALLBACK",fallback
+    loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
+    try:value=loaded["module"].ui_contribution(presentation,decision) if loaded.get("state")=="AVAILABLE" else None
+    except (Exception,SystemExit):value=None
+    if _valid_protected_optical_ui_contribution(value) and value==fallback:return "PLUGIN_P2",value
+    plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_UI_CONTRIBUTION_BROKEN"})
     return "CORE_FALLBACK",fallback
 
 def core_protected_optical_capability(snapshot:dict[str,Any]|None)->dict[str,Any]:

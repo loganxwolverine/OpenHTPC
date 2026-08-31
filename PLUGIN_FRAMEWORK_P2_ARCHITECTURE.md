@@ -212,6 +212,30 @@ generation, action tokens, dispatcher enforcement and immediate canonical
 revalidation, the `bd://` backend, MPV execution and last-attempt recording.
 The plugin remains disabled by default, preserving the qualified normal path.
 
+## Phase 7 declarative UI/menu contribution ownership
+
+The fifth transferred responsibility combines only the already-validated
+Phase 4 presentation descriptor and Phase 6 playback-decision projection into
+declarative Blu-ray/UHD menu data. The bounded contract contains ownership,
+item kind, visibility, display label, an allowlisted badge key, enabled state,
+canonical disabled reason and an allowlisted semantic action intent.
+
+The plugin does not classify media or derive provider eligibility again. DVD,
+no-disc and ejected inputs remain unowned. Current Blu-ray, Blu-ray family and
+UHD inputs preserve their qualified labels and badge keys; historical attempt
+state is not an input. Malformed upstream contracts select the conservative
+Core fallback without invoking plugin code.
+
+The sole executable intent vocabulary is semantic data:
+`PLAY_CURRENT_OPTICAL_MEDIA` or `NONE`. It contains no token, command,
+dispatcher, URI or arguments. Core validates exact A/B equality and remains
+the only authority for Flex rendering, asset-key resolution, generation-bound
+tokens, dispatcher revalidation and playback execution.
+
+Plugin UI contribution is not UI execution. `plugin.bluray` remains disabled
+by default; invalid, mismatched or broken contributions retain the qualified
+Core UI builder.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its

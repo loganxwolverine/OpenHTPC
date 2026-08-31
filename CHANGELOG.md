@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical UI Contribution — 1.2.0-dev8
+
+- Transfers only the declarative Blu-ray/UHD menu contribution to enabled `plugin.bluray`.
+- Consumes validated Phase 4 presentation and Phase 6 decision data without reclassifying or regating media.
+- Keeps Flex rendering, asset resolution, action tokens, dispatcher enforcement and playback execution in Core.
+
 # OPENHTPC Plugin Framework P2 Optical Playback Decision — 1.2.0-dev7
 
 - Transfers only the deterministic protected-optical playback-decision projection to enabled `plugin.bluray`.

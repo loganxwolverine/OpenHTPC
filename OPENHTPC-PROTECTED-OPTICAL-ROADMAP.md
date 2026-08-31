@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 6 PLAYBACK-DECISION PROJECTION — CORE ENFORCEMENT RETAINED`
+Status: `P2 PHASE 7 UI CONTRIBUTION — CORE RENDER/SECURITY RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -72,3 +72,11 @@ retained Core fallback. `AVAILABLE` still means ready to attempt; historical
 classification, Flex rendering, action tokens, dispatcher/revalidation,
 `bd://`, MPV and result recording remain Core-owned. Plugin decision is not
 playback authority.
+
+Phase 7 transfers only the declarative Blu-ray/UHD UI/menu contribution. It
+combines validated presentation and playback-decision data and may return only
+an allowlisted badge key and semantic `PLAY_CURRENT_OPTICAL_MEDIA` intent.
+Core validates, resolves assets, creates generation-bound tokens, renders Flex
+and revalidates in the dispatcher. Physical/software probing, canonical
+classification, snapshot generation, `bd://`, MPV and protected-attempt
+recording remain Core-owned. Plugin UI contribution is not UI execution.

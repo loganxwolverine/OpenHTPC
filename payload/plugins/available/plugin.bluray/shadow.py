@@ -76,3 +76,11 @@ def playback_decision(optical:dict[str,Any],snapshot:dict[str,Any])->dict[str,An
  else:enabled,reason=False,"PROTECTION_STATE_INVALID"
  return {"owned":owned,"media_type":media_type,"protection":protection,"protected_media_support":support,"playback_action":"ENABLED" if enabled else "DISABLED",
          "playback_reason":reason,"playable":enabled,"playback_provider":"core" if canonical=="DVD_VIDEO" else "protected-optical-provider"}
+
+def ui_contribution(presentation:dict[str,Any],decision:dict[str,Any])->dict[str,Any]:
+ if not presentation.get("owned") or not decision.get("owned"):
+  return {"owned":False,"item_kind":"NONE","visible":False,"display_label":"","badge_key":"NONE","enabled":False,"disabled_reason":"NONE","action_intent":"NONE"}
+ enabled=decision.get("playback_action")=="ENABLED"
+ return {"owned":True,"item_kind":"OPTICAL_PLAYBACK","visible":True,"display_label":presentation.get("display_label",""),
+         "badge_key":presentation.get("badge_key","NONE"),"enabled":enabled,"disabled_reason":"NONE" if enabled else decision.get("playback_reason","MEDIA_NOT_PLAYABLE"),
+         "action_intent":"PLAY_CURRENT_OPTICAL_MEDIA" if enabled else "NONE"}
