@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schema_version","verdict","summary","plan_compliance","architecture_compliance","test_evidence_accepted","scope_compliance","security_findings","physical_validation_required","human_gate_stage","gate_reason","blocking_findings","recommended_next_action"],
+  "properties":{
+    "schema_version":{"const":1},"verdict":{"enum":["ACCEPT","REJECT","HUMAN_GATE"]},"summary":{"type":"string"},
+    "plan_compliance":{"type":"boolean"},"architecture_compliance":{"type":"boolean"},"test_evidence_accepted":{"type":"boolean"},"scope_compliance":{"type":"boolean"},
+    "security_findings":{"type":"array","items":{"type":"string"}},"physical_validation_required":{"type":"boolean"},
+    "human_gate_stage":{"enum":["NONE","BEFORE_EXECUTION","AFTER_IMPLEMENTATION"]},
+    "gate_reason":{"enum":["NONE","PHYSICAL_VALIDATION","PUSH","TAG","RELEASE","MERGE","REBASE","DESTRUCTIVE_GIT","SECURITY_BOUNDARY","HARDWARE_IO_OWNERSHIP","CREDENTIAL_OR_SECRET","SYSTEM_CONFIGURATION","OTHER"]},
+    "blocking_findings":{"type":"array","items":{"type":"string"}},"recommended_next_action":{"type":"string"}
+  }
+}

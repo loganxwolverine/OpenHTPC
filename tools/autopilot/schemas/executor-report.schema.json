@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schema_version","status","summary","files_changed","tests","git_status","head_before","head_after","scope_compliance","policy_violations","physical_validation_required","recommended_next_action"],
+  "properties":{
+    "schema_version":{"const":1},"status":{"enum":["PASS","FAIL","BLOCKED"]},"summary":{"type":"string"},
+    "files_changed":{"type":"array","items":{"type":"string"}},
+    "tests":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["command","return_code","result"],"properties":{"command":{"type":"string"},"return_code":{"type":"integer"},"result":{"enum":["PASS","FAIL","NOT_RUN"]}}}},
+    "git_status":{"type":"string"},"head_before":{"type":"string","pattern":"^[0-9a-f]{40}$"},"head_after":{"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "scope_compliance":{"type":"boolean"},"policy_violations":{"type":"array","items":{"type":"string"}},
+    "physical_validation_required":{"type":"boolean"},"recommended_next_action":{"type":"string"}
+  }
+}

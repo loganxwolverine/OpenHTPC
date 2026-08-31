@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""OPENHTPC Autopilot launcher.
+
+Copyright 2026 Steve Dehanne
+SPDX-License-Identifier: Apache-2.0
+
+Part of the OPENHTPC project.
+Original project by Steve Dehanne.
+"""
+import pathlib,sys
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parent/"autopilot"))
+from openhtpc_autopilot import cli
+raise SystemExit(cli())

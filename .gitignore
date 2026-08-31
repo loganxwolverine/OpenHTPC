@@ -9,6 +9,7 @@ core.*
 *.report.json
 .agents/
 .codex/
+.openhtpc-autopilot/
 .backups/
 artifacts/
 dev-1.1-phase-*/
@@ -27,4 +28,3 @@ tmdb-token
 media-cache/
 .idea/
 .vscode/
-

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","run_id","title","objective","rationale","expected_branch","expected_head","scope_in","scope_out","allowed_paths","risk_class","human_gate_stage","gate_reason","physical_validation_required","default_behavior_change","security_boundary_change","hardware_io_ownership_change","required_tests","commit_message","next_step_policy"],
+  "properties": {
+    "schema_version":{"const":1}, "run_id":{"type":"string","pattern":"^[A-Za-z0-9._-]{1,80}$"},
+    "title":{"type":"string"}, "objective":{"type":"string"}, "rationale":{"type":"string"},
+    "expected_branch":{"type":"string"}, "expected_head":{"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "scope_in":{"type":"array","items":{"type":"string"}}, "scope_out":{"type":"array","items":{"type":"string"}},
+    "allowed_paths":{"type":"array","minItems":1,"items":{"type":"string"}},
+    "risk_class":{"enum":["DOCS_ONLY","SOFTWARE_NO_PHYSICAL","SOFTWARE_PHYSICAL_GATE","HUMAN_APPROVAL_BEFORE_EXECUTION","FORBIDDEN"]},
+    "human_gate_stage":{"enum":["NONE","BEFORE_EXECUTION","AFTER_IMPLEMENTATION"]},
+    "gate_reason":{"enum":["NONE","PHYSICAL_VALIDATION","PUSH","TAG","RELEASE","MERGE","REBASE","DESTRUCTIVE_GIT","SECURITY_BOUNDARY","HARDWARE_IO_OWNERSHIP","CREDENTIAL_OR_SECRET","SYSTEM_CONFIGURATION","OTHER"]},
+    "physical_validation_required":{"type":"boolean"}, "default_behavior_change":{"type":"boolean"},
+    "security_boundary_change":{"type":"boolean"}, "hardware_io_ownership_change":{"type":"boolean"},
+    "required_tests":{"type":"array","items":{"type":"string"}}, "commit_message":{"type":"string"},
+    "next_step_policy":{"enum":["CONTINUE","STOP"]}
+  }
+}
