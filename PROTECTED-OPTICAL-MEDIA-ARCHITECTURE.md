@@ -82,3 +82,12 @@ changes, supplies, or acquires key material.
 `BLURAY_FAMILY` uses that same generic `bd://` backend when protection and
 provider gating authorize an attempt. Protection, provider capability and the
 recorded `OPEN_SUCCESS`/`OPEN_FAILED` result remain three separate facts.
+
+## Development-branch plugin status
+
+Protected optical support is currently experimental and integrated into this
+development branch. It is not evidence that the future optional Blu-ray or UHD
+plugins are installed. Doctor may therefore truthfully show protected optical
+playback `ENABLED` while the Plugin Registry shows both optional plugins as
+`NOT_INSTALLED`. Extraction is reserved for Plugin Framework P2; Dev5 does not
+move components or fabricate plugin manifests.

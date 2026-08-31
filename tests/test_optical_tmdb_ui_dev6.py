@@ -66,7 +66,7 @@ class TmdbDataFlow(unittest.TestCase):
 class OpticalSheetPolish(unittest.TestCase):
  def test_canonical_badge_mapping(self):
   self.assertEqual({key:view.MEDIA_PROFILES[key]["badge"] for key in view.MEDIA_PROFILES},{
-   "DVD_VIDEO":"DVD VIDÉO","BLURAY_VIDEO":"BLU-RAY","UHD_BLURAY_VIDEO":"ULTRA HD BLU-RAY",
+   "DVD_VIDEO":"DVD VIDÉO","BLURAY_VIDEO":"BLU-RAY","UHD_BLURAY_VIDEO":"ULTRA HD BLU-RAY 4K",
    "BLURAY_FAMILY":"BLU-RAY / UHD","UNKNOWN_OPTICAL_MEDIA":"MÉDIA OPTIQUE"})
 
  def test_family_text_badge_is_poster_attached_with_real_poster(self):

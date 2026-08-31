@@ -6,12 +6,12 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.1.4-dev4 — Protected Blu-ray physical qualification report
+# OPENHTPC 1.1.4-dev5 — Protected optical qualification consolidation
 
 ## Qualified identity
 
-- Version: `1.1.4-dev4`
-- Build: `protected-optical-disc-classification-dev4`
+- Version: `1.1.4-dev5`
+- Build: `protected-optical-qualification-ux-dev5`
 - Qualification baseline commit: `b3199fb84a815fda0d0506f58dbbba51bfe9d4d9`
 - Platform: ZimaBoard 2
 - Operating environment: Fedora KDE Wayland
@@ -54,6 +54,38 @@ Appliance state             RUNNING
 Overall                     READY
 ```
 
+## DVD regression evidence
+
+- Detection: **PASS**
+- Play button: **PASS**
+- Launch: **PASS**
+- Video: **PASS**
+- Audio: **PASS**
+- Stable playback: **PASS**
+- Quit: **PASS**
+- Return to OPENHTPC: **PASS**
+- Doctor Overall: **READY**
+
+## Protected UHD Blu-ray 4K evidence
+
+A real commercial protected UHD Blu-ray 4K was physically opened on the same
+ZimaBoard 2 / Fedora KDE Wayland system.
+
+- UHD physical detection: **PASS**
+- Playback button: **AVAILABLE**
+- MPV launch: **PASS**
+- Video: **PASS**
+- Audio: **PASS**
+- Playback: **FUNCTIONAL**
+- Quit: **PASS**
+- Return to OPENHTPC: **PASS**
+- Last protected disc attempt: `OPEN_SUCCESS`
+- Doctor Overall: **READY**
+
+Important dropped output frames were observed during UHD playback on this
+configuration. UHD fluidity and performance are therefore not qualified as
+PASS; investigation is deferred to the roadmap.
+
 ## Qualification boundary
 
 - One real protected Blu-ray was validated.
@@ -61,15 +93,24 @@ Overall                     READY
 - The exact Blu-ray/UHD variant remained `UNKNOWN`; no exact variant is
   claimed for this disc.
 - This result does not qualify universal Blu-ray compatibility.
-- This result does not qualify protected UHD playback.
+- Protected UHD opening, video, audio and return were validated for one real
+  disc and this specific system; this is not a universal compatibility claim.
+- Protected UHD performance remains a known limitation and is not qualified.
 - The absence of libbdplus was non-blocking for this AACS-protected disc.
-- DVD was not exercised by this physical validation. Its existing regression
-  gate and previously qualified behavior are not broadened by this report.
+- DVD regression was physically exercised and passed.
 
 ## Conclusion
 
 `PROTECTED_BLURAY_PHYSICAL_GATE=PASS`
 
-`UHD_PHYSICAL_GATE=NOT_QUALIFIED`
+`DVD_REGRESSION_GATE=PASS`
 
-`DVD_REGRESSION_GATE=NOT_RUN_IN_THIS_PHYSICAL_QUALIFICATION`
+`PROTECTED_UHD_OPEN_GATE=PASS`
+
+`PROTECTED_UHD_VIDEO_GATE=PASS`
+
+`PROTECTED_UHD_AUDIO_GATE=PASS`
+
+`PROTECTED_UHD_RETURN_GATE=PASS`
+
+`PROTECTED_UHD_PERFORMANCE_GATE=KNOWN_LIMITATION`

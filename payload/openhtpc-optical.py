@@ -223,6 +223,33 @@ class _BlurayDiscInfo(ctypes.Structure):
         ("bdplus_gen",ctypes.c_uint8),("bdplus_date",ctypes.c_uint32),("initial_dynamic_range_type",ctypes.c_uint8),
     ]
 
+class _BlurayFile(ctypes.Structure):pass
+_BlurayFileClose=ctypes.CFUNCTYPE(None,ctypes.POINTER(_BlurayFile))
+_BlurayFileSeek=ctypes.CFUNCTYPE(ctypes.c_int64,ctypes.POINTER(_BlurayFile),ctypes.c_int64,ctypes.c_int32)
+_BlurayFileTell=ctypes.CFUNCTYPE(ctypes.c_int64,ctypes.POINTER(_BlurayFile))
+_BlurayFileEof=ctypes.CFUNCTYPE(ctypes.c_int,ctypes.POINTER(_BlurayFile))
+_BlurayFileRead=ctypes.CFUNCTYPE(ctypes.c_int64,ctypes.POINTER(_BlurayFile),ctypes.POINTER(ctypes.c_uint8),ctypes.c_int64)
+_BlurayFileWrite=ctypes.CFUNCTYPE(ctypes.c_int64,ctypes.POINTER(_BlurayFile),ctypes.POINTER(ctypes.c_uint8),ctypes.c_int64)
+_BlurayFile._fields_=[("internal",ctypes.c_void_p),("close",_BlurayFileClose),("seek",_BlurayFileSeek),
+                      ("tell",_BlurayFileTell),("eof",_BlurayFileEof),("read",_BlurayFileRead),("write",_BlurayFileWrite)]
+
+def _libbluray_bdmv_header(library,handle):
+    """Read the same public BDMV index signature through libbluray."""
+    file_handle=None
+    try:
+        library.bd_open_file_dec.argtypes=[ctypes.c_void_p,ctypes.c_char_p]
+        library.bd_open_file_dec.restype=ctypes.POINTER(_BlurayFile)
+        file_handle=library.bd_open_file_dec(handle,b"BDMV/index.bdmv")
+        if not file_handle:return None
+        buffer=(ctypes.c_uint8*8)()
+        if file_handle.contents.read(file_handle,buffer,8)!=8:return None
+        return bytes(buffer).decode("ascii","replace")
+    except (OSError,AttributeError,TypeError,ValueError):return None
+    finally:
+        if file_handle:
+            try:file_handle.contents.close(file_handle)
+            except (OSError,AttributeError,TypeError,ValueError):pass
+
 def _libbluray_disc_info(device,library_loader=ctypes.CDLL,library_finder=ctypes.util.find_library):
     """Probe public libbluray disc facts; no key path or key material is supplied."""
     name=library_finder("bluray")
@@ -240,9 +267,11 @@ def _libbluray_disc_info(device,library_loader=ctypes.CDLL,library_finder=ctypes
         pointer=library.bd_get_disc_info(handle)
         if not pointer:return None
         info=pointer.contents
+        bdmv_header=_libbluray_bdmv_header(library,handle) if info.bluray_detected else None
         return {"bluray_detected":bool(info.bluray_detected),"aacs_detected":bool(info.aacs_detected),
                 "aacs_handled":bool(info.aacs_handled),"bdplus_detected":bool(info.bdplus_detected),
-                "bdplus_handled":bool(info.bdplus_handled),"probe_open_succeeded":opened}
+                "bdplus_handled":bool(info.bdplus_handled),"probe_open_succeeded":opened,
+                "bdmv_index_header":bdmv_header}
     except (OSError,AttributeError,TypeError,ValueError):return None
     finally:
         if handle and library:
@@ -335,6 +364,8 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
     info=(subprocess.CompletedProcess([],1,"","") if bd_detected else runner(["lsdvd","-x","-Ox",str(device)])); text=info.stdout if info.returncode==0 else ""
     dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
     header,header_path=header_reader(block)
+    if not header and isinstance(libbluray_info,dict) and libbluray_info.get("bdmv_index_header"):
+        header,header_path=libbluray_info["bdmv_index_header"],"libbluray:BDMV/index.bdmv"
     evidence=[]
     if bd_medium: evidence.append("UDEV_MMC_BD_MEDIA")
     if isinstance(libbluray_info,dict) and libbluray_info.get("bluray_detected"): evidence.append("LIBBLURAY_DISC_INFO")

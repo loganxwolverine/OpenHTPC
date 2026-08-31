@@ -121,7 +121,7 @@ class ProtectedOpticalDoctor(unittest.TestCase):
             attempt = home / ".local/state/openhtpc/protected-optical-last-attempt.json"; attempt.parent.mkdir(parents=True)
             attempt.write_text(json.dumps({"schema":1,"status":"OPEN_FAILED","reason":"DISC_OPEN_REFUSED"}))
             (attempt.parent / "optical-current.json").write_text(json.dumps({
-                "canonical_state":"BLURAY_FAMILY", "protection":"PROTECTED",
+                "canonical_state":"UHD_BLURAY_VIDEO", "protection":"PROTECTED",
                 "protection_mechanisms":["AACS"], "classification_source":"LIBBLURAY",
             }))
             state = {
@@ -154,10 +154,13 @@ class ProtectedOpticalDoctor(unittest.TestCase):
             self.assertEqual(statuses["libbdplus"], "NOT_AVAILABLE")
             self.assertEqual(statuses["Last protected disc attempt"], "OPEN_FAILED")
             self.assertEqual(statuses["Optical media family"], "BLURAY")
-            self.assertEqual(statuses["Optical exact type"], "UNKNOWN")
+            self.assertEqual(statuses["Optical exact type"], "UHD_BLURAY")
             self.assertEqual(statuses["Optical protection"], "PROTECTED")
             self.assertEqual(statuses["Protection mechanism"], "AACS")
             self.assertEqual(statuses["Classification source"], "LIBBLURAY")
+            optional = {item["label"]:item["status"] for item in report["optional"]}
+            self.assertEqual(optional["Blu-ray"], "NOT_INSTALLED")
+            self.assertEqual(optional["UHD"], "NOT_INSTALLED")
 
 
 class RuntimeNonRegression(unittest.TestCase):

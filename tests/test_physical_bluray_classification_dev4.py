@@ -31,9 +31,13 @@ class Classification(unittest.TestCase):
  def test_exact_variant_unknown_is_not_global_unknown(self):
   state=probe(info(aacs_detected=True));self.assertEqual((state["canonical_state"],state["classification_confidence"]),("BLURAY_FAMILY","PARTIAL"))
  def test_index_0300_is_documented_uhd_proof(self):self.assertEqual(probe(info(),"INDX0300")["canonical_state"],"UHD_BLURAY_VIDEO")
+ def test_libbluray_index_0300_is_same_canonical_uhd_proof(self):
+  state=probe(info(bdmv_index_header="INDX0300"));self.assertEqual((state["canonical_state"],state["bdmv_index_path"]),("UHD_BLURAY_VIDEO","libbluray:BDMV/index.bdmv"))
  def test_hevc_or_resolution_alone_is_not_uhd(self):
   state=probe(info());state["video"]={"codec":"HEVC","width":3840,"height":2160};self.assertEqual(state["canonical_state"],"BLURAY_FAMILY")
  def test_uhd_label_is_not_uhd_proof(self):self.assertEqual(probe(info(),label="ULTRA UHD MOVIE")["canonical_state"],"BLURAY_FAMILY")
+ def test_hdr_alone_is_not_uhd_proof(self):
+  state=probe(info());state["video"]={"hdr":True};self.assertEqual(state["canonical_state"],"BLURAY_FAMILY")
  def test_reliable_absence_of_protection_is_unprotected(self):self.assertEqual(probe(info())["protection_mechanisms"],["NONE"])
  def test_contradictory_aacs_fact_wins_conservatively(self):
   state=probe(info(bluray_detected=False,aacs_detected=True),bd=True);self.assertEqual((state["canonical_state"],state["protection"]),("BLURAY_FAMILY","PROTECTED"))

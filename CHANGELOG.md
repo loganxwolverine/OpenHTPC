@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Protected Optical Provider Phase 5 — 1.1.4-dev5
+
+- Consolidates physical gates for protected Blu-ray, DVD regression and protected UHD opening while recording UHD dropped frames as a deferred limitation.
+- Propagates the existing `INDX0300` structural proof through libbluray so protected, unmounted UHD media selects the dedicated Ultra HD Blu-ray 4K badge.
+- Documents honest Plugin Registry semantics and the future Plugin Framework P2 ownership boundary without extracting code.
+
 # OPENHTPC Protected Optical Provider Phase 4 — 1.1.4-dev4
 
 - Classifies physical Blu-ray, AACS and BD+ facts from libbluray's public disc-information API, with a structural read-only fallback.

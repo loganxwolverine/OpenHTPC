@@ -68,7 +68,7 @@ def committed_poster(metadata):
 MEDIA_PROFILES = {
     "DVD_VIDEO":         {"badge": "DVD VIDÉO",         "icon": "assets/ui/optical-dvd.png",    "logo": "assets/ui/dvd-media-badge.png",        "label": "DVD"},
     "BLURAY_VIDEO":      {"badge": "BLU-RAY",           "icon": "assets/ui/optical-bluray.png", "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray"},
-    "UHD_BLURAY_VIDEO":  {"badge": "ULTRA HD BLU-RAY",  "icon": "assets/ui/optical-uhd.png",    "logo": "assets/ui/uhd-bluray-media-badge.png", "label": "UHD Blu-ray"},
+    "UHD_BLURAY_VIDEO":  {"badge": "ULTRA HD BLU-RAY 4K", "icon": "assets/ui/optical-uhd.png",   "logo": "assets/ui/uhd-bluray-media-badge.png", "label": "UHD Blu-ray"},
     "BLURAY_FAMILY":     {"badge": "BLU-RAY / UHD",     "icon": "assets/ui/optical-empty.png",  "logo": "assets/ui/bluray-media-badge.png",    "label": "Blu-ray / UHD"},
     "UNKNOWN_OPTICAL_MEDIA":{"badge":"MÉDIA OPTIQUE",  "icon": "assets/ui/optical-empty.png",  "logo": None,                                  "label": "Média optique"},
 }
