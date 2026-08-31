@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Optical Capability — 1.2.0-dev6
+
+- Transfers only protected-optical capability projection to enabled `plugin.bluray`.
+- Keeps all probing and canonical snapshot generation in Core.
+- Preserves `AVAILABLE` as ready-to-attempt rather than per-disc success.
+
 # OPENHTPC Plugin Framework P2 Optical Presentation — 1.2.0-dev5
 
 - Transfers only Blu-ray/UHD descriptor selection to enabled `plugin.bluray`.

@@ -10,6 +10,8 @@
   Core fallback and mandatory direct A/B comparison.
 - P2 Phase 4 transfers only the Blu-ray/UHD presentation descriptor mapping;
   Core retains rendering and asset resolution.
+- P2 Phase 5 transfers only the protected-optical capability projection;
+  Core retains probing and canonical snapshot generation.
 - Later phases may progressively extract classification and other bounded
   responsibilities, only when each prior
   boundary is proven equivalent.
@@ -165,6 +167,26 @@ Disabled, invalid, mismatched or broken contributions use `CORE_FALLBACK`.
 Core alone resolves `BLURAY` and `UHD_BLURAY` to existing asset paths and
 continues to own Pillow/Flex rendering, layout, generated pages and all asset
 files. The plugin contains no paths or rendering primitives.
+
+## Phase 5 capability projection ownership
+
+The third transferred responsibility is the pure projection of the
+Core-generated `optical.protected_media` snapshot into a bounded P2 capability
+contribution. It reports the canonical capability ID, provider/availability
+state, ready-to-attempt boolean, supported Blu-ray media kinds, dependency
+states, external-key-database state and non-blocking metadata.
+
+`AVAILABLE` means only `READY_TO_ATTEMPT`; it never predicts per-disc
+decryption or `OPEN_SUCCESS`. Current media type, protection and historical
+`OPEN_SUCCESS`/`OPEN_FAILED` are not inputs and cannot mutate machine
+capability. Absent snapshots project conservatively as `NOT_AVAILABLE` and
+malformed states as `BLOCKED`.
+
+Core remains the only probe and snapshot authority. It continues to discover
+and load libraries, inspect allowed KEYDB metadata and write the canonical
+snapshot. The plugin receives the resulting dictionary only. Selection follows
+the same disabled/enabled/BROKEN and exact A/B fallback policy as Doctor and
+presentation, while all three contributions remain independently bounded.
 
 ## Protected Optical migration boundary
 

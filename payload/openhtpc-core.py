@@ -89,6 +89,7 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
     pure_path = pure.get("config_path")
     sources = user.get("local_media_sources") if isinstance(user.get("local_media_sources"), list) else []
     registry=plugin_status(home,install);plugins,plugin_errors=installed_plugins(home,install)
+    capability_authority,protected_contribution=protected_optical_capability_projection(home,install,registry,protected)
     optical_initialized = (home / ".local/state/openhtpc/optical-current.json").is_file()
     optical_state = optical.get("state", "NOT_INITIALIZED" if not optical_initialized else "NO_DRIVE")
     detected = profile.get("detected") if isinstance(profile.get("detected"), dict) else {}
@@ -112,6 +113,8 @@ def capability_state(home: pathlib.Path, install: pathlib.Path) -> dict[str, Any
         "PLUGIN_REGISTRY": registry,
         "DISC_MONITOR_ACTIVE": _process_active("openhtpc-optical-monitor"),
         "PROTECTED_OPTICAL_SUPPORT": protected,
+        "PROTECTED_OPTICAL_CAPABILITY": protected_contribution,
+        "PROTECTED_OPTICAL_CAPABILITY_AUTHORITY": capability_authority,
         "optical_state": optical_state,
         "plugins": plugins,
         "plugin_errors": plugin_errors,
@@ -158,6 +161,42 @@ PROTECTED_OPTICAL_DOCTOR_LABELS=("Protected optical media","libbluray","libaacs"
  "Optical protection","Protection mechanism","Classification source","Last protected disc attempt")
 OPTICAL_PRESENTATION_KEYS={"NONE","BLURAY","BLURAY_FAMILY","UHD_BLURAY"}
 OPTICAL_BADGE_KEYS={"NONE","BLURAY","UHD_BLURAY"}
+PROTECTED_CAPABILITY_STATES={"AVAILABLE","NOT_CONFIGURED","NOT_AVAILABLE","BLOCKED"}
+
+def core_protected_optical_capability(snapshot:dict[str,Any]|None)->dict[str,Any]:
+    """Project a Core-generated provider snapshot into the bounded P2 contract."""
+    snapshot=snapshot if isinstance(snapshot,dict) else {};raw=snapshot.get("status")
+    status=("NOT_AVAILABLE" if not snapshot else raw if raw in PROTECTED_CAPABILITY_STATES else "BLOCKED")
+    dependencies=snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"),dict) else {}
+    dependency_states={name:(dependencies.get(name) or {}).get("status","NOT_AVAILABLE") for name in ("libbluray","libaacs","libbdplus")}
+    key_database=snapshot.get("external_key_database") if isinstance(snapshot.get("external_key_database"),dict) else {}
+    ready=status=="AVAILABLE"
+    return {"capability_id":"PROTECTED_OPTICAL_SUPPORT","availability_state":status,"provider_state":status,
+            "playback_capability_state":status,"available":ready,"ready_to_attempt":ready,
+            "supported_media_kinds":["BLURAY","UHD_BLURAY"],"dependency_states":dependency_states,
+            "external_key_database_state":key_database.get("status","NOT_CONFIGURED"),"blocking":status=="BLOCKED"}
+
+def _valid_protected_optical_capability(value:Any)->bool:
+    fields={"capability_id","availability_state","provider_state","playback_capability_state","available","ready_to_attempt",
+            "supported_media_kinds","dependency_states","external_key_database_state","blocking"}
+    if not isinstance(value,dict) or set(value)!=fields or value.get("capability_id")!="PROTECTED_OPTICAL_SUPPORT":return False
+    status=value.get("provider_state")
+    return (status in PROTECTED_CAPABILITY_STATES and value.get("availability_state")==status and value.get("playback_capability_state")==status and
+            value.get("available") is (status=="AVAILABLE") and value.get("ready_to_attempt") is (status=="AVAILABLE") and
+            value.get("blocking") is (status=="BLOCKED") and value.get("supported_media_kinds")==["BLURAY","UHD_BLURAY"] and
+            isinstance(value.get("dependency_states"),dict) and set(value["dependency_states"])=={"libbluray","libaacs","libbdplus"} and
+            all(item in PROTECTED_CAPABILITY_STATES|{"DETECTED"} for item in [*value["dependency_states"].values(),value.get("external_key_database_state")]))
+
+def protected_optical_capability_projection(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],snapshot:dict[str,Any]|None)->tuple[str,dict[str,Any]]:
+    fallback=core_protected_optical_capability(snapshot)
+    plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+    loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
+    try:value=loaded["module"].capability_contribution(snapshot or {}) if loaded.get("state")=="AVAILABLE" else None
+    except (Exception,SystemExit):value=None
+    if _valid_protected_optical_capability(value) and value==fallback:return "PLUGIN_P2",value
+    plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_CAPABILITY_BROKEN"})
+    return "CORE_FALLBACK",fallback
 
 def core_optical_presentation_descriptor(optical:dict[str,Any]|None)->dict[str,Any]:
     """Temporary Core fallback for Blu-ray/UHD presentation selection."""

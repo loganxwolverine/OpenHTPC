@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 4 PRESENTATION DESCRIPTOR — CORE RENDERER/FALLBACK RETAINED`
+Status: `P2 PHASE 5 CAPABILITY PROJECTION — CORE PROBE/SNAPSHOT RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -53,5 +53,13 @@ Phase 4 additionally transfers only the Blu-ray/UHD presentation descriptor
 mapping. Core still owns Flex rendering, asset files, safe badge-key-to-path
 resolution and the exact fallback. The frozen physical invariant is:
 `UHD_BLURAY` displays `ULTRA HD BLU-RAY 4K`. Hardware probing, libbluray and
-libaacs probing, canonical classification, protected capability, playback
+libaacs probing, canonical classification, canonical capability generation, playback
 decision, dispatcher, `bd://` backend and MPV remain Core-owned.
+
+Phase 5 transfers only the deterministic protected-optical capability
+projection. The plugin consumes the canonical Core-generated snapshot and is
+not a second probe engine. Hardware probing, libbluray/libaacs/libbdplus
+probing, KEYDB metadata detection, snapshot generation, classification,
+playback decision, Flex rendering/assets, dispatcher, `bd://` and MPV remain
+Core-owned. `AVAILABLE` continues to mean ready to attempt, not guaranteed
+per-disc success.

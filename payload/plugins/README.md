@@ -13,3 +13,6 @@ Core-owned, so Doctor truthfully reports `Blu-ray/UHD DISABLED` while Core
 functionality may remain available during this temporary overlap. Phase 4 also
 allows the enabled plugin to contribute only allowlisted Blu-ray/UHD badge
 descriptor data; Core retains every asset and all rendering.
+Phase 5 additionally permits an enabled equivalent plugin to project the
+already-generated protected-optical capability facts. Core remains the sole
+probe and snapshot writer.

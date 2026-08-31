@@ -48,3 +48,14 @@ def presentation_descriptor(optical:dict[str,Any])->dict[str,Any]:
  if canonical=="BLURAY_FAMILY":return {"owned":True,"presentation_key":"BLURAY_FAMILY","badge_key":"BLURAY","display_label":"BLU-RAY / UHD","media_kind":"BLURAY"}
  if canonical=="UHD_BLURAY_VIDEO":return {"owned":True,"presentation_key":"UHD_BLURAY","badge_key":"UHD_BLURAY","display_label":"ULTRA HD BLU-RAY 4K","media_kind":"BLURAY"}
  return {"owned":False,"presentation_key":"NONE","badge_key":"NONE","display_label":"","media_kind":"NONE"}
+
+def capability_contribution(snapshot:dict[str,Any])->dict[str,Any]:
+ snapshot=snapshot if isinstance(snapshot,dict) else {};raw=snapshot.get("status");states={"AVAILABLE","NOT_CONFIGURED","NOT_AVAILABLE","BLOCKED"}
+ status="NOT_AVAILABLE" if not snapshot else raw if raw in states else "BLOCKED"
+ dependencies=snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"),dict) else {}
+ dependency_states={name:(dependencies.get(name) or {}).get("status","NOT_AVAILABLE") for name in ("libbluray","libaacs","libbdplus")}
+ key_database=snapshot.get("external_key_database") if isinstance(snapshot.get("external_key_database"),dict) else {};ready=status=="AVAILABLE"
+ return {"capability_id":"PROTECTED_OPTICAL_SUPPORT","availability_state":status,"provider_state":status,
+         "playback_capability_state":status,"available":ready,"ready_to_attempt":ready,
+         "supported_media_kinds":["BLURAY","UHD_BLURAY"],"dependency_states":dependency_states,
+         "external_key_database_state":key_database.get("status","NOT_CONFIGURED"),"blocking":status=="BLOCKED"}
