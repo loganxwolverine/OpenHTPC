@@ -42,15 +42,15 @@ class ContractAndEquivalence(unittest.TestCase):
   value=self.equivalent(primitive(aacs=True,index="INDX0300"))
   for field in ("media_family","exact_type","protection","classification_source","classification_confidence"):self.assertNotIn(field,value)
  def test_core_merge_preserves_independent_structural_facts(self):
-  fragment=self.equivalent(primitive(index="INDX0300"));facts=OPTICAL.normalized_bluray_probe_facts(bd_detected=True,header="INDX0200",header_source="DISC_STRUCTURE",libbluray_fragment=fragment,structural_protection="PROTECTED")
+  fragment=self.equivalent(primitive(index="INDX0300"));structural=OPTICAL.core_normalize_structural_primitives({"bdmv_index_header":"INDX0200","structural_protection_evidence":"PROTECTED","structural_probe_complete":True});facts=OPTICAL.normalized_bluray_probe_facts(bd_detected=True,libbluray_fragment=fragment,structural_fragment=structural)
   self.assertEqual((facts["index_version"],facts["index_source"],facts["structural_protection"]),("0200","DISC_STRUCTURE","PROTECTED"))
  def test_phase8_classification_remains_separate(self):
-  fragment=self.equivalent(primitive(index="INDX0300",aacs=True,aacs_handled=False));facts=OPTICAL.normalized_bluray_probe_facts(bd_detected=True,header="INDX0300",header_source="LIBBLURAY",libbluray_fragment=fragment,structural_protection="UNKNOWN")
+  fragment=self.equivalent(primitive(index="INDX0300",aacs=True,aacs_handled=False));structural=OPTICAL.core_normalize_structural_primitives({"bdmv_index_header":None,"structural_protection_evidence":"UNKNOWN","structural_probe_complete":False});facts=OPTICAL.normalized_bluray_probe_facts(bd_detected=True,libbluray_fragment=fragment,structural_fragment=structural)
   result=OPTICAL.classify_bluray_probe_facts(facts);self.assertEqual((result["exact_type"],result["protection"]),("UHD_BLURAY","PROTECTED"))
 
 class AuthorityAndFailureIsolation(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev10\n")
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev11\n")
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def test_disabled_selects_core(self):self.assertEqual(OPTICAL.selected_libbluray_normalization(self.home,self.install,primitive())[0],"CORE_FALLBACK")
  def test_enabled_selects_exact_plugin_equivalent(self):

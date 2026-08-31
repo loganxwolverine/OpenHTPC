@@ -20,7 +20,7 @@ as PASS and does not claim universal UHD compatibility.
 
 ## Protected optical → plugin migration
 
-Status: `P2 PHASE 9 LIBBLURAY NORMALIZATION — CORE ACQUISITION RETAINED`
+Status: `P2 PHASE 10 STRUCTURAL NORMALIZATION — CORE FILESYSTEM I/O RETAINED`
 
 Protected optical support remains integrated into the development branch.
 The first-party `plugin.bluray` manifest now exists as a disabled read-only
@@ -97,3 +97,15 @@ independent values and normalizes the INDX version without classifying media.
 Core still owns every libbluray call and BDMV/INDX read, the structural
 fallback, validation and merge of the complete Phase 8 facts, and canonical
 state publication. Plugin normalization is not libbluray probing.
+
+Phase 10 transfers only deterministic normalization of already-acquired
+structural BDMV/INDX and protection primitives. The plugin receives the INDX
+header value, the existing conservative structural protection evidence and a
+probe-completeness boolean; it receives no mountpoint, path, descriptor,
+file object or callable. The current structural fallback does not acquire a
+distinct BD+ mechanism fact, so Phase 10 does not fabricate one.
+
+Core performs every filesystem operation and error handler, retains the
+separate Phase 9 libbluray fragment, validates and merges both fragments into
+the Phase 8 raw contract, and alone publishes canonical state. Plugin
+structural normalization is not filesystem probing.

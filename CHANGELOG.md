@@ -1,5 +1,11 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Structural Fact Normalization — 1.2.0-dev11
+
+- Transfers only deterministic normalization of Core-acquired BDMV/INDX and structural protection primitives to enabled `plugin.bluray`.
+- Keeps structural and libbluray fragments distinct until the validated Core raw-fact merge and Phase 8 classifier.
+- Retains every mounted-filesystem operation, BDMV/INDX read, fallback and canonical-state publication in Core.
+
 # OPENHTPC Plugin Framework P2 libbluray Fact Normalization — 1.2.0-dev10
 
 - Transfers only deterministic normalization of Core-acquired libbluray primitive facts to enabled `plugin.bluray`.

@@ -118,3 +118,13 @@ def normalize_libbluray_primitives(value:dict[str,Any]|None)->dict[str,Any]:
          "aacs_handled":value["aacs_handled"],"bdplus_detected":value["bdplus_detected"],"bdplus_handled":value["bdplus_handled"],
          "libbluray_index_version":version,"libbluray_index_available":version!="NONE",
          "libbluray_probe_complete":value.get("probe_open_succeeded",False)}
+
+def normalize_structural_primitives(value:dict[str,Any])->dict[str,Any]:
+ """Normalize Core-acquired structural primitives without filesystem access."""
+ header=value["bdmv_index_header"];version="NONE"
+ if isinstance(header,str):
+  raw=header[4:] if header.startswith("INDX") and len(header)==8 else "OTHER";version=raw if raw in {"0100","0200","0300"} else "OTHER"
+ protection=value["structural_protection_evidence"]
+ return {"structural_info_available":header is not None or protection!="UNKNOWN","bluray_structure_present":header is not None,
+         "structural_index_version":version,"structural_index_available":header is not None,"structural_protection":protection,
+         "structural_probe_complete":value["structural_probe_complete"]}

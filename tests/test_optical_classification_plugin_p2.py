@@ -11,7 +11,11 @@ def info(bluray=True,aacs=False,aacs_handled=False,bdplus=False,bdplus_handled=F
  return {"bluray_detected":bluray,"aacs_detected":aacs,"aacs_handled":aacs_handled,"bdplus_detected":bdplus,"bdplus_handled":bdplus_handled,"probe_open_succeeded":False}
 def facts(*,bd=True,header=None,source=None,library=None,structural="UNKNOWN"):
  fragment=OPTICAL.core_normalize_libbluray_primitives(library)
- return OPTICAL.normalized_bluray_probe_facts(bd_detected=bd,header=header,header_source=source,libbluray_fragment=fragment,structural_protection=structural)
+ structural_header=header if source=="DISC_STRUCTURE" else None
+ structural_fragment=OPTICAL.core_normalize_structural_primitives({"bdmv_index_header":structural_header,"structural_protection_evidence":structural,"structural_probe_complete":structural!="UNKNOWN"})
+ if source=="LIBBLURAY" and header:
+  library={**(library or info()),"bdmv_index_header":header};fragment=OPTICAL.core_normalize_libbluray_primitives(library)
+ return OPTICAL.normalized_bluray_probe_facts(bd_detected=bd,libbluray_fragment=fragment,structural_fragment=structural_fragment)
 
 class ContractsAndEquivalence(unittest.TestCase):
  def equivalent(self,value):
@@ -57,7 +61,7 @@ class ContractsAndEquivalence(unittest.TestCase):
 
 class Authority(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev10\n")
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev11\n")
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def test_disabled_selects_core(self):self.assertEqual(OPTICAL.selected_bluray_classification(self.home,self.install,facts(library=info()))[0],"CORE_FALLBACK")
  def test_enabled_selects_plugin(self):

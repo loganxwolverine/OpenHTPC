@@ -283,6 +283,27 @@ with independently acquired structural facts, validates the complete Phase 8
 contract and remains the sole canonical-state publisher. Plugin normalization
 is not libbluray probing.
 
+## Phase 10 structural BDMV/INDX fact normalization ownership
+
+Phase 10 adds a second pure normalization boundary for values already read by
+Core's mounted-disc fallback. The strict input contains only the acquired INDX
+header value, the existing `PROTECTED`/`UNPROTECTED`/`UNKNOWN` structural
+evidence and probe completeness. The output contains structure availability,
+a normalized index version, the unchanged structural evidence and completion.
+It contains no final media identity, UHD or protection classification.
+
+No device, mountpoint, BDMV path, file descriptor, file object, pathlib
+object, stat result, iterator or callable crosses the boundary. Core retains
+all `open`/`read`/`stat` operations, mounted path handling, structural error
+handling and fallback. Because the current fallback does not acquire a
+distinct BD+ mechanism fact, the contract does not invent one.
+
+Core keeps Phase 9 libbluray and Phase 10 structural fragments separate,
+validates both, performs the Phase 8 raw-fact merge and source precedence, and
+alone publishes canonical state. Disabled, invalid, mismatched or broken
+contributions use the exact Core normalizer. Plugin structural normalization
+is not filesystem probing.
+
 ## Protected Optical migration boundary
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its

@@ -30,3 +30,7 @@ Phase 9 permits the enabled equivalent plugin to normalize already-acquired
 libbluray primitive values into the Phase 8 library-fact fragment. Core keeps
 all handles and calls, structural fallback, final raw-fact merge and canonical
 publication. Plugin normalization is not libbluray probing or classification.
+Phase 10 permits the enabled equivalent plugin to normalize Core-acquired
+structural INDX and protection primitives. No path or I/O object crosses the
+contract; Core retains every filesystem operation, merges the separate Phase
+9/10 fragments and remains the canonical-state publisher.

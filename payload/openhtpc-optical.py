@@ -287,6 +287,9 @@ LIBBLURAY_PRIMITIVE_REQUIRED={"bluray_detected","aacs_detected","aacs_handled","
 LIBBLURAY_PRIMITIVE_OPTIONAL={"probe_open_succeeded","bdmv_index_header"}
 LIBBLURAY_FRAGMENT_FIELDS={"libbluray_info_available","libbluray_bluray_detected","aacs_detected","aacs_handled","bdplus_detected",
                            "bdplus_handled","libbluray_index_version","libbluray_index_available","libbluray_probe_complete"}
+STRUCTURAL_PRIMITIVE_FIELDS={"bdmv_index_header","structural_protection_evidence","structural_probe_complete"}
+STRUCTURAL_FRAGMENT_FIELDS={"structural_info_available","bluray_structure_present","structural_index_version","structural_index_available",
+                            "structural_protection","structural_probe_complete"}
 
 def valid_libbluray_primitives(value):
     if value is None:return True
@@ -335,18 +338,60 @@ def selected_libbluray_normalization(home,install,primitives):
     except (Exception,SystemExit):pass
     return "CORE_FALLBACK",fallback
 
-def normalized_bluray_probe_facts(*,bd_detected,header,header_source,libbluray_fragment,structural_protection):
-    """Core merge of normalized library and independently acquired structural facts."""
+def valid_structural_primitives(value):
+    if not isinstance(value,dict) or set(value)!=STRUCTURAL_PRIMITIVE_FIELDS:return False
+    if value.get("bdmv_index_header") is not None and not isinstance(value.get("bdmv_index_header"),str):return False
+    return value.get("structural_protection_evidence") in {"PROTECTED","UNPROTECTED","UNKNOWN"} and isinstance(value.get("structural_probe_complete"),bool)
+
+def core_normalize_structural_primitives(value):
+    """Normalize Core-acquired BDMV facts only; this function performs no I/O."""
+    if not valid_structural_primitives(value):raise ValueError("STRUCTURAL_PRIMITIVES_INVALID")
+    header=value["bdmv_index_header"];version="NONE"
+    if isinstance(header,str):
+        raw=header[4:] if header.startswith("INDX") and len(header)==8 else "OTHER";version=raw if raw in {"0100","0200","0300"} else "OTHER"
+    protection=value["structural_protection_evidence"]
+    return {"structural_info_available":header is not None or protection!="UNKNOWN","bluray_structure_present":header is not None,
+            "structural_index_version":version,"structural_index_available":header is not None,"structural_protection":protection,
+            "structural_probe_complete":value["structural_probe_complete"]}
+
+def valid_structural_fragment(value):
+    if not isinstance(value,dict) or set(value)!=STRUCTURAL_FRAGMENT_FIELDS:return False
+    if any(not isinstance(value.get(key),bool) for key in ("structural_info_available","bluray_structure_present","structural_index_available","structural_probe_complete")):return False
+    if value.get("structural_index_version") not in {"NONE","0100","0200","0300","OTHER"} or value.get("structural_protection") not in {"PROTECTED","UNPROTECTED","UNKNOWN"}:return False
+    return value["structural_index_available"] is (value["structural_index_version"]!="NONE") and value["bluray_structure_present"] is value["structural_index_available"]
+
+def selected_structural_normalization(home,install,primitives):
+    """Select a pure equivalent normalizer; acquisition and merge remain Core."""
+    if not valid_structural_primitives(primitives):
+        primitives={"bdmv_index_header":None,"structural_protection_evidence":"UNKNOWN","structural_probe_complete":False}
+    fallback=core_normalize_structural_primitives(primitives)
+    if home is None:return "CORE_FALLBACK",fallback
+    try:
+        path=install/"openhtpc-plugin-registry.py";spec=importlib.util.spec_from_file_location("openhtpc_optical_structural_registry",path)
+        if spec is None or spec.loader is None:return "CORE_FALLBACK",fallback
+        registry=importlib.util.module_from_spec(spec);spec.loader.exec_module(registry);status=registry.registry(home,install)
+        plugin=next((item for item in status.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+        if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+        loaded=registry.load_entrypoint(home,install,"plugin.bluray")
+        value=loaded["module"].normalize_structural_primitives(primitives) if loaded.get("state")=="AVAILABLE" else None
+        if valid_structural_fragment(value) and value==fallback:return "PLUGIN_P2",value
+    except (Exception,SystemExit):pass
+    return "CORE_FALLBACK",fallback
+
+def normalized_bluray_probe_facts(*,bd_detected,libbluray_fragment,structural_fragment):
+    """Core merge of separate validated library and structural fragments."""
     if not valid_libbluray_fragment(libbluray_fragment):raise ValueError("LIBBLURAY_FRAGMENT_INVALID")
-    library=libbluray_fragment["libbluray_info_available"];raw_version=(header[4:] if isinstance(header,str) and header.startswith("INDX") else "NONE")
-    version=raw_version if raw_version in {"NONE","0100","0200","0300"} else "OTHER"
-    source=("LIBBLURAY" if header_source=="LIBBLURAY" else "DISC_STRUCTURE" if header_source=="DISC_STRUCTURE" else "NONE")
+    if not valid_structural_fragment(structural_fragment):raise ValueError("STRUCTURAL_FRAGMENT_INVALID")
+    library=libbluray_fragment["libbluray_info_available"]
+    if structural_fragment["structural_index_available"]:version,source=structural_fragment["structural_index_version"],"DISC_STRUCTURE"
+    elif libbluray_fragment["libbluray_index_available"]:version,source=libbluray_fragment["libbluray_index_version"],"LIBBLURAY"
+    else:version,source="NONE","NONE"
     return {"bluray_detected":bool(bd_detected),"bluray_structure_present":version!="NONE","index_version":version,"index_source":source,
             "libbluray_info_available":library,"libbluray_bluray_detected":libbluray_fragment["libbluray_bluray_detected"],
             "aacs_detected":libbluray_fragment["aacs_detected"],"aacs_handled":libbluray_fragment["aacs_handled"],
             "bdplus_detected":libbluray_fragment["bdplus_detected"],"bdplus_handled":libbluray_fragment["bdplus_handled"],
-            "structural_protection":structural_protection if structural_protection in {"PROTECTED","UNPROTECTED","UNKNOWN"} else "UNKNOWN",
-            "probe_incomplete":not library and structural_protection=="UNKNOWN"}
+            "structural_protection":structural_fragment["structural_protection"],
+            "probe_incomplete":not library and not structural_fragment["structural_probe_complete"]}
 
 def valid_bluray_probe_facts(value):
     if not isinstance(value,dict) or set(value)!=RAW_PROBE_FACT_FIELDS:return False
@@ -389,12 +434,12 @@ def valid_bluray_classification(value):
     mechanisms=value.get("protection_mechanisms")
     if not isinstance(mechanisms,list) or not mechanisms or any(item not in {"UNKNOWN","NONE","AACS","BDPLUS"} for item in mechanisms) or len(mechanisms)!=len(set(mechanisms)):return False
     return ((value["owned"] and value["media_family"]=="BLURAY" and value["canonical_state"]!="UNKNOWN_OPTICAL_MEDIA") or
-            (not value["owned"] and value==classify_bluray_probe_facts(normalized_bluray_probe_facts(bd_detected=False,header=None,header_source=None,libbluray_fragment=core_normalize_libbluray_primitives(None),structural_protection="UNKNOWN"))))
+            (not value["owned"] and value==classify_bluray_probe_facts(normalized_bluray_probe_facts(bd_detected=False,libbluray_fragment=core_normalize_libbluray_primitives(None),structural_fragment=core_normalize_structural_primitives({"bdmv_index_header":None,"structural_protection_evidence":"UNKNOWN","structural_probe_complete":False})))))
 
 def selected_bluray_classification(home,install,facts):
     """Select a validated equivalent classifier; canonical publication remains Core."""
     if not valid_bluray_probe_facts(facts):
-        neutral=normalized_bluray_probe_facts(bd_detected=False,header=None,header_source=None,libbluray_fragment=core_normalize_libbluray_primitives(None),structural_protection="UNKNOWN")
+        neutral=normalized_bluray_probe_facts(bd_detected=False,libbluray_fragment=core_normalize_libbluray_primitives(None),structural_fragment=core_normalize_structural_primitives({"bdmv_index_header":None,"structural_protection_evidence":"UNKNOWN","structural_probe_complete":False}))
         return "CORE_FALLBACK",classify_bluray_probe_facts(neutral)
     fallback=classify_bluray_probe_facts(facts)
     if home is None:return "CORE_FALLBACK",fallback
@@ -484,10 +529,14 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
     bd_detected=bd_medium or libbluray_fragment.get("libbluray_bluray_detected") is True
     info=(subprocess.CompletedProcess([],1,"","") if bd_detected else runner(["lsdvd","-x","-Ox",str(device)])); text=info.stdout if info.returncode==0 else ""
     dvd_video=info.returncode==0 and ("<lsdvd" in text.lower() or "discinfo" in text.lower())
-    header,header_path=header_reader(block)
-    header_source="DISC_STRUCTURE" if header else None
-    if not header and libbluray_fragment["libbluray_index_available"]:
-        header="INDX"+libbluray_fragment["libbluray_index_version"];header_path,header_source="libbluray:BDMV/index.bdmv","LIBBLURAY"
+    structural_header,structural_header_path=header_reader(block);structural_protection=protection_reader(block) if bd_detected else "UNKNOWN"
+    structural_primitives={"bdmv_index_header":structural_header,"structural_protection_evidence":structural_protection,
+                           "structural_probe_complete":structural_protection!="UNKNOWN"}
+    if bd_detected:structural_authority,structural_fragment=selected_structural_normalization(home,install,structural_primitives)
+    else:structural_authority,structural_fragment="CORE_FALLBACK",core_normalize_structural_primitives(structural_primitives)
+    if structural_fragment["structural_index_available"]:header,header_path=structural_header,structural_header_path
+    elif libbluray_fragment["libbluray_index_available"]:header,header_path="INDX"+libbluray_fragment["libbluray_index_version"],"libbluray:BDMV/index.bdmv"
+    else:header,header_path=None,None
     evidence=[]
     if bd_medium: evidence.append("UDEV_MMC_BD_MEDIA")
     if isinstance(libbluray_info,dict) and libbluray_info.get("bluray_detected"): evidence.append("LIBBLURAY_DISC_INFO")
@@ -496,8 +545,7 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
         canonical,legacy,uhd_status="DVD_VIDEO","DVD","NOT_APPLICABLE";evidence.append("LSDVD_DVD_VIDEO")
         classification={"protection":"UNPROTECTED","protection_mechanisms":["NONE"],"classification_source":"DISC_STRUCTURE","classification_confidence":"CERTAIN"};authority="CORE_FALLBACK"
     elif bd_detected:
-        facts=normalized_bluray_probe_facts(bd_detected=bd_detected,header=header,header_source=header_source,
-                                           libbluray_fragment=libbluray_fragment,structural_protection=protection_reader(block))
+        facts=normalized_bluray_probe_facts(bd_detected=bd_detected,libbluray_fragment=libbluray_fragment,structural_fragment=structural_fragment)
         authority,result=selected_bluray_classification(home,install,facts);canonical,legacy,uhd_status=result["canonical_state"],result["legacy_state"],result["uhd_status"]
         classification={key:result[key] for key in ("protection","protection_mechanisms","classification_source","classification_confidence")}
     elif fstype not in {"iso9660","udf"}:
@@ -508,6 +556,7 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
         classification={"protection":"UNKNOWN","protection_mechanisms":["UNKNOWN"],"classification_source":"UNKNOWN","classification_confidence":"UNKNOWN"}
     value=_state(canonical,device,legacy,volume_label=label,disc_title=None,
                  uhd_status=uhd_status,detection_evidence=evidence,libbluray_normalization_authority=normalization_authority,
+                 structural_normalization_authority=structural_authority,
                  classification_authority=authority,**classification)
     if isinstance(libbluray_info,dict) and canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:value["libbluray_disc_info"]=libbluray_info
     if header: value["bdmv_index_version"]=header[4:] if header.startswith("INDX") else "UNRECOGNIZED"
