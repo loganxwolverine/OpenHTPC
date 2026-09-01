@@ -47,19 +47,19 @@ class Authority(unittest.TestCase):
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py")
   self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def registry(self):return REGISTRY.registry(self.home,self.install)
- def test_disabled_selects_core_fallback(self):self.assertEqual(CORE.protected_optical_doctor_projection(self.home,self.install,self.registry(),inputs(disc()))[0],"CORE_FALLBACK")
+ def test_disabled_withholds_plugin_doctor(self):self.assertEqual(CORE.protected_optical_doctor_projection(self.home,self.install,self.registry(),inputs(disc()))[0],"PLUGIN_UNAVAILABLE")
  def test_enabled_selects_plugin_without_duplicate_rows(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,rows=CORE.protected_optical_doctor_projection(self.home,self.install,self.registry(),inputs(disc()))
   self.assertEqual(authority,"PLUGIN_P2");labels=[row["label"] for row in rows];self.assertEqual(len(labels),len(set(labels)))
  def test_broken_runtime_falls_back_and_marks_plugin(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);(self.plugin/"shadow.py").write_text("raise SystemExit(7)\n");registry=self.registry()
-  authority,rows=CORE.protected_optical_doctor_projection(self.home,self.install,registry,inputs(disc()));self.assertEqual(authority,"CORE_FALLBACK");self.assertTrue(rows)
+  authority,rows=CORE.protected_optical_doctor_projection(self.home,self.install,registry,inputs(disc()));self.assertEqual(authority,"PLUGIN_UNAVAILABLE");self.assertFalse(rows)
   self.assertEqual(registry["plugins"][0]["state"],"BROKEN");self.assertEqual(registry["errors"][-1]["reason"],"PLUGIN_DOCTOR_BROKEN")
  def test_missing_or_malformed_optional_plugin_uses_fallback(self):
-  shutil.rmtree(self.plugin);self.assertEqual(CORE.protected_optical_doctor_projection(self.home,self.install,self.registry(),inputs())[0],"CORE_FALLBACK")
+  shutil.rmtree(self.plugin);self.assertEqual(CORE.protected_optical_doctor_projection(self.home,self.install,self.registry(),inputs())[0],"PLUGIN_UNAVAILABLE")
  def test_plugin_cannot_change_blocking_semantics(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);source=(self.plugin/"shadow.py").read_text();(self.plugin/"shadow.py").write_text(source.replace('"blocking":False},\n  {"label":"libaacs"','"blocking":True},\n  {"label":"libaacs"'))
-  registry=self.registry();authority,_=CORE.protected_optical_doctor_projection(self.home,self.install,registry,inputs(disc()));self.assertEqual(authority,"CORE_FALLBACK")
+  registry=self.registry();authority,_=CORE.protected_optical_doctor_projection(self.home,self.install,registry,inputs(disc()));self.assertEqual(authority,"PLUGIN_UNAVAILABLE")
  def test_enabled_and_broken_doctor_paths_keep_overall_ready(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);state_dir=self.home/".local/state/openhtpc";state_dir.mkdir(parents=True,exist_ok=True)
   (state_dir/"optical-current.json").write_text(json.dumps(disc()));base={"HARDWARE_PASSPORT_READY":True,"HARDWARE_PASSPORT_PROVENANCE":"CURRENT","VIDEO_RUNTIME_READY":True,
@@ -72,7 +72,7 @@ class Authority(unittest.TestCase):
    with mock.patch.object(CORE,"capability_state",return_value=base),mock.patch.object(CORE,"_runtime_lifecycle",return_value=lifecycle),mock.patch.object(CORE,"graphical_runtime",return_value={"status":"NOT_RUNNING","session":"Wayland","desktop":"KDE","pid":""}),mock.patch.object(CORE,"_dvdcss_status",return_value="NOT_CONFIGURED"),mock.patch.object(CORE,"_plasma_suppression",return_value="INACTIVE"),mock.patch.object(CORE,"_plasma_shell_status",return_value="PASS"),mock.patch.object(CORE.os,"access",return_value=True),mock.patch.object(CORE.shutil,"which",return_value="/usr/bin/mpv"),mock.patch.object(CORE.ctypes.util,"find_library",return_value="libSDL2.so"):
     return CORE.health_report(self.home,self.install)
   enabled=report();self.assertEqual((enabled["overall"],enabled["protected_optical_doctor_authority"]),("READY","PLUGIN_P2"))
-  (self.plugin/"shadow.py").write_text("raise SystemExit(3)\n");broken=report();self.assertEqual((broken["overall"],broken["protected_optical_doctor_authority"]),("READY","CORE_FALLBACK"))
+  (self.plugin/"shadow.py").write_text("raise SystemExit(3)\n");broken=report();self.assertEqual((broken["overall"],broken["protected_optical_doctor_authority"]),("READY","PLUGIN_UNAVAILABLE"))
   self.assertEqual({item["label"]:item["status"] for item in broken["optional"]}["Blu-ray/UHD"],"BROKEN")
 
 class Boundaries(unittest.TestCase):

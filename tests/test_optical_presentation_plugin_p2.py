@@ -44,12 +44,12 @@ class Authority(unittest.TestCase):
   shutil.copytree(PAYLOAD/"assets",self.install/"assets")
   self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def registry(self):return REGISTRY.registry(self.home,self.install)
- def test_disabled_uses_core(self):self.assertEqual(CORE.optical_presentation_descriptor(self.home,self.install,self.registry(),state("UHD_BLURAY_VIDEO"))[0],"CORE_FALLBACK")
+ def test_disabled_is_plugin_unavailable(self):self.assertEqual(CORE.optical_presentation_descriptor(self.home,self.install,self.registry(),state("UHD_BLURAY_VIDEO"))[0],"PLUGIN_UNAVAILABLE")
  def test_enabled_uses_plugin(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,value=CORE.optical_presentation_descriptor(self.home,self.install,self.registry(),state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,value["badge_key"]),("PLUGIN_P2","UHD_BLURAY"))
- def test_broken_or_mismatched_uses_core(self):
+ def test_broken_or_mismatched_is_plugin_unavailable(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);source=(self.plugin/"shadow.py").read_text();(self.plugin/"shadow.py").write_text(source.replace('"badge_key":"UHD_BLURAY"','"badge_key":"UNKNOWN"'))
-  registry=self.registry();authority,value=CORE.optical_presentation_descriptor(self.home,self.install,registry,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,value["badge_key"]),("CORE_FALLBACK","UHD_BLURAY"));self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
+  registry=self.registry();authority,value=CORE.optical_presentation_descriptor(self.home,self.install,registry,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,value["badge_key"]),("PLUGIN_UNAVAILABLE","NONE"));self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
  def test_renderer_resolves_enabled_descriptor_without_plugin_path(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);shutil.copy2(PAYLOAD/"openhtpc-core.py",self.install/"openhtpc-core.py")
   profile,authority=VIEW.presentation_profile(self.home,self.install,state("UHD_BLURAY_VIDEO"));self.assertEqual((authority,pathlib.Path(profile["logo"]).name,profile["badge"]),("PLUGIN_P2","uhd-bluray-media-badge.png","ULTRA HD BLU-RAY 4K"))

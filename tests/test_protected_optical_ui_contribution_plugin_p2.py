@@ -55,14 +55,14 @@ class Authority(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev8\n")
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def registry(self):return REGISTRY.registry(self.home,self.install)
- def test_disabled_selects_core(self):self.assertEqual(CORE.protected_optical_ui_contribution(self.home,self.install,self.registry(),*inputs())[0],"CORE_FALLBACK")
+ def test_disabled_withholds_plugin_ui(self):self.assertEqual(CORE.protected_optical_ui_contribution(self.home,self.install,self.registry(),*inputs())[0],"PLUGIN_UNAVAILABLE")
  def test_enabled_selects_plugin(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,value=CORE.protected_optical_ui_contribution(self.home,self.install,self.registry(),*inputs());self.assertEqual((authority,value["action_intent"]),("PLUGIN_P2","PLAY_CURRENT_OPTICAL_MEDIA"))
  def test_broken_or_mismatch_selects_core(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);source=(self.plugin/"shadow.py").read_text();(self.plugin/"shadow.py").write_text(source.replace('"action_intent":"PLAY_CURRENT_OPTICAL_MEDIA"','"action_intent":"RUN_COMMAND"'))
-  registry=self.registry();authority,value=CORE.protected_optical_ui_contribution(self.home,self.install,registry,*inputs());self.assertEqual(authority,"CORE_FALLBACK");self.assertTrue(value["enabled"]);self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
+  registry=self.registry();authority,value=CORE.protected_optical_ui_contribution(self.home,self.install,registry,*inputs());self.assertEqual(authority,"PLUGIN_UNAVAILABLE");self.assertFalse(value["owned"]);self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
  def test_malformed_upstream_never_invokes_plugin(self):
-  REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,value=CORE.protected_optical_ui_contribution(self.home,self.install,self.registry(),{"badge_key":"BLURAY"},inputs()[1]);self.assertEqual(authority,"CORE_FALLBACK");self.assertFalse(value["owned"])
+  REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,value=CORE.protected_optical_ui_contribution(self.home,self.install,self.registry(),{"badge_key":"BLURAY"},inputs()[1]);self.assertEqual(authority,"PLUGIN_UNAVAILABLE");self.assertFalse(value["owned"])
  def test_capability_state_publishes_selected_data_without_mutation(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);cap_path=self.home/".config/openhtpc/runtime/capabilities.json";cap_path.parent.mkdir(parents=True,exist_ok=True);disc_path=self.home/".local/state/openhtpc/optical-current.json";disc_path.parent.mkdir(parents=True,exist_ok=True)
   cap={"optical":{"protected_media":{"status":"AVAILABLE","dependencies":{"libbluray":{"status":"AVAILABLE"}}}}};disc={"canonical_state":"UHD_BLURAY_VIDEO","protection":"PROTECTED"};cap_path.write_text(json.dumps(cap));disc_path.write_text(json.dumps(disc));state=CORE.capability_state(self.home,self.install)

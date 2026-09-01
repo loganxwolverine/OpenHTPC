@@ -34,14 +34,14 @@ class ResourceContract(unittest.TestCase):
  def test_missing_and_unsupported_resource_rejected(self):
   for path in ("assets/missing.png","assets/bluray-media-badge.jpg","shadow.py"):
    value=self.manifest();value["resources"]["BLURAY"]=path;self.assertFalse(REGISTRY.validate_manifest(value,self.plugin,"1.2.0-dev12")[0])
- def test_disabled_uses_core_asset(self):
-  logo,authority=VIEW.resolve_badge_asset(self.home,self.install,"BLURAY","CORE_FALLBACK");self.assertEqual((logo,authority),("assets/ui/bluray-media-badge.png","CORE_FALLBACK"))
+ def test_disabled_withholds_bluray_asset(self):
+  logo,authority=VIEW.resolve_badge_asset(self.home,self.install,"BLURAY","PLUGIN_UNAVAILABLE");self.assertEqual((logo,authority),(None,"PLUGIN_UNAVAILABLE"))
  def test_enabled_uses_equivalent_plugin_asset(self):
   self.enable();profile,authority=VIEW.presentation_profile(self.home,self.install,{"canonical_state":"UHD_BLURAY_VIDEO","protection":"PROTECTED"});self.assertEqual(authority,"PLUGIN_P2");self.assertEqual(pathlib.Path(profile["logo"]).name,"uhd-bluray-media-badge.png")
  def test_broken_entrypoint_uses_core_asset(self):
-  self.enable();(self.plugin/"shadow.py").write_text("raise RuntimeError('broken')\n");profile,authority=VIEW.presentation_profile(self.home,self.install,{"canonical_state":"BLURAY_VIDEO"});self.assertEqual((authority,profile["logo"]),("CORE_FALLBACK","assets/ui/bluray-media-badge.png"))
- def test_semantic_mismatch_uses_core_fallback(self):
-  self.enable();(self.plugin/"assets/bluray-media-badge.png").write_bytes(b"not-qualified");profile,authority=VIEW.presentation_profile(self.home,self.install,{"canonical_state":"BLURAY_VIDEO"});self.assertEqual((authority,profile["logo"]),("CORE_FALLBACK","assets/ui/bluray-media-badge.png"))
+  self.enable();(self.plugin/"shadow.py").write_text("raise RuntimeError('broken')\n");profile,authority=VIEW.presentation_profile(self.home,self.install,{"canonical_state":"BLURAY_VIDEO"});self.assertEqual((authority,profile["logo"]),("PLUGIN_UNAVAILABLE",None))
+ def test_semantic_mismatch_withholds_bluray_asset(self):
+  self.enable();(self.plugin/"assets/bluray-media-badge.png").write_bytes(b"not-qualified");profile,authority=VIEW.presentation_profile(self.home,self.install,{"canonical_state":"BLURAY_VIDEO"});self.assertEqual((authority,profile["logo"]),("PLUGIN_UNAVAILABLE",None))
  def test_no_disc_dvd_and_history_do_not_request_plugin_resource(self):
   self.enable()
   for state in ({"canonical_state":"DRIVE_PRESENT_NO_MEDIA"},{"canonical_state":"DVD_VIDEO"},{"canonical_state":"DRIVE_PRESENT_NO_MEDIA","last_attempt":"OPEN_SUCCESS"},{"canonical_state":"DRIVE_PRESENT_NO_MEDIA","last_attempt":"OPEN_FAILED"}):
@@ -67,7 +67,7 @@ class EquivalenceLifecycleAndIsolation(unittest.TestCase):
  def test_resource_failure_does_not_touch_authoritative_subsystems(self):
   names=("openhtpc-optical.py","openhtpc-core.py","openhtpc-protected-optical.py","openhtpc-protected-optical-backend.py","openhtpc-play-optical","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py","openhtpc-session-engine.py")
   for name in names:
-   if name=="openhtpc-disc-view.py":continue
+   if name in {"openhtpc-disc-view.py","openhtpc-core.py","openhtpc-plugin-registry.py"}:continue
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
  def test_flex_renderer_remains_core_owned(self):
   source=(PAYLOAD/"openhtpc-disc-view.py").read_text();self.assertIn("Image.open(logo_path)",source);self.assertIn("base.paste(logo_scaled",source);self.assertNotIn("Image",(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text())

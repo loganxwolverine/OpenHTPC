@@ -173,7 +173,7 @@ OPTICAL_BADGE_KEYS={"NONE","BLURAY","UHD_BLURAY"}
 PROTECTED_CAPABILITY_STATES={"AVAILABLE","NOT_CONFIGURED","NOT_AVAILABLE","BLOCKED"}
 PROTECTED_PLAYBACK_REASONS={"MEDIA_NOT_PLAYABLE","PROTECTION_UNKNOWN","UNPROTECTED_MEDIA","STRUCTURAL_SUPPORT_NOT_AVAILABLE",
  "PROTECTED_SUPPORT_AVAILABLE","PROTECTED_SUPPORT_NOT_CONFIGURED","PROTECTED_SUPPORT_NOT_AVAILABLE","PROTECTED_SUPPORT_BLOCKED",
- "PROTECTION_STATE_INVALID"}
+ "PROTECTION_STATE_INVALID","PLUGIN_REQUIRED","PLUGIN_BROKEN"}
 OPTICAL_UI_ITEM_KINDS={"NONE","OPTICAL_PLAYBACK"}
 OPTICAL_UI_ACTION_INTENTS={"NONE","PLAY_CURRENT_OPTICAL_MEDIA"}
 
@@ -216,13 +216,18 @@ def protected_optical_playback_decision_projection(home:pathlib.Path,install:pat
     """Select a declarative decision authority; Core remains enforcement authority."""
     fallback=core_protected_optical_playback_decision(optical,snapshot)
     plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
-    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+    if not plugin or plugin.get("state")!="AVAILABLE":return _unavailable_playback_decision(optical,"PLUGIN_REQUIRED")
     loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
     try:value=loaded["module"].playback_decision(optical or {},snapshot or {}) if loaded.get("state")=="AVAILABLE" else None
     except (Exception,SystemExit):value=None
     if _valid_protected_optical_playback_decision(value) and value==fallback:return "PLUGIN_P2",value
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PLAYBACK_DECISION_BROKEN"})
-    return "CORE_FALLBACK",fallback
+    return _unavailable_playback_decision(optical,"PLUGIN_BROKEN")
+
+def _unavailable_playback_decision(optical:dict[str,Any]|None,reason:str)->tuple[str,dict[str,Any]]:
+    value=core_protected_optical_playback_decision(optical,{})
+    if value["owned"]:value.update(playback_action="DISABLED",playback_reason=reason,playable=False)
+    return "PLUGIN_UNAVAILABLE",value
 
 def core_protected_optical_ui_contribution(presentation:dict[str,Any]|None,decision:dict[str,Any]|None)->dict[str,Any]:
     """Build declarative Blu-ray/UHD UI data without rendering or execution."""
@@ -254,13 +259,13 @@ def protected_optical_ui_contribution(home:pathlib.Path,install:pathlib.Path,reg
     fallback=core_protected_optical_ui_contribution(presentation,decision)
     plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
     if (not _valid_optical_presentation_descriptor(presentation) or not _valid_protected_optical_playback_decision(decision) or
-            not plugin or plugin.get("state")!="AVAILABLE"):return "CORE_FALLBACK",fallback
+            not plugin or plugin.get("state")!="AVAILABLE"):return "PLUGIN_UNAVAILABLE",core_protected_optical_ui_contribution(None,None)
     loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
     try:value=loaded["module"].ui_contribution(presentation,decision) if loaded.get("state")=="AVAILABLE" else None
     except (Exception,SystemExit):value=None
     if _valid_protected_optical_ui_contribution(value) and value==fallback:return "PLUGIN_P2",value
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_UI_CONTRIBUTION_BROKEN"})
-    return "CORE_FALLBACK",fallback
+    return "PLUGIN_UNAVAILABLE",core_protected_optical_ui_contribution(None,None)
 
 def core_protected_optical_capability(snapshot:dict[str,Any]|None)->dict[str,Any]:
     """Project a Core-generated provider snapshot into the bounded P2 contract."""
@@ -289,13 +294,13 @@ def _valid_protected_optical_capability(value:Any)->bool:
 def protected_optical_capability_projection(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],snapshot:dict[str,Any]|None)->tuple[str,dict[str,Any]]:
     fallback=core_protected_optical_capability(snapshot)
     plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
-    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+    if not plugin or plugin.get("state")!="AVAILABLE":return "PLUGIN_UNAVAILABLE",core_protected_optical_capability(None)
     loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
     try:value=loaded["module"].capability_contribution(snapshot or {}) if loaded.get("state")=="AVAILABLE" else None
     except (Exception,SystemExit):value=None
     if _valid_protected_optical_capability(value) and value==fallback:return "PLUGIN_P2",value
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_CAPABILITY_BROKEN"})
-    return "CORE_FALLBACK",fallback
+    return "PLUGIN_UNAVAILABLE",core_protected_optical_capability(None)
 
 def core_optical_presentation_descriptor(optical:dict[str,Any]|None)->dict[str,Any]:
     """Temporary Core fallback for Blu-ray/UHD presentation selection."""
@@ -317,13 +322,13 @@ def optical_presentation_descriptor(home:pathlib.Path,install:pathlib.Path,regis
     """Select one declarative presentation authority with exact Core fallback."""
     fallback=core_optical_presentation_descriptor(optical)
     plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
-    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",fallback
+    if not plugin or plugin.get("state")!="AVAILABLE":return "PLUGIN_UNAVAILABLE",core_optical_presentation_descriptor({})
     loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
     try:value=loaded["module"].presentation_descriptor(optical or {}) if loaded.get("state")=="AVAILABLE" else None
     except (Exception,SystemExit):value=None
     if _valid_optical_presentation_descriptor(value) and value==fallback:return "PLUGIN_P2",value
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PRESENTATION_BROKEN"})
-    return "CORE_FALLBACK",fallback
+    return "PLUGIN_UNAVAILABLE",core_optical_presentation_descriptor({})
 
 def core_protected_optical_doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
     """Temporary Core fallback for the media-specific Doctor presentation."""
@@ -363,14 +368,14 @@ def _valid_protected_optical_doctor_rows(rows:Any)->bool:
 def protected_optical_doctor_projection(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],inputs:dict[str,Any])->tuple[str,list[dict[str,Any]]]:
     """Select one Doctor authority; optional plugin failures always fall back."""
     plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
-    if not plugin or plugin.get("state")!="AVAILABLE":return "CORE_FALLBACK",core_protected_optical_doctor_rows(inputs)
+    if not plugin or plugin.get("state")!="AVAILABLE":return "PLUGIN_UNAVAILABLE",[]
     loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
     try:rows=loaded["module"].doctor_rows(inputs) if loaded.get("state")=="AVAILABLE" else None
     except (Exception,SystemExit):rows=None
     fallback=core_protected_optical_doctor_rows(inputs)
     if _valid_protected_optical_doctor_rows(rows) and rows==fallback:return "PLUGIN_P2",rows
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_DOCTOR_BROKEN"})
-    return "CORE_FALLBACK",fallback
+    return "PLUGIN_UNAVAILABLE",[]
 
 
 def health_report(home: pathlib.Path, install: pathlib.Path) -> dict[str,Any]:

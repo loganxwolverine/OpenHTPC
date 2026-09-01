@@ -79,15 +79,15 @@ def resolve_badge_asset(home,install,badge_key,plugin_authority):
  core_relative=BADGE_ASSETS.get(badge_key)
  if not core_relative:return None,"CORE_FALLBACK"
  core_path=install/core_relative
- if plugin_authority!="PLUGIN_P2":return core_relative,"CORE_FALLBACK"
+ if plugin_authority!="PLUGIN_P2":return None,"PLUGIN_UNAVAILABLE"
  try:
   registry=load(install/"openhtpc-plugin-registry.py","disc_view_p2_resource_registry")
   selected=registry.resolve_resource(home,install,"plugin.bluray",badge_key)
   candidate=selected.get("path") if selected.get("authority")=="PLUGIN_P2" else None
-  if not isinstance(candidate,pathlib.Path):return core_relative,"CORE_FALLBACK"
-  if hashlib.sha256(candidate.read_bytes()).digest()!=hashlib.sha256(core_path.read_bytes()).digest():return core_relative,"CORE_FALLBACK"
+  if not isinstance(candidate,pathlib.Path):return None,"PLUGIN_UNAVAILABLE"
+  if hashlib.sha256(candidate.read_bytes()).digest()!=hashlib.sha256(core_path.read_bytes()).digest():return None,"PLUGIN_UNAVAILABLE"
   return str(candidate),"PLUGIN_P2"
- except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return core_relative,"CORE_FALLBACK"
+ except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return None,"PLUGIN_UNAVAILABLE"
 
 def presentation_profile(home,install,state):
  """Core-owned key resolution and rendering profile; plugin supplies data only."""
@@ -97,11 +97,13 @@ def presentation_profile(home,install,state):
  try:
   core=load(core_path,"disc_view_p2_core");registry=core.plugin_status(home,install)
   authority,descriptor=core.optical_presentation_descriptor(home,install,registry,state)
-  if not descriptor["owned"]:return fallback,authority
+  if not descriptor["owned"]:
+   return (MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"],authority) if canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} else (fallback,authority)
   logo,resource_authority=resolve_badge_asset(home,install,descriptor["badge_key"],authority)
-  if not logo:return fallback,"CORE_FALLBACK"
+  if not logo:return MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"],"PLUGIN_UNAVAILABLE"
   return {**fallback,"badge":descriptor["display_label"],"logo":logo},resource_authority
- except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return fallback,"CORE_FALLBACK"
+ except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):
+  return (MEDIA_PROFILES["UNKNOWN_OPTICAL_MEDIA"],"PLUGIN_UNAVAILABLE") if canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} else (fallback,"CORE_FALLBACK")
 
 # ─── Task A: Physical-media logo overlay — top-right corner of poster ────────
 #

@@ -167,8 +167,8 @@ def resolve_resource(home:pathlib.Path,install:pathlib.Path,plugin_id:str,resour
  """Resolve one allowlisted local resource; callers retain all file-reading authority."""
  if resource_key not in RESOURCE_KEYS:return {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_KEY_INVALID"}
  value=registry(home,install);plugin=next((item for item in value["plugins"] if item["id"]==plugin_id),None)
- if not plugin or plugin.get("state")!="AVAILABLE":return {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_UNAVAILABLE"}
+ if not plugin or plugin.get("state")!="AVAILABLE":return {"authority":"PLUGIN_UNAVAILABLE","reason":"PLUGIN_RESOURCE_UNAVAILABLE"}
  relative=(plugin.get("resources") or {}).get(resource_key);root=paths(home,install)["available"][0 if plugin["origin"]=="project" else 1]/plugin_id
  target=_safe_resource(root,relative)
  return ({"authority":"PLUGIN_P2","resource_key":resource_key,"path":target} if target else
-         {"authority":"CORE_FALLBACK","reason":"PLUGIN_RESOURCE_INVALID"})
+         {"authority":"PLUGIN_UNAVAILABLE","reason":"PLUGIN_RESOURCE_INVALID"})

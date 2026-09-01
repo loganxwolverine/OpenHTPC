@@ -53,7 +53,7 @@ class Authority(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir()
   (self.install/"VERSION").write_text("1.2.0-dev7\n");shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
  def registry(self):return REGISTRY.registry(self.home,self.install)
- def test_disabled_selects_core(self):self.assertEqual(CORE.protected_optical_playback_decision_projection(self.home,self.install,self.registry(),optical(),snapshot())[0],"CORE_FALLBACK")
+ def test_disabled_withholds_plugin_policy(self):self.assertEqual(CORE.protected_optical_playback_decision_projection(self.home,self.install,self.registry(),optical(),snapshot())[0],"PLUGIN_UNAVAILABLE")
  def test_enabled_selects_plugin(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);authority,value=CORE.protected_optical_playback_decision_projection(self.home,self.install,self.registry(),optical(),snapshot());self.assertEqual((authority,value["playback_action"]),("PLUGIN_P2","ENABLED"))
  def test_capability_state_publishes_projection_without_mutating_sources(self):
@@ -62,7 +62,7 @@ class Authority(unittest.TestCase):
   self.assertEqual(state["PROTECTED_OPTICAL_PLAYBACK_DECISION_AUTHORITY"],"PLUGIN_P2");self.assertEqual(state["PROTECTED_OPTICAL_PLAYBACK_DECISION"]["playback_action"],"ENABLED");self.assertEqual(json.loads(cap_path.read_text()),cap);self.assertEqual(json.loads(state_path.read_text()),disc)
  def test_broken_or_mismatch_selects_core(self):
   REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True);source=(self.plugin/"shadow.py").read_text();(self.plugin/"shadow.py").write_text(source.replace('"playback_reason":reason','"playback_reason":"UNKNOWN"'))
-  registry=self.registry();authority,value=CORE.protected_optical_playback_decision_projection(self.home,self.install,registry,optical(),snapshot());self.assertEqual(authority,"CORE_FALLBACK");self.assertEqual(value["playback_reason"],"PROTECTED_SUPPORT_AVAILABLE");self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
+  registry=self.registry();authority,value=CORE.protected_optical_playback_decision_projection(self.home,self.install,registry,optical(),snapshot());self.assertEqual(authority,"PLUGIN_UNAVAILABLE");self.assertEqual((value["playback_action"],value["playback_reason"]),("DISABLED","PLUGIN_BROKEN"));self.assertEqual(registry["plugins"][0]["state"],"BROKEN")
 
 class Boundaries(unittest.TestCase):
  def test_plugin_decision_has_no_execution_or_probe_primitives(self):
