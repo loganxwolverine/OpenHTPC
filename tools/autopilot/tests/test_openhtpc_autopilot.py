@@ -26,7 +26,9 @@ def review(**updates):
 
 class Contracts(unittest.TestCase):
  @classmethod
- def setUpClass(cls):cls.root=MODULE_PATH.parents[2]
+ def setUpClass(cls):
+  cls.root=MODULE_PATH.parents[2]
+  cls.executor_schema=A.load_json(A.schema_path(cls.root,"executor-report.schema.json"))
  def test_01_valid_plan_parsing(self):A.validate_document(self.root,plan(),"plan.schema.json")
  def test_02_invalid_plan_rejected(self):
   with self.assertRaises(A.AutopilotError):A.validate_document(self.root,{"schema_version":1},"plan.schema.json")
@@ -43,6 +45,31 @@ class Contracts(unittest.TestCase):
   value={"status":"SUCCESS","response":"ok","structured_output":plan()};self.assertEqual(A.parse_antigravity_outer(json.dumps(value)),plan())
   for status in ("ERROR","WAITING","CANCELED","INTERRUPTED","INVALID"):
    with self.assertRaisesRegex(A.AutopilotError,"STATUS"):A.parse_antigravity_outer(json.dumps({"status":status,"structured_output":plan()}))
+ def test_08_executor_schema_is_codex_compatible_and_strict(self):
+  schema=self.executor_schema
+  self.assertEqual(schema["properties"]["schema_version"]["type"],"integer")
+  def audit(node):
+   if not isinstance(node,dict):return
+   if "const" in node or "enum" in node:self.assertIn("type",node)
+   if node.get("type")=="object":
+    self.assertIsInstance(node.get("properties"),dict);self.assertEqual(set(node["required"]),set(node["properties"]));self.assertIs(node.get("additionalProperties"),False)
+   for value in node.values():
+    if isinstance(value,dict):audit(value)
+    elif isinstance(value,list):
+     for item in value:audit(item)
+  audit(schema)
+ def test_09_executor_test_evidence_contract_is_required(self):
+  tests=self.executor_schema["properties"]["tests"]
+  self.assertEqual(tests["type"],"array");self.assertEqual(tests["items"]["type"],"object")
+  self.assertEqual(set(tests["items"]["required"]),{"command","return_code","result"})
+ def test_10_valid_executor_report_passes_local_validation(self):
+  self.assertEqual(A.validate_document(self.root,report(),"executor-report.schema.json"),report())
+ def test_11_invalid_executor_schema_version_is_rejected(self):
+  with self.assertRaises(A.AutopilotError):A.validate_document(self.root,report(schema_version=2),"executor-report.schema.json")
+ def test_12_malformed_executor_test_evidence_is_rejected(self):
+  for evidence in ([{"command":"test","return_code":0}],[{"command":"test","return_code":"0","result":"PASS"}],[{"command":"test","return_code":0,"result":"UNKNOWN"}]):
+   with self.subTest(evidence=evidence):
+    with self.assertRaises(A.AutopilotError):A.validate_document(self.root,report(tests=evidence),"executor-report.schema.json")
 
 class Policy(unittest.TestCase):
  def test_08_before_execution_gate_stops(self):self.assertEqual(A.policy_evaluate(plan(human_gate_stage="BEFORE_EXECUTION",gate_reason="OTHER"))["stage"],"BEFORE_EXECUTION")
