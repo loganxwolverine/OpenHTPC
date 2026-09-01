@@ -151,14 +151,18 @@ class ProtectedOpticalDoctor(unittest.TestCase):
                 report = CORE.health_report(home, install)
             statuses = {item["label"]:item["status"] for item in report["checks"]}
             self.assertEqual(report["overall"], "READY")
-            self.assertEqual(statuses["Protected optical media"], "NOT_CONFIGURED")
-            self.assertEqual(statuses["libbdplus"], "NOT_AVAILABLE")
-            self.assertEqual(statuses["Last protected disc attempt"], "OPEN_FAILED")
-            self.assertEqual(statuses["Optical media family"], "BLURAY")
-            self.assertEqual(statuses["Optical exact type"], "UHD_BLURAY")
-            self.assertEqual(statuses["Optical protection"], "PROTECTED")
-            self.assertEqual(statuses["Protection mechanism"], "AACS")
-            self.assertEqual(statuses["Classification source"], "LIBBLURAY")
+            self.assertEqual(report["protected_optical_doctor_authority"], "PLUGIN_UNAVAILABLE")
+            plugin_owned = {
+                "Protected optical media", "libbluray", "libaacs", "libbdplus",
+                "External key database", "Protected optical playback",
+                "Last protected disc attempt", "Optical media family",
+                "Optical exact type", "Optical protection", "Protection mechanism",
+                "Classification source",
+            }
+            self.assertTrue(plugin_owned.isdisjoint(statuses))
+            self.assertEqual(statuses["Canonical optical state"], "NOT_INITIALIZED")
+            self.assertEqual(statuses["Optical Detection"], "NOT_INITIALIZED")
+            self.assertEqual(statuses["DVD"], "UNAVAILABLE")
             optional = {item["label"]:item["status"] for item in report["optional"]}
             self.assertEqual(optional["Blu-ray"], "NOT_INSTALLED")
             self.assertEqual(optional["UHD"], "NOT_INSTALLED")
