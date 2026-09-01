@@ -25,6 +25,14 @@ step. `--until-gate` replans after each accepted local commit, has a hard limit
 of five, and stops at every failure, rejection, gate, dirty tree or no-work
 decision. Press Ctrl-C to stop; subprocess timeouts also fail closed.
 
+The offline doctor reports `local_openhtpc_runtime_active=True/False` without
+making an otherwise healthy doctor fail. Planning remains permitted while an
+installed OPENHTPC runtime is active. Immediately before Codex execution,
+`run` checks current-user processes deterministically; detected runtime
+processes produce `LOCAL_OPENHTPC_RUNTIME_ACTIVE`, bounded names/PIDs, and
+state `AWAITING_LOCAL_RUNTIME_STOP` with gate reason `LOCAL_RUNTIME_ACTIVE`.
+Autopilot never stops or kills those processes.
+
 The Codex online doctor is a minimal read-only text heartbeat requiring the
 exact output `CODEX_OK`; it does not use a response schema. The real Codex
 executor remains a separate workspace-write path with its strict structured

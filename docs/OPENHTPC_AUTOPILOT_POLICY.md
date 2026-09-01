@@ -36,6 +36,12 @@ code test evidence, and pass `git diff --check`. New diff text is scanned for
 plausible credentials before review. Secrets are redacted from retained agent
 output and prohibited from bounded state metadata.
 
+After planning and deterministic plan/policy validation, but before Codex
+execution, Autopilot checks current-user processes for an active installed
+OPENHTPC runtime. If found, it reports bounded process names/PIDs and stops at
+`AWAITING_LOCAL_RUNTIME_STOP`; it never stops or kills the runtime. This check
+does not prevent read-only planning or make the ordinary offline doctor fail.
+
 Only an independent Antigravity `ACCEPT`, complete deterministic checks and explicit
 test evidence permit a local commit. `REJECT` preserves the workspace without
 commit or reset. An after-implementation physical gate may permit an accepted

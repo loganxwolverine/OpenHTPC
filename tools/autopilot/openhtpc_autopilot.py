@@ -173,6 +173,38 @@ def codex_doctor_success(result:subprocess.CompletedProcess[str],output:pathlib.
  try:return output.read_text(encoding="utf-8").strip()=="CODEX_OK"
  except (OSError,UnicodeError):return False
 
+def _installed_runtime_name(argv:list[str],home:pathlib.Path)->str|None:
+ if not argv:return None
+ runtime_root=home/".local/lib/openhtpc";bin_root=home/".local/bin"
+ for index,raw in enumerate(argv):
+  if not raw:continue
+  path=pathlib.Path(raw);name=path.name
+  in_runtime=path.is_absolute() and (path==runtime_root or runtime_root in path.parents)
+  in_bin=path.is_absolute() and path.parent==bin_root
+  if name in {"openhtpc-home.py","openhtpc-optical-monitor"} and in_runtime:return name
+  if name=="openhtpc-session-start" and (in_runtime or in_bin or index==0):return name
+  if name=="flex-launcher" and in_runtime:return name
+ return None
+
+def local_openhtpc_runtime_processes(proc_root:pathlib.Path=pathlib.Path("/proc"),home:pathlib.Path|None=None,limit:int=16)->list[dict[str,Any]]:
+ home=(home or pathlib.Path.home()).resolve();found=[];uid=os.getuid()
+ try:entries=sorted((entry for entry in proc_root.iterdir() if entry.name.isdigit()),key=lambda entry:int(entry.name))
+ except OSError:return []
+ for entry in entries:
+  if len(found)>=limit:break
+  try:
+   if entry.stat().st_uid!=uid:continue
+   raw=(entry/"cmdline").read_bytes()[:65536]
+  except OSError:continue
+  argv=[item.decode("utf-8",errors="replace") for item in raw.split(b"\0") if item]
+  name=_installed_runtime_name(argv,home)
+  if name:found.append({"pid":int(entry.name),"name":name})
+ return found
+
+def print_local_runtime_stop(processes:list[dict[str,Any]])->None:
+ print("LOCAL_OPENHTPC_RUNTIME_ACTIVE")
+ for process in processes:print(f"process={process['name']} pid={process['pid']}")
+
 def secret_findings(text:str)->list[dict[str,str]]:
  findings=[]
  for label,pattern in SECRET_PATTERNS:
@@ -305,6 +337,9 @@ class Autopilot:
   run_dir,plan,policy=self.plan()
   if not plan_has_executable_step(plan):self.update_state(status="NO_USEFUL_WORK",current_gate="NONE",gate_reason="NONE");return "NO_USEFUL_WORK"
   if policy["decision"] in {"FORBIDDEN","HUMAN_GATE"}:self.update_state(status="AWAITING_HUMAN_GATE",current_gate=policy["stage"],gate_reason=policy["reason"]);return "AWAITING_HUMAN_GATE"
+  processes=local_openhtpc_runtime_processes()
+  if processes:
+   print_local_runtime_stop(processes);self.update_state(status="AWAITING_LOCAL_RUNTIME_STOP",current_gate="BEFORE_EXECUTION",gate_reason="LOCAL_RUNTIME_ACTIVE");return "AWAITING_LOCAL_RUNTIME_STOP"
   report=self.execute(run_dir,plan);review=self.reviewer(run_dir,plan,report)
   if review["verdict"]=="REJECT":self.update_state(status="REVIEW_REJECTED",current_gate="NONE",gate_reason="NONE");return "REVIEW_REJECTED"
   if review["verdict"]=="HUMAN_GATE" and review["human_gate_stage"]=="BEFORE_EXECUTION":self.update_state(status="AWAITING_HUMAN_GATE",current_gate="BEFORE_EXECUTION",gate_reason=review["gate_reason"]);return "AWAITING_HUMAN_GATE"
@@ -314,7 +349,7 @@ class Autopilot:
   status="AWAITING_PHYSICAL_VALIDATION" if after_gate and (policy["reason"]=="PHYSICAL_VALIDATION" or review["gate_reason"]=="PHYSICAL_VALIDATION") else "AWAITING_HUMAN_GATE" if after_gate else "ACCEPTED"
   self.update_state(status=status,last_accepted_commit=commit,head=commit,current_gate="AFTER_IMPLEMENTATION" if after_gate else "NONE",gate_reason=policy["reason"] if after_gate else "NONE");return status
  def doctor(self,online:bool=False)->int:
-  checks={"repository_root":self.root.is_dir(),"git_repository":(self.root/".git").exists(),"python":sys.version_info>=(3,10),"antigravity":bool(shutil.which("agy")),"codex":bool(shutil.which("codex")),"agents":(self.root/"AGENTS.md").is_file(),"gemini_md":(self.root/"GEMINI.md").is_file(),"policy":True}
+  checks={"repository_root":self.root.is_dir(),"git_repository":(self.root/".git").exists(),"python":sys.version_info>=(3,10),"antigravity":bool(shutil.which("agy")),"codex":bool(shutil.which("codex")),"agents":(self.root/"AGENTS.md").is_file(),"gemini_md":(self.root/"GEMINI.md").is_file(),"policy":True,"local_openhtpc_runtime_active":bool(local_openhtpc_runtime_processes())}
   try:context=git_context(self.root,require_clean=False);checks["git_status"]="CLEAN" if not context["status"] else "DIRTY";checks["branch"]=context["branch"]
   except AutopilotError:checks["git_status"]="ERROR"
   for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json","project-state.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
@@ -335,7 +370,8 @@ class Autopilot:
     output=pathlib.Path(raw)/"out.txt";command=self._codex_doctor_command(output);before=workspace_fingerprint(self.root)
     codex=run_command(command,self.root,self.codex_doctor_timeout);require_workspace_unchanged(before,workspace_fingerprint(self.root),"CODEX_DOCTOR_MUTATED_WORKSPACE");checks["codex_online"]=codex_doctor_success(codex,output)
   print("OPENHTPC AUTOPILOT DOCTOR");[print(f"{key}={value}") for key,value in checks.items()]
-  return 0 if all(value not in {False,"ERROR"} for value in checks.values()) else 1
+  required={key:value for key,value in checks.items() if key!="local_openhtpc_runtime_active"}
+  return 0 if all(value not in {False,"ERROR"} for value in required.values()) else 1
 
 def bounded_steps(value:int)->int:
  if value<1 or value>5:raise AutopilotError("MAX_STEPS_INVALID")

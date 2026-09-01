@@ -101,6 +101,48 @@ class ProcessAndPreflight(unittest.TestCase):
    with mock.patch.object(A.shutil,"which",side_effect=lookup),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):pilot.doctor(False)
    self.assertNotIn("gemini",calls);self.assertIn("agy",calls)
 
+class LocalRuntimeIsolation(unittest.TestCase):
+ def setUp(self):self.home=pathlib.Path("/home/tester")
+ def classify(self,*argv):return A._installed_runtime_name(list(argv),self.home)
+ def test_29_no_runtime_allows_execution_to_continue(self):
+  pilot=A.Autopilot(MODULE_PATH.parents[2]);run_dir=pathlib.Path("/tmp/run");calls=[]
+  with mock.patch.object(pilot,"plan",return_value=(run_dir,plan(),A.policy_evaluate(plan()))),mock.patch.object(A,"local_openhtpc_runtime_processes",return_value=[]),mock.patch.object(pilot,"execute",side_effect=lambda *_:calls.append("execute") or report()),mock.patch.object(pilot,"reviewer",return_value=review()),mock.patch.object(pilot,"commit",return_value="b"*40),mock.patch.object(pilot,"update_state"):
+   self.assertEqual(pilot.run_once(),"ACCEPTED")
+  self.assertEqual(calls,["execute"])
+ def test_30_detects_canonical_installed_runtime_forms(self):
+  cases=(("python3",str(self.home/".local/lib/openhtpc/openhtpc-home.py"),"openhtpc-home.py"),("bash",str(self.home/".local/lib/openhtpc/openhtpc-optical-monitor"),"openhtpc-optical-monitor"),("systemd-inhibit",str(self.home/".local/bin/openhtpc-session-start"),"openhtpc-session-start"),(str(self.home/".local/lib/openhtpc/flex/bin/flex-launcher"),"flex-launcher"))
+  for case in cases:
+   with self.subTest(case=case):self.assertEqual(self.classify(*case[:-1]),case[-1])
+ def test_31_unrelated_flex_and_prompt_text_do_not_match(self):
+  self.assertIsNone(self.classify("/opt/other/flex-launcher"))
+  self.assertIsNone(self.classify("rg","openhtpc-home.py",str(self.home/"source/test_openhtpc-optical-monitor.py"),"prompt mentions openhtpc-session-start"))
+ def test_32_proc_scan_is_current_user_bounded_and_structured(self):
+  with tempfile.TemporaryDirectory() as raw:
+   proc=pathlib.Path(raw);entry=proc/"4321";entry.mkdir();(entry/"cmdline").write_bytes(b"python3\0"+str(self.home/".local/lib/openhtpc/openhtpc-home.py").encode()+b"\0")
+   self.assertEqual(A.local_openhtpc_runtime_processes(proc,self.home),[{"pid":4321,"name":"openhtpc-home.py"}])
+ def test_33_active_runtime_blocks_executor_and_records_gate(self):
+  pilot=A.Autopilot(MODULE_PATH.parents[2]);processes=[{"pid":123,"name":"openhtpc-home.py"}]
+  with mock.patch.object(pilot,"plan",return_value=(pathlib.Path("/tmp/run"),plan(),A.policy_evaluate(plan()))),mock.patch.object(A,"local_openhtpc_runtime_processes",return_value=processes),mock.patch.object(pilot,"execute") as execute,mock.patch.object(pilot,"update_state") as state,contextlib.redirect_stdout(io.StringIO()) as output:
+   self.assertEqual(pilot.run_once(),"AWAITING_LOCAL_RUNTIME_STOP")
+  execute.assert_not_called();state.assert_called_once_with(status="AWAITING_LOCAL_RUNTIME_STOP",current_gate="BEFORE_EXECUTION",gate_reason="LOCAL_RUNTIME_ACTIVE");self.assertIn("process=openhtpc-home.py pid=123",output.getvalue())
+ def test_34_plan_remains_independent_of_runtime_detection(self):
+  import inspect
+  self.assertNotIn("local_openhtpc_runtime_processes",inspect.getsource(A.Autopilot.plan))
+ def test_35_doctor_reports_runtime_without_making_it_failure(self):
+  pilot=A.Autopilot(MODULE_PATH.parents[2])
+  with mock.patch.object(A,"local_openhtpc_runtime_processes",return_value=[{"pid":1,"name":"openhtpc-home.py"}]),mock.patch.object(A.shutil,"which",return_value="/bin/true"),contextlib.redirect_stdout(io.StringIO()) as output:
+   result=pilot.doctor(False)
+  self.assertEqual(result,0);self.assertIn("local_openhtpc_runtime_active=True",output.getvalue())
+ def test_36_detection_has_no_process_control(self):
+  import inspect
+  source=inspect.getsource(A.local_openhtpc_runtime_processes)+inspect.getsource(A.print_local_runtime_stop)
+  self.assertNotIn("os.kill(",source);self.assertNotIn("subprocess",source)
+ def test_37_existing_human_gate_precedes_runtime_check(self):
+  pilot=A.Autopilot(MODULE_PATH.parents[2]);gated=plan(human_gate_stage="BEFORE_EXECUTION",gate_reason="OTHER")
+  with mock.patch.object(pilot,"plan",return_value=(pathlib.Path("/tmp/run"),gated,A.policy_evaluate(gated))),mock.patch.object(A,"local_openhtpc_runtime_processes") as detection,mock.patch.object(pilot,"update_state"):
+   self.assertEqual(pilot.run_once(),"AWAITING_HUMAN_GATE")
+  detection.assert_not_called()
+
 class AntigravityReadonlyHeadless(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
