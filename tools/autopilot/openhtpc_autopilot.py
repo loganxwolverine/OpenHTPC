@@ -246,6 +246,10 @@ class Autopilot:
   return run_command(self._agy_command(prompt,schema,timeout),self.root,timeout+15)
  def _codex_doctor_command(self,output:pathlib.Path)->list[str]:
   return ["codex","exec","--sandbox","read-only","--ephemeral","-C",str(self.root),"-o",str(output),"Réponds exactement et uniquement : CODEX_OK"]
+ def _codex_executor_command(self,report_path:pathlib.Path)->list[str]:
+  command=["codex","exec","--approve-for-me","--ephemeral","-C",str(self.root),"--output-schema",str(schema_path(self.root,"executor-report.schema.json")),"-o",str(report_path),"-"]
+  model=os.environ.get("OPENHTPC_CODEX_MODEL");command[2:2]=["--model",model] if model else []
+  return command
  def plan(self,run_id:str|None=None)->tuple[pathlib.Path,dict[str,Any],dict[str,Any]]:
   self.ensure_runtime();context=self.context();run_id=run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8];run_dir=self.runs/run_id;run_dir.mkdir()
   context["run_id"]=run_id;self.write_json(run_dir/"context.json",context)
@@ -263,8 +267,7 @@ class Autopilot:
   return run_dir,plan,policy
  def execute(self,run_dir:pathlib.Path,plan:dict[str,Any])->dict[str,Any]:
   before=git(self.root,"rev-parse","HEAD");prompt=(self.root/"tools/autopilot/prompts/executor.md").read_text()+"\n\nAGENTS:\n"+(self.root/"AGENTS.md").read_text()+"\n\nVALIDATED PLAN:\n"+json.dumps(plan,indent=2)+"\nHEAD BEFORE: "+before+"\nDO NOT COMMIT\nDO NOT PUSH\n"
-  report_path=run_dir/"executor-report.json";command=["codex","exec","--sandbox","workspace-write","--approve-for-me","--ephemeral","-C",str(self.root),"--output-schema",str(schema_path(self.root,"executor-report.schema.json")),"-o",str(report_path),"-"]
-  model=os.environ.get("OPENHTPC_CODEX_MODEL");command[2:2]=["--model",model] if model else []
+  report_path=run_dir/"executor-report.json";command=self._codex_executor_command(report_path)
   result=run_command(command,self.root,self.executor_timeout,prompt);(run_dir/"codex.stderr.log").write_text(redact_text(result.stderr),encoding="utf-8")
   if result.returncode:raise AutopilotError("EXECUTOR_FAILED")
   report=validate_document(self.root,load_json(report_path),"executor-report.schema.json");after=git(self.root,"rev-parse","HEAD")

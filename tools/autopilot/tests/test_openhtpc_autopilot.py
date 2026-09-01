@@ -159,7 +159,14 @@ class AntigravityReadonlyHeadless(unittest.TestCase):
   before={"head":"a","status":"","paths":[],"digest":"1"};after={**before,"paths":["changed"],"digest":"2"}
   with self.assertRaisesRegex(A.AutopilotError,"CODEX_DOCTOR_MUTATED_WORKSPACE"):A.require_workspace_unchanged(before,after,"CODEX_DOCTOR_MUTATED_WORKSPACE")
  def test_50_normal_executor_keeps_structured_report_contract(self):
-  source=MODULE_PATH.read_text(encoding="utf-8");self.assertIn('"--sandbox","workspace-write","--approve-for-me"',source);self.assertIn('"--output-schema",str(schema_path(self.root,"executor-report.schema.json"))',source)
+  report_path=pathlib.Path("/tmp/executor-report.json");command=self.pilot._codex_executor_command(report_path)
+  self.assertIn("--approve-for-me",command);self.assertNotIn("--sandbox",command);self.assertNotIn("danger-full-access",command)
+  self.assertIn("--ephemeral",command);self.assertEqual(pathlib.Path(command[command.index("--output-schema")+1]).name,"executor-report.schema.json")
+  self.assertEqual(pathlib.Path(command[command.index("-o")+1]),report_path)
+ def test_51_executor_prompt_and_safety_guards_remain(self):
+  source=MODULE_PATH.read_text(encoding="utf-8")
+  for contract in ('DO NOT COMMIT\\nDO NOT PUSH\\n','head_unchanged(before,after)','scope_violations(paths,plan["allowed_paths"])'):
+   self.assertIn(contract,source)
 
 class CanonicalProjectState(unittest.TestCase):
  @classmethod
