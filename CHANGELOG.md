@@ -1,5 +1,10 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 UI Gating — 1.2.0-dev14
+
+- Prevents protected-optical play actions from remaining visible when `plugin.bluray` is disabled, absent or broken.
+- Preserves Core-owned DVD behavior and awaits physical qualification.
+
 # OPENHTPC Plugin Framework P2 Production Cutover — 1.2.0-dev13
 
 - Identifies the production plugin cutover software candidate, awaiting physical qualification.

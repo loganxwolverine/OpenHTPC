@@ -15,6 +15,8 @@
   ],
   "current_phase": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE",
   "default_behavior_change_expected": true,
+  "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
+  "dev14_physical_qualification": "PENDING",
   "hardware_io_ownership_change": false,
   "next_action": "PHYSICAL_VALIDATION",
   "next_action_context": {
@@ -34,5 +36,6 @@
   "schema_version": 1,
   "security_boundary_change": false,
   "software_implementation_allowed": false,
+  "ui_gating_regression_fix": "COMPLETE",
   "workstream": "PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2"
 }

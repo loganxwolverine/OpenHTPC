@@ -6,6 +6,8 @@
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
     "current_phase": {"const": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE"},
     "default_behavior_change_expected": {"type": "boolean"},
+    "dev13_physical_qualification": {"const": "FAILED_DISABLED_UI_GATING"},
+    "dev14_physical_qualification": {"const": "PENDING"},
     "hardware_io_ownership_change": {"type": "boolean"},
     "next_action": {"const": "PHYSICAL_VALIDATION"},
     "next_action_context": {
@@ -30,6 +32,7 @@
     "schema_version": {"const": 1},
     "security_boundary_change": {"type": "boolean"},
     "software_implementation_allowed": {"type": "boolean"},
+    "ui_gating_regression_fix": {"const": "COMPLETE"},
     "workstream": {"const": "PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2"}
   },
   "required": [
@@ -38,9 +41,10 @@
     "next_action_kind", "software_implementation_allowed",
     "physical_validation_required_after_implementation", "required_human_gate_stage",
     "required_gate_reason", "default_behavior_change_expected",
+    "dev13_physical_qualification", "dev14_physical_qualification",
     "hardware_io_ownership_change", "security_boundary_change",
     "next_step_after_software", "plugin_policy_feature_owner",
-    "core_remains_owner_of", "next_action_context"
+    "core_remains_owner_of", "next_action_context", "ui_gating_regression_fix"
   ],
   "type": "object"
 }
