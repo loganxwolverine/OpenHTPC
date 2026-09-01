@@ -92,7 +92,7 @@ class Boundaries(unittest.TestCase):
   source=(PAYLOAD/"openhtpc-optical.py").read_text();self.assertIn('runner(["udevadm"',source);self.assertIn("_libbluray_disc_info",source);self.assertIn('atomic_json(home/".local/state/openhtpc/optical-current.json",value)',source)
   self.assertNotIn("atomic_json",inspect.getsource(PLUGIN.classify_probe_facts))
  def test_production_security_and_media_sources_unchanged(self):
-  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-session-engine.py","openhtpc-disc-sheet.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
  def test_prior_p2_contracts_remain_equivalent(self):

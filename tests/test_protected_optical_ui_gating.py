@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery,importlib.util
 import json
 import pathlib
+import shutil
 import tempfile
 import unittest
 
@@ -12,7 +13,9 @@ def load(name,path):
  loader=importlib.machinery.SourceFileLoader(name,str(path));spec=importlib.util.spec_from_loader(name,loader);module=importlib.util.module_from_spec(spec);loader.exec_module(module);return module
 OPTICAL=load("phase2_optical",PAYLOAD/"openhtpc-optical.py")
 SESSION=load("phase2_session",PAYLOAD/"openhtpc-session-engine.py")
+DISC_SHEET=load("phase2_disc_sheet",PAYLOAD/"openhtpc-disc-sheet.py")
 DISPATCH=load("phase2_dispatch",PAYLOAD/"openhtpc-play-optical")
+REGISTRY=load("phase2_registry",PAYLOAD/"openhtpc-plugin-registry.py")
 
 def capability(status="NOT_CONFIGURED",bluray="AVAILABLE",bdplus="NOT_AVAILABLE"):
  return {"capability":"PROTECTED_OPTICAL_SUPPORT","status":status,
@@ -61,12 +64,16 @@ class MenuAndDispatcher(unittest.TestCase):
   (self.home/".local/state/openhtpc/optical-current.json").write_text(json.dumps(optical_state))
   (self.home/".config/openhtpc/runtime/capabilities.json").write_text(json.dumps({"optical":{"protected_media":model}}))
  def menu(self,optical_state):return SESSION.disc_menu_entries(optical_state,PAYLOAD,self.icons,self.home)
+ def sheet_menu(self,optical_state,install=PAYLOAD):
+  data={"state":optical_state,"title":"FIXTURE","metadata":{"status":"NOT_CONFIGURED"},"artwork":self.icons[0],"duration":None}
+  return DISC_SHEET.write_menu(self.home,install,data).read_text()
+ def enable(self,install=PAYLOAD):REGISTRY.set_enabled(self.home,install,"plugin.bluray",True)
  def test_disabled_action_is_not_emitted_and_clear_reason_is_shown(self):
-  current=state();self.write(current,capability("NOT_CONFIGURED"));text=self.menu(current)
+  self.enable();current=state();self.write(current,capability("NOT_CONFIGURED"));text=self.menu(current)
   self.assertNotIn("openhtpc-play-optical",text);self.assertIn("SUPPORT PROTÉGÉ NON CONFIGURÉ",text);self.assertIn("NE FOURNIT PAS DE CLÉS AACS",text)
  def test_available_action_is_generation_bound(self):
-  current=state();self.write(current,capability("AVAILABLE"));text=self.menu(current)
-  self.assertIn("openhtpc-play-optical --device /dev/sr0 --generation 7",text)
+  self.enable();current=state();self.write(current,capability("AVAILABLE"));text=self.menu(current)
+  self.assertIn("openhtpc-play-optical --device /dev/sr0 --generation 7",text);self.assertIn("openhtpc-play-optical",self.sheet_menu(current))
  def test_forged_or_stale_action_is_refused_server_side(self):
   current=state();self.write(current,capability("NOT_AVAILABLE"))
   unavailable=OPTICAL.playback_action_token(current,capability("NOT_AVAILABLE"))
@@ -76,10 +83,30 @@ class MenuAndDispatcher(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,"STALE_OPTICAL_GENERATION"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr0",6,token,lambda _device:True)
   with self.assertRaisesRegex(ValueError,"OPTICAL_DEVICE_MISMATCH"):DISPATCH.authorize(self.home,PAYLOAD,"/dev/sr1",7,token,lambda _device:True)
  def test_next_menu_generation_reflects_capability_refresh(self):
-  current=state();self.write(current,capability("NOT_CONFIGURED"));before=self.menu(current)
+  self.enable();current=state();self.write(current,capability("NOT_CONFIGURED"));before=self.menu(current)
   self.write(current,capability("AVAILABLE"));after=self.menu(current)
   self.assertNotIn("openhtpc-play-optical",before);self.assertIn("openhtpc-play-optical",after)
   self.assertIn("protected_capability_signature",(PAYLOAD/"openhtpc-home.py").read_text())
+ def test_physically_observed_disabled_plugin_withholds_bluray_play_action(self):
+  current={**state(),"playable":False,"playback_status":"PLUGIN_REQUIRED"};self.write(current,capability("AVAILABLE"))
+  plugin=next(item for item in REGISTRY.registry(self.home,PAYLOAD)["plugins"] if item["id"]=="plugin.bluray")
+  self.assertEqual(plugin["state"],"DISABLED")
+  text=self.menu(current);self.assertNotIn("LIRE LE BLU-RAY",text);self.assertNotIn("openhtpc-play-optical",text);self.assertNotIn("openhtpc-play-optical",self.sheet_menu(current))
+ def test_broken_plugin_withholds_bluray_play_action(self):
+  install=self.home/"broken-install";install.mkdir();shutil.copy2(PAYLOAD/"VERSION",install/"VERSION");shutil.copy2(PAYLOAD/"openhtpc-core.py",install/"openhtpc-core.py");shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",install/"openhtpc-plugin-registry.py")
+  plugin=install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",plugin);source=(plugin/"shadow.py").read_text();(plugin/"shadow.py").write_text(source.replace('"playback_reason":reason','"playback_reason":"INVALID"'))
+  self.enable(install);current=state();self.write(current,capability("AVAILABLE"));text=SESSION.disc_menu_entries(current,install,self.icons,self.home)
+  self.assertNotIn("LIRE LE BLU-RAY",text);self.assertNotIn("openhtpc-play-optical",text)
+ def test_absent_plugin_withholds_bluray_play_action(self):
+  install=self.home/"absent-install";install.mkdir();shutil.copy2(PAYLOAD/"VERSION",install/"VERSION");shutil.copy2(PAYLOAD/"openhtpc-core.py",install/"openhtpc-core.py");shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",install/"openhtpc-plugin-registry.py")
+  current=state();self.write(current,capability("AVAILABLE"));text=SESSION.disc_menu_entries(current,install,self.icons,self.home)
+  self.assertNotIn("LIRE LE BLU-RAY",text);self.assertNotIn("openhtpc-play-optical",text)
+ def test_available_uhd_action_remains_generation_bound(self):
+  self.enable();current=state("UHD_BLURAY_VIDEO");self.write(current,capability("AVAILABLE"));text=self.menu(current)
+  self.assertIn("LIRE LE UHD BLU-RAY",text);self.assertIn("openhtpc-play-optical --device /dev/sr0 --generation 7",text)
+ def test_dvd_action_remains_core_owned(self):
+  current=state("DVD_VIDEO","UNPROTECTED");self.write(current,capability("NOT_AVAILABLE"));text=self.menu(current)
+  self.assertIn("LIRE LE DVD",text);self.assertIn("openhtpc-play-dvd",text);self.assertNotIn("openhtpc-play-optical",text)
 
 class PhaseBoundary(unittest.TestCase):
  def test_no_network_or_key_acquisition_code_was_added(self):

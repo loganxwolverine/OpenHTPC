@@ -70,7 +70,7 @@ class Boundaries(unittest.TestCase):
   for marker in ("pathlib","ctypes","find_library","udev","keydb.cfg","lstat(","stat(","open(","read_text(","subprocess","socket","urlopen","curl ","wget ","bd://","mpv","dispatcher","action_token","flex"):
    self.assertNotIn(marker,source)
  def test_security_and_production_sources_unchanged(self):
-  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-session-engine.py","openhtpc-disc-sheet.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
  def test_dispatcher_revalidation_and_forged_token_guards_remain(self):

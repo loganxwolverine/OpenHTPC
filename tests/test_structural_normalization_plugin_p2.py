@@ -88,7 +88,7 @@ class SecurityAndRegressions(unittest.TestCase):
  def test_prior_phase_contracts_remain_present(self):
   for name in ("doctor_rows","presentation_descriptor","capability_contribution","playback_decision","ui_contribution","classify_probe_facts","normalize_libbluray_primitives"):self.assertTrue(callable(getattr(PLUGIN,name)))
  def test_production_playback_media_and_gpu_sources_unchanged(self):
-  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-session-engine.py","openhtpc-disc-sheet.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
 

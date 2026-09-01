@@ -68,7 +68,7 @@ class Boundaries(unittest.TestCase):
   source=(PAYLOAD/"openhtpc-plugin-registry.py").read_text().lower()
   for marker in ("subprocess","shell=true","os.system","urlopen(","requests.","curl ","wget ","http://","https://","eval("):self.assertNotIn(marker,source)
  def test_qualified_production_sources_unchanged(self):
-  names=("openhtpc-protected-optical.py","openhtpc-protected-optical-backend.py","openhtpc-play-optical","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py","openhtpc-session-engine.py")
+  names=("openhtpc-protected-optical.py","openhtpc-protected-optical-backend.py","openhtpc-play-optical","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
    self.assertEqual((PAYLOAD/name).read_text(),baseline,name)

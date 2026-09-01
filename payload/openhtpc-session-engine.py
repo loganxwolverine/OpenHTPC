@@ -362,6 +362,23 @@ def bounded_flex_entry(index: int, label: str, icon: pathlib.Path, command: str,
     return line
 
 
+def protected_optical_menu_policy(home: pathlib.Path, install: pathlib.Path, optical: dict) -> tuple[str, dict, dict]:
+    """Resolve protected-optical exposure through the production plugin authority."""
+    neutral = {"owned": False, "visible": False, "enabled": False, "action_intent": "NONE"}
+    try:
+        core_path = install / "openhtpc-core.py"
+        spec = importlib.util.spec_from_file_location("openhtpc_menu_p2_core", core_path)
+        core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+        registry = core.plugin_status(home, install)
+        snapshot = _optical_model.protected_capability(home)
+        _, decision = core.protected_optical_playback_decision_projection(home, install, registry, optical, snapshot)
+        _, presentation = core.optical_presentation_descriptor(home, install, registry, optical)
+        authority, contribution = core.protected_optical_ui_contribution(home, install, registry, presentation, decision)
+        return authority, contribution, decision
+    except (OSError, ImportError, AttributeError, TypeError, ValueError, SystemExit):
+        return "PLUGIN_UNAVAILABLE", neutral, {"playback_action": "DISABLED", "playback_reason": "PLUGIN_BROKEN", "protection": optical.get("protection", "UNKNOWN")}
+
+
 
 def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path], home: pathlib.Path | None = None) -> str:
     state = _optical_model.canonical_state(optical); media = _optical_model.presentation(optical); entries = []
@@ -369,6 +386,9 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
     dvd_icon = install / "assets/ui/optical-dvd.png"
     media_play_icon = dvd_icon if (state == "DVD_VIDEO" and dvd_icon.is_file()) else play_icon
     decision = _optical_model.playback_decision(optical, _optical_model.protected_capability(home)) if home else _optical_model.playback_decision(optical, {})
+    ui_authority, ui_contribution = "CORE_FALLBACK", {"visible": False, "enabled": False, "action_intent": "NONE"}
+    if state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} and home:
+        ui_authority, ui_contribution, decision = protected_optical_menu_policy(home, install, optical)
 
     has_token = bool(home and (home / ".config/openhtpc/secrets/tmdb-token").is_file())
     cached_meta = {}
@@ -448,7 +468,9 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
 
     if state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
         media_name = {"BLURAY_VIDEO":"BLU-RAY","UHD_BLURAY_VIDEO":"UHD BLU-RAY","BLURAY_FAMILY":"BLU-RAY / UHD"}[state]
-        if decision["playback_action"] == "ENABLED":
+        if ui_authority != "PLUGIN_P2" or not ui_contribution.get("visible"):
+            pass
+        elif ui_contribution.get("enabled") and ui_contribution.get("action_intent")=="PLAY_CURRENT_OPTICAL_MEDIA":
             device = shlex.quote(str(optical.get("device") or "")); generation = int(optical.get("generation", 0) or 0)
             token = _optical_model.playback_action_token(optical, _optical_model.protected_capability(home) if home else {})
             entries.append((f"LIRE LE {media_name}", media_play_icon,

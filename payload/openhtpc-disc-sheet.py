@@ -32,6 +32,14 @@ def model(home,install,state):
   if metadata.get("status")=="PASS": title=metadata.get("title") or title
   if poster: artwork=poster
  return {"state":state,"title":title,"metadata":metadata,"artwork":artwork,"duration":duration(state["device"]) if canonical=="DVD_VIDEO" else None}
+def protected_ui_policy(home,install,state):
+ try:
+  core=load("disc_sheet_p2_core",install/"openhtpc-core.py");registry=core.plugin_status(home,install);snapshot=optical_model.protected_capability(home)
+  _,decision=core.protected_optical_playback_decision_projection(home,install,registry,state,snapshot)
+  _,presentation=core.optical_presentation_descriptor(home,install,registry,state)
+  authority,contribution=core.protected_optical_ui_contribution(home,install,registry,presentation,decision)
+  return authority,contribution
+ except (OSError,ImportError,AttributeError,TypeError,ValueError,SystemExit):return "PLUGIN_UNAVAILABLE",{"visible":False,"enabled":False,"action_intent":"NONE"}
 def write_menu(home,install,data):
  state=data["state"]; canonical=optical_model.canonical_state(state); media=optical_model.presentation(state); icon=data["artwork"]; font=install/"flex/assets/fonts/OpenSans-Regular.ttf"; theme=load_theme(install); entries=[]
  decision=optical_model.playback_decision(state,optical_model.protected_capability(home))
@@ -42,7 +50,9 @@ def write_menu(home,install,data):
   if meta.get("status")!="PASS": entries.append(("CONFIGURER TMDb",f":replace {install/'openhtpc-configure-tmdb'}"))
   entries.append(("ÉJECTER",f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {dev}"))
  elif canonical in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
-  if decision["playback_action"]=="ENABLED":
+  authority,contribution=protected_ui_policy(home,install,state)
+  if authority!="PLUGIN_P2" or not contribution.get("visible"):pass
+  elif contribution.get("enabled") and contribution.get("action_intent")=="PLAY_CURRENT_OPTICAL_MEDIA":
    token=optical_model.playback_action_token(state,optical_model.protected_capability(home))
    entries.append(("LIRE · "+data["title"],f"{install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)} --action-token {token}"))
   else: entries.append((media["message"]+" — "+decision["playback_reason"].replace("_"," ")+".",":fork true"))
