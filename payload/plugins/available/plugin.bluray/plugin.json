@@ -4,7 +4,7 @@
   "name": "Blu-ray UHD",
   "version": "0.10.0",
   "plugin_api": 2,
-  "openhtpc": {"minimum": "1.2.0-dev12", "maximum": null},
+  "openhtpc": {"minimum": "1.2.0-dev13", "maximum": null},
   "category": "optical",
   "entrypoint": "shadow.py",
   "capabilities": ["capability", "doctor"],

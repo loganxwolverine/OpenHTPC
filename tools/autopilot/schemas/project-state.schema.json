@@ -4,10 +4,10 @@
   "properties": {
     "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-    "current_phase": {"const": "P2_PHASE12_COMPLETE"},
+    "current_phase": {"const": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE"},
     "default_behavior_change_expected": {"type": "boolean"},
     "hardware_io_ownership_change": {"type": "boolean"},
-    "next_action": {"const": "BOUNDED_PRODUCTION_PLUGIN_CUTOVER"},
+    "next_action": {"const": "PHYSICAL_VALIDATION"},
     "next_action_context": {
       "additionalProperties": false,
       "properties": {
@@ -19,14 +19,14 @@
       "required": ["plugin_absent", "disabled", "enabled_valid", "broken"],
       "type": "object"
     },
-    "next_action_kind": {"const": "SOFTWARE"},
+    "next_action_kind": {"const": "PHYSICAL"},
     "next_step_after_software": {"const": "STOP_FOR_PHYSICAL_VALIDATION"},
     "ownership_migration_status": {"const": "COMPLETE"},
     "physical_validation_required_after_implementation": {"type": "boolean"},
-    "plugin_cutover_status": {"const": "INCOMPLETE"},
+    "plugin_cutover_status": {"const": "COMPLETE"},
     "plugin_policy_feature_owner": {"const": "plugin.bluray"},
     "required_gate_reason": {"const": "PHYSICAL_VALIDATION"},
-    "required_human_gate_stage": {"const": "AFTER_IMPLEMENTATION"},
+    "required_human_gate_stage": {"const": "BEFORE_EXECUTION"},
     "schema_version": {"const": 1},
     "security_boundary_change": {"type": "boolean"},
     "software_implementation_allowed": {"type": "boolean"},

@@ -1,5 +1,9 @@
 # Changelog
 
+# OPENHTPC Plugin Framework P2 Production Cutover — 1.2.0-dev13
+
+- Identifies the production plugin cutover software candidate, awaiting physical qualification.
+
 # OPENHTPC Plugin Framework P2 Optical Static Assets — 1.2.0-dev12
 
 - Moves byte-identical qualified Blu-ray and Ultra HD Blu-ray 4K badge resources into the disabled first-party plugin.

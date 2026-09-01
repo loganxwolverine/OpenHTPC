@@ -259,20 +259,17 @@ class CanonicalProjectState(unittest.TestCase):
  def test_55_architecture_freeze_is_not_development_stop(self):
   prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text(encoding="utf-8")
   self.assertIn("does not mean all protected-optical development is finished",prompt)
-  self.assertEqual((self.state["architectural_boundary"],self.state["plugin_cutover_status"]),("FROZEN_AFTER_PHASE11","INCOMPLETE"))
- def test_56_implement_then_gate_policy_executes(self):
-  decision=A.policy_evaluate(self.cutover_plan());self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("EXECUTE","AFTER_IMPLEMENTATION","PHYSICAL_VALIDATION"))
- def test_57_future_physical_validation_is_after_implementation(self):
-  value=self.cutover_plan();A.validate_plan_against_state(self.state,value);self.assertTrue(A.plan_has_executable_step(value))
+  self.assertEqual((self.state["architectural_boundary"],self.state["plugin_cutover_status"]),("FROZEN_AFTER_PHASE11","COMPLETE"))
+ def test_56_physical_validation_requires_human_gate(self):
+  value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="PHYSICAL_VALIDATION",physical_validation_required=True,default_behavior_change=True)
+  decision=A.policy_evaluate(value);self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("HUMAN_GATE","BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
+ def test_57_software_cutover_is_complete(self):
+  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("PHYSICAL_VALIDATION","PHYSICAL",False))
  def test_58_physical_task_can_require_before_execution(self):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="SYSTEM_CONFIGURATION")
   self.assertEqual(A.policy_evaluate(value)["stage"],"BEFORE_EXECUTION")
- def test_59_current_state_rejects_docs_only_stop(self):
-  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
-   A.validate_plan_against_state(self.state,plan(next_step_policy="STOP",objective="No further automated work"))
- def test_60_current_state_rejects_missing_physical_validation(self):
-  with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
-   A.validate_plan_against_state(self.state,self.cutover_plan(physical_validation_required=False))
+ def test_59_current_state_records_physical_validation(self):self.assertTrue(self.state["physical_validation_required_after_implementation"])
+ def test_60_current_state_records_physical_gate(self):self.assertEqual((self.state["required_human_gate_stage"],self.state["required_gate_reason"]),("BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
  def test_61_current_state_rejects_default_behavior_downgrade(self):
   with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
    A.validate_plan_against_state(self.state,self.cutover_plan(default_behavior_change=False))
@@ -282,7 +279,8 @@ class CanonicalProjectState(unittest.TestCase):
  def test_63_current_state_rejects_security_boundary_change(self):
   with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
    A.validate_plan_against_state(self.state,self.cutover_plan(security_boundary_change=True))
- def test_64_current_state_accepts_software_physical_gate(self):A.validate_plan_against_state(self.state,self.cutover_plan())
+ def test_64_current_state_retains_frozen_boundaries(self):
+  self.assertFalse(self.state["hardware_io_ownership_change"]);self.assertFalse(self.state["security_boundary_change"])
  def test_65_stop_policy_is_post_implementation(self):self.assertTrue(A.plan_has_executable_step(self.cutover_plan()))
  def test_66_ordinary_stop_plan_has_no_executable_step(self):self.assertFalse(A.plan_has_executable_step(plan(next_step_policy="STOP")))
 

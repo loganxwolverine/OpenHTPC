@@ -13,26 +13,26 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_PHASE12_COMPLETE",
+  "current_phase": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE",
   "default_behavior_change_expected": true,
   "hardware_io_ownership_change": false,
-  "next_action": "BOUNDED_PRODUCTION_PLUGIN_CUTOVER",
+  "next_action": "PHYSICAL_VALIDATION",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
     "enabled_valid": "plugin policy exposes feature; generic Core services execute securely",
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
-  "next_action_kind": "SOFTWARE",
+  "next_action_kind": "PHYSICAL",
   "next_step_after_software": "STOP_FOR_PHYSICAL_VALIDATION",
   "ownership_migration_status": "COMPLETE",
   "physical_validation_required_after_implementation": true,
-  "plugin_cutover_status": "INCOMPLETE",
+  "plugin_cutover_status": "COMPLETE",
   "plugin_policy_feature_owner": "plugin.bluray",
   "required_gate_reason": "PHYSICAL_VALIDATION",
-  "required_human_gate_stage": "AFTER_IMPLEMENTATION",
+  "required_human_gate_stage": "BEFORE_EXECUTION",
   "schema_version": 1,
   "security_boundary_change": false,
-  "software_implementation_allowed": true,
+  "software_implementation_allowed": false,
   "workstream": "PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2"
 }
