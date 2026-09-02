@@ -13,12 +13,12 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_RC3_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION",
+  "current_phase": "P2_RC4_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
   "dev14_physical_qualification": "PASS",
   "hardware_io_ownership_change": false,
-  "next_action": "RC3_PHYSICAL_VALIDATION",
+  "next_action": "RC4_PHYSICAL_VALIDATION",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
@@ -26,7 +26,7 @@
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
   "next_action_kind": "PHYSICAL",
-  "next_step_after_software": "STOP_FOR_RC3_PHYSICAL_VALIDATION",
+  "next_step_after_software": "STOP_FOR_RC4_PHYSICAL_VALIDATION",
   "ownership_migration_status": "COMPLETE",
   "physical_validation_required_after_implementation": true,
   "plugin_cutover_status": "COMPLETE",
@@ -97,15 +97,29 @@
     "uhd_open_failed": "EXTERNAL_AACS_PER_DISC_OR_ENVIRONMENT_LIMITATION_NON_BLOCKING",
     "version": "1.2.0-rc2"
   },
-  "next_candidate": {
+  "rc3_candidate": {
     "artifact_prepared": true,
     "build": "public-release-1.2.0-rc3",
     "filename": "OpenHTPC-1.2.0-RC3.tar.gz",
-    "physical_qualification": "PENDING_PHYSICAL_VALIDATION",
-    "protected_bluray_audio_fix": "SOFTWARE_PASS_PHYSICAL_VALIDATION_REQUIRED",
-    "purpose": "PROTECTED_BLURAY_AUDIO_STABILIZATION_ONLY",
-    "status": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "physical_evidence": [
+      "Protected Blu-ray bitstream default: STEREO / NO AUDIO on HDMI surround71 sink with iec958.codecs = [PCM DTS AC3]",
+      "Causality verified: temporary pw-cli props setting [PCM DTS AC3 EAC3 TrueHD DTS-HD] produced physical DTS-HD PASS on Denon AVR",
+      "PipeWire/WirePlumber restart recreated sink with default codecs [PCM DTS AC3]"
+    ],
+    "physical_qualification": "PHYSICAL_GATE_NO_GO",
+    "purpose": "DETERMINISTIC_BITSTREAM_POLICY_CONTRACT",
+    "status": "PHYSICAL_GATE_NO_GO",
     "version": "1.2.0-rc3"
+  },
+  "next_candidate": {
+    "artifact_prepared": true,
+    "build": "public-release-1.2.0-rc4",
+    "filename": "OpenHTPC-1.2.0-RC4.tar.gz",
+    "physical_qualification": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "protected_bluray_audio_fix": "PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION",
+    "purpose": "PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION",
+    "status": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "version": "1.2.0-rc4"
   },
   "required_gate_reason": "PHYSICAL_VALIDATION",
   "required_human_gate_stage": "BEFORE_EXECUTION",

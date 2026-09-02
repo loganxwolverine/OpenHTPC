@@ -1,5 +1,22 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 4 — 1.2.0-rc4
+
+- Implements dynamic PipeWire HDMI sink resolution and deterministic `iec958.codecs` preparation for protected Blu-ray bitstream passthrough.
+- Ensures required bitstream HD codecs (`PCM`, `DTS`, `AC3`, `EAC3`, `TrueHD`, `DTS-HD`) are active on the HDMI sink node.
+- Verifies preparation post-mutation and enriches atomic diagnostics in `~/.local/state/openhtpc/protected-optical-last-command.json`.
+- Preserves PCM mode behavior without bitstream allowlist or PipeWire sink mutation.
+- Awaits Steve's physical qualification on Fedora KDE with Denon AVR.
+
+# OPENHTPC 1.2.0 Release Candidate 3 — 1.2.0-rc3
+
+- Made protected Blu-ray bitstream track, channel, and SPDIF audio policy explicit.
+- Retained last execution command and diagnostic log evidence.
+
+# OPENHTPC 1.2.0 Release Candidate 2 — 1.2.0-rc2
+
+- Added protected optical stabilization following RC1 physical NO-GO.
+
 # OPENHTPC 1.2.0 Release Candidate 1 — 1.2.0-rc1
 
 - Promotes the physically qualified Dev14 Plugin Framework P2 production-cutover baseline without functional changes.

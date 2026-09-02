@@ -1,0 +1,38 @@
+OPENHTPC 1.2.0 RC4 — DECISIVE PROTECTED BLU-RAY HD AUDIO PIPEWIRE PASSTHROUGH GATE
+
+Expected: 1.2.0-rc4 / public-release-1.2.0-rc4
+
+Start state: Fedora default PipeWire state with iec958.codecs = [ "PCM", "DTS", "AC3" ].
+Do NOT run any manual pw-cli command prior to testing. OPENHTPC must prepare the sink dynamically.
+
+1. Check archive checksum:
+   sha256sum -c OpenHTPC-1.2.0-RC4.tar.gz.sha256
+2. Extract archive:
+   tar -xzf OpenHTPC-1.2.0-RC4.tar.gz
+   cd OpenHTPC-1.2.0-RC4
+3. Dry-run install check:
+   ./install.sh --check
+4. Apply update:
+   ./update.sh
+5. Verify identity & doctor:
+   openhtpc version
+   openhtpc doctor
+6. Start couch UI:
+   openhtpc start
+7. Ensure BITSTREAM mode is selected in Settings
+8. TV TEST — PROTECTED BLU-RAY / BITSTREAM
+   Verify:
+   - Playback starts
+   - Video OK
+   - Audio OK
+   - Denon AVR reports DTS-HD
+   - Retour Flex OK
+9. Inspect diagnostic:
+   cat ~/.local/state/openhtpc/protected-optical-last-command.json
+10. Extended qualification:
+   A. Restart PipeWire services (systemctl --user restart wireplumber pipewire pipewire-pulse) and retest
+   B. Full reboot and retest
+   C. Test PCM mode (verify AVR receives PCM without bitstream)
+   D. Verify media controls
+
+RC4 remains unqualified until Steve records physical results.
