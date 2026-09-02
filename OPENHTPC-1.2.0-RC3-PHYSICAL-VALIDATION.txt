@@ -1,0 +1,17 @@
+OPENHTPC 1.2.0 RC3 — DECISIVE PROTECTED BLU-RAY AUDIO GATE
+
+Expected: 1.2.0-rc3 / public-release-1.2.0-rc3
+
+After RC2 -> RC3 update:
+  openhtpc version
+  openhtpc doctor
+  openhtpc start
+
+TV TEST — BLU-RAY RC3 / BITSTREAM
+  Lecture / Image / Audio / AVR display / Retour Flex
+
+If AVR reports DTS, DTS-HD, Dolby or TrueHD passthrough, continue later with
+PCM and control tests. If AVR reports STEREO or PCM, STOP physical testing and
+return to SSH; retained diagnostic state is sufficient for inspection.
+
+RC3 remains unqualified until Steve records the result.

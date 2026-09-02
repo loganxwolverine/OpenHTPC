@@ -6,10 +6,10 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.2.0 RC2
+# OPENHTPC 1.2.0 RC3
 
-Version: `1.2.0-rc2`
-Build: `public-release-1.2.0-rc2`
+Version: `1.2.0-rc3`
+Build: `public-release-1.2.0-rc3`
 Status: **Release Candidate / prerelease — physical validation pending**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
@@ -19,20 +19,21 @@ on the local machine; normal operation does not require a cloud service.
 
 The qualified Dev14 baseline passed on Fedora 44 KDE Plasma/Wayland with
 Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. RC2 adds only the protected
-optical stabilization required after the RC1 physical gate closed NO-GO. RC2
-remains a prerelease until Steve's separate physical validation passes.
+optical stabilization required after the RC1 and RC2 physical gates closed
+NO-GO. RC3 remains a prerelease until Steve's decisive protected Blu-ray audio
+validation passes.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.2.0-RC2.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0-RC3.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.2.0-RC2.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.2.0-RC3.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -56,7 +57,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted RC2 directory:
+From the extracted RC3 directory:
 
 ```bash
 ./update.sh
@@ -113,7 +114,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [RC2 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC2-FR-EN.md),
+See [RC3 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC3-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).

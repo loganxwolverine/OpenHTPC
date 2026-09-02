@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.2.0-rc2"
+readonly OPENHTPC_VERSION="1.2.0-rc3"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -322,7 +322,7 @@ install_multimedia_extension() {
 [[ -r /etc/os-release ]] || die "/etc/os-release est introuvable."
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC 1.2.0 RC2 prend uniquement en charge Fedora 44 KDE."
+[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC 1.2.0 RC3 prend uniquement en charge Fedora 44 KDE."
 command -v rpm >/dev/null 2>&1 || die "La commande rpm est requise."
 
 if ! rpm -q plasma-workspace >/dev/null 2>&1 &&
@@ -353,7 +353,7 @@ fi
 [[ -x $SOURCE_DVD_DEPENDENCIES ]] || die "Le détecteur de dépendances DVD est absent."
 [[ -x $SOURCE_FEDORA_DEPENDENCIES ]] || die "Le vérificateur de dépendances Fedora est absent."
 [[ -x $SOURCE_DNF_TRANSACTION ]] || die "Le constructeur de transaction DNF est absent."
-[[ -r $SCRIPT_DIR/VERSION && -r $SCRIPT_DIR/plugins/README.md ]] || die "Les métadonnées produit RC2 sont incomplètes."
+[[ -r $SCRIPT_DIR/VERSION && -r $SCRIPT_DIR/plugins/README.md ]] || die "Les métadonnées produit RC3 sont incomplètes."
 for name in "${PRODUCT_FILES[@]}"; do [[ -r $SCRIPT_DIR/$name ]] || die "Composant produit absent : $name"; done
 [[ -x $SCRIPT_DIR/openhtpc-tmdb-recovery ]] || die "Le contrôleur de récupération TMDb est absent."
 log "Fedora ${VERSION_ID:-inconnue}, KDE Plasma détecté."

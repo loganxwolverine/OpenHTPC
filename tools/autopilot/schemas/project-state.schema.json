@@ -4,12 +4,12 @@
   "properties": {
     "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_PHYSICAL_GATE_NO_GO_RC3_STABILIZATION_IMPLEMENTED"], "type": "string"},
+    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_PHYSICAL_GATE_NO_GO_RC3_STABILIZATION_IMPLEMENTED", "P2_RC3_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION"], "type": "string"},
     "default_behavior_change_expected": {"type": "boolean"},
     "dev13_physical_qualification": {"const": "FAILED_DISABLED_UI_GATING"},
     "dev14_physical_qualification": {"enum": ["PENDING", "PASS"], "type": "string"},
     "hardware_io_ownership_change": {"type": "boolean"},
-    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION", "AWAIT_RC3_PREPARATION_AUTHORIZATION"], "type": "string"},
+    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION", "AWAIT_RC3_PREPARATION_AUTHORIZATION", "RC3_PHYSICAL_VALIDATION"], "type": "string"},
     "next_action_context": {
       "additionalProperties": false,
       "properties": {
@@ -22,7 +22,7 @@
       "type": "object"
     },
     "next_action_kind": {"enum": ["PHYSICAL", "RELEASE_PREPARATION"], "type": "string"},
-    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION", "STOP_BEFORE_RC3_PREPARATION"], "type": "string"},
+    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION", "STOP_BEFORE_RC3_PREPARATION", "STOP_FOR_RC3_PHYSICAL_VALIDATION"], "type": "string"},
     "ownership_migration_status": {"const": "COMPLETE"},
     "physical_validation_required_after_implementation": {"type": "boolean"},
     "plugin_cutover_status": {"const": "COMPLETE"},
@@ -125,10 +125,13 @@
     "next_candidate": {
       "additionalProperties": false,
       "properties": {
-        "artifact_prepared": {"const": false},
-        "physical_qualification": {"const": "NOT_STARTED"},
+        "artifact_prepared": {"type": "boolean"},
+        "build": {"const": "public-release-1.2.0-rc3"},
+        "filename": {"const": "OpenHTPC-1.2.0-RC3.tar.gz"},
+        "physical_qualification": {"enum": ["NOT_STARTED", "PENDING_PHYSICAL_VALIDATION"]},
+        "protected_bluray_audio_fix": {"const": "SOFTWARE_PASS_PHYSICAL_VALIDATION_REQUIRED"},
         "purpose": {"const": "PROTECTED_BLURAY_AUDIO_STABILIZATION_ONLY"},
-        "status": {"const": "NOT_PREPARED_NOT_QUALIFIED"},
+        "status": {"enum": ["NOT_PREPARED_NOT_QUALIFIED", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
         "version": {"const": "1.2.0-rc3"}
       },
       "required": ["artifact_prepared", "physical_qualification", "purpose", "status", "version"],
