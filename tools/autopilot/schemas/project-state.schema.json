@@ -156,13 +156,14 @@
       "additionalProperties": false,
       "properties": {
         "artifact_prepared": {"type": "boolean"},
-        "build": {"enum": ["public-release-1.2.0-rc4", "public-release-1.2.0-rc5"]},
-        "filename": {"enum": ["OpenHTPC-1.2.0-RC4.tar.gz", "OpenHTPC-1.2.0-RC5.tar.gz"]},
+        "build": {"enum": ["public-release-1.2.0-rc4", "public-release-1.2.0-rc5", "public-release-1.2.0-rc6"]},
+        "filename": {"enum": ["OpenHTPC-1.2.0-RC4.tar.gz", "OpenHTPC-1.2.0-RC5.tar.gz", "OpenHTPC-1.2.0-RC6.tar.gz"]},
+        "media_audio_fix": {"enum": ["MEDIA_PIPEWIRE_IEC958_RECOVERY"]},
         "physical_qualification": {"enum": ["NOT_STARTED", "PENDING_PHYSICAL_VALIDATION", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
         "protected_bluray_audio_fix": {"enum": ["PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION", "PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION"]},
-        "purpose": {"enum": ["PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION", "PROTECTED_BLURAY_PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION"]},
+        "purpose": {"enum": ["PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION", "PROTECTED_BLURAY_PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION", "MEDIA_PIPEWIRE_IEC958_RECOVERY"]},
         "status": {"enum": ["NOT_PREPARED_NOT_QUALIFIED", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
-        "version": {"enum": ["1.2.0-rc4", "1.2.0-rc5"]}
+        "version": {"enum": ["1.2.0-rc4", "1.2.0-rc5", "1.2.0-rc6"]}
       },
       "required": ["artifact_prepared", "physical_qualification", "purpose", "status", "version"],
       "type": "object"

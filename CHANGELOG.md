@@ -1,5 +1,14 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 6 — 1.2.0-rc6
+
+- Centralizes and shares dynamic PipeWire IEC958 sink preparation helper between Protected Optical and MEDIA playback policy.
+- MEDIA BITSTREAM now dynamically prepares HDMI sink for HD codecs (`EAC3`, `TrueHD`, `DTS-HD`) before MPV launch.
+- Recovers MEDIA bitstream passthrough after dynamic HDMI sink recreation (e.g. HDMI hotplug / AVR power cycling).
+- Leaves MEDIA PCM mode unchanged (skipped preparation, no PipeWire mutation).
+- Keeps Protected Optical functionally unchanged and fully compatible.
+- Awaits Steve's physical qualification on Fedora KDE with Denon AVR.
+
 # OPENHTPC 1.2.0 Release Candidate 5 — 1.2.0-rc5
 
 - Corrects PipeWire IEC958 state authority to query active SPA parameters via `pw-cli enum-params <node_id> Props`.
