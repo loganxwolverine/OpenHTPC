@@ -36,6 +36,16 @@ def atomic_result(home:pathlib.Path,result:dict[str,Any])->None:
     finally:
         if os.path.exists(name):os.unlink(name)
 
+def atomic_playback_context(home:pathlib.Path,device:str,generation:int)->None:
+    target=home/".local/state/openhtpc/playback-context.json";target.parent.mkdir(parents=True,exist_ok=True)
+    data={"schema":1,"kind":"disc_sheet","device":device,"generation":generation}
+    fd,name=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as stream:json.dump(data,stream,sort_keys=True);stream.write("\n")
+        os.chmod(name,0o600);os.replace(name,target)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
 def dispatch(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,action_token:str,*,
              backend:Callable[...,dict[str,Any]]|None=None,device_exists:Callable[[str],bool]=os.path.exists)->dict[str,Any]:
     authorize(home,install,device,generation,action_token,device_exists)
@@ -43,6 +53,7 @@ def dispatch(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,ac
     request={"device":device,"media_type":current["decision"]["media_type"],"protection":current["decision"]["protection"],
              "provider_status":current["decision"]["protected_media_support"],"generation":generation}
     if backend is None:backend=load(install/"openhtpc-protected-optical-backend.py").open_disc
+    atomic_playback_context(home,device,generation)
     result={**backend(home,request),"generation":generation,"device":device};atomic_result(home,result);return result
 
 def notify(message:str)->None:

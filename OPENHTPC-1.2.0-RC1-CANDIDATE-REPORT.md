@@ -33,8 +33,16 @@ generic I/O, security, rendering and execution services remain in Core. DVD
 remains Core-owned. Protected optical `AVAILABLE` means `READY_TO_ATTEMPT`, not
 guaranteed success for every disc.
 
-RC1 physical qualification is **PENDING**. No tag, publication or RC1 physical
-PASS is claimed by this assembly record.
+RC1 physical qualification is **NO-GO**. Protected Blu-ray produced PCM while
+OPENHTPC was configured for bitstream, although local MKV and physical DVD
+controls passed. The future `1.2.0-rc2` candidate is stabilization-only and is
+not prepared or qualified. No tag, publication or physical bitstream PASS is
+claimed by this record.
+
+The RC1 UHD `OPEN_FAILED` is reclassified as an external AACS per-disc or
+environment limitation after direct MPV reproduced the libaacs refusal outside
+OPENHTPC. Structural UHD classification (`INDX0300`) and action gating passed;
+`AVAILABLE` remains `READY_TO_ATTEMPT`, not a per-disc opening guarantee.
 
 ## Packaging hygiene audit
 

@@ -34,6 +34,12 @@ class Equivalence(unittest.TestCase):
   self.equivalent(inputs(disc(),capability(keydb="DETECTED")));self.equivalent(inputs(disc(),capability("NOT_CONFIGURED",keydb="NOT_CONFIGURED")))
  def test_open_success_and_failed(self):
   self.equivalent(inputs(disc(),attempt={"status":"OPEN_SUCCESS"}));self.equivalent(inputs(disc(),attempt={"status":"OPEN_FAILED"}))
+ def test_open_failure_diagnostics_are_exposed_and_non_blocking(self):
+  attempt={"status":"OPEN_FAILED","device":"/dev/sr1","generation":12,"reason":"DISC_OPEN_REFUSED","process_started":True,"exit_code":2,"elapsed_seconds":1.25}
+  value=inputs(disc("UHD_BLURAY_VIDEO"),attempt=attempt);self.equivalent(value);rows=PLUGIN.doctor_rows(value)
+  statuses={row["label"]:row["status"] for row in rows}
+  self.assertEqual(statuses["Protected attempt device"],"/dev/sr1");self.assertEqual(statuses["Protected attempt reason"],"DISC_OPEN_REFUSED")
+  self.assertTrue(all(not row["blocking"] for row in rows if row["label"].startswith("Protected attempt") or row["label"]=="Last protected disc attempt"))
  def test_eject_clears_current_but_keeps_history(self):
   value=inputs({"canonical_state":"DRIVE_PRESENT_NO_MEDIA"},attempt={"status":"OPEN_SUCCESS"});self.equivalent(value)
   labels={row["label"] for row in PLUGIN.doctor_rows(value)};self.assertNotIn("Optical media family",labels);self.assertIn("Last protected disc attempt",labels)
@@ -82,7 +88,7 @@ class Boundaries(unittest.TestCase):
  def test_discovery_remains_data_only(self):
   source=(PAYLOAD/"openhtpc-plugin-registry.py").read_text().lower();self.assertNotIn("doctor_rows",source)
  def test_production_sources_unchanged(self):
-  names=("openhtpc-protected-optical.py","openhtpc-protected-optical-backend.py","openhtpc-play-optical","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
+  names=("openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
    self.assertEqual((PAYLOAD/name).read_text(),baseline,name)

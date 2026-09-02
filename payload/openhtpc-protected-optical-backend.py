@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import pathlib
 import shutil
@@ -29,6 +30,19 @@ def runtime_config(home:pathlib.Path)->pathlib.Path:
         raise ValueError("PLAYBACK_RUNTIME_NOT_READY") from error
 
 
+def playback_policy(home:pathlib.Path)->tuple[Any,dict[str,Any]]:
+    """Resolve the same persistent policy used by local files and DVD."""
+    path=pathlib.Path(__file__).with_name("openhtpc-playback-policy.py")
+    try:
+        spec=importlib.util.spec_from_file_location("openhtpc_protected_optical_policy",path)
+        if spec is None or spec.loader is None:raise ImportError
+        policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
+        decision=policy.resolve(home,None,"bluray")
+        return (policy,decision)
+    except (OSError,AttributeError,ImportError,TypeError,ValueError):
+        return (None,{"mpv_args":[]})
+
+
 def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]=subprocess.run,
               finder:Callable[[str],str|None]=shutil.which,clock:Callable[[],float]=time.monotonic)->dict[str,Any]:
     """Ask MPV's normal libbluray integration to open a validated device."""
@@ -43,7 +57,8 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     except ValueError as error:return {"status":"OPEN_FAILED","process_started":False,"reason":str(error)}
     state_root=home/".local/state/openhtpc";state_root.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix="optical-mpv.",suffix=".log",dir=state_root);os.close(fd);attempt=pathlib.Path(name)
-    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",
+    policy,decision=playback_policy(home);policy_args=decision.get("mpv_args",[])
+    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",*policy_args,
              "--cache=yes","--demuxer-readahead-secs=12.0","--demuxer-max-bytes=268435456","--demuxer-max-back-bytes=67108864",
              f"--log-file={attempt}",f"--bluray-device={request['device']}","--","bd://"]
     started=clock()
@@ -57,6 +72,9 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     except OSError:raw=""
     finally:attempt.unlink(missing_ok=True)
     opened=any(marker in raw for marker in OPEN_MARKERS)
+    if policy is not None:
+        try:policy.record_audio_observation(home,decision,raw)
+        except (OSError,AttributeError,TypeError,ValueError):pass
     if not opened:reason="DISC_OPEN_REFUSED" if exit_code!=127 else reason
     elif elapsed<0.75:reason="MPV_EXITED_IMMEDIATELY"
     status="OPEN_SUCCESS" if opened and elapsed>=0.75 else "OPEN_FAILED"

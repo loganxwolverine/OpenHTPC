@@ -167,7 +167,9 @@ def graphical_runtime() -> dict[str,str]:
 
 PROTECTED_OPTICAL_DOCTOR_LABELS=("Protected optical media","libbluray","libaacs","libbdplus",
  "External key database","Protected optical playback","Optical media family","Optical exact type",
- "Optical protection","Protection mechanism","Classification source","Last protected disc attempt")
+ "Optical protection","Protection mechanism","Classification source","Last protected disc attempt",
+ "Protected attempt device","Protected attempt generation","Protected attempt reason",
+ "Protected attempt process started","Protected attempt exit code","Protected attempt elapsed seconds")
 OPTICAL_PRESENTATION_KEYS={"NONE","BLURAY","BLURAY_FAMILY","UHD_BLURAY"}
 OPTICAL_BADGE_KEYS={"NONE","BLURAY","UHD_BLURAY"}
 PROTECTED_CAPABILITY_STATES={"AVAILABLE","NOT_CONFIGURED","NOT_AVAILABLE","BLOCKED"}
@@ -353,7 +355,12 @@ def core_protected_optical_doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]
             {"label":"Classification source","status":optical.get("classification_source","UNKNOWN"),"blocking":False},
         ])
     attempt=inputs.get("last_attempt")
-    if isinstance(attempt,dict):rows.append({"label":"Last protected disc attempt","status":attempt.get("status","UNKNOWN"),"blocking":False})
+    if isinstance(attempt,dict):
+        rows.append({"label":"Last protected disc attempt","status":str(attempt.get("status","UNKNOWN")),"blocking":False})
+        diagnostics=(("Protected attempt device",attempt.get("device")),("Protected attempt generation",attempt.get("generation")),
+                     ("Protected attempt reason",attempt.get("reason")),("Protected attempt process started",attempt.get("process_started")),
+                     ("Protected attempt exit code",attempt.get("exit_code")),("Protected attempt elapsed seconds",attempt.get("elapsed_seconds")))
+        rows.extend({"label":label,"status":str(value),"blocking":False} for label,value in diagnostics if value is not None)
     return rows
 
 def _valid_protected_optical_doctor_rows(rows:Any)->bool:

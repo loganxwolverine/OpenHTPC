@@ -39,7 +39,12 @@ def doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
    {"label":"Classification source","status":optical.get("classification_source","UNKNOWN"),"blocking":False},
   ])
  attempt=inputs.get("last_attempt")
- if isinstance(attempt,dict):rows.append({"label":"Last protected disc attempt","status":attempt.get("status","UNKNOWN"),"blocking":False})
+ if isinstance(attempt,dict):
+  rows.append({"label":"Last protected disc attempt","status":str(attempt.get("status","UNKNOWN")),"blocking":False})
+  diagnostics=(("Protected attempt device",attempt.get("device")),("Protected attempt generation",attempt.get("generation")),
+               ("Protected attempt reason",attempt.get("reason")),("Protected attempt process started",attempt.get("process_started")),
+               ("Protected attempt exit code",attempt.get("exit_code")),("Protected attempt elapsed seconds",attempt.get("elapsed_seconds")))
+  rows.extend({"label":label,"status":str(value),"blocking":False} for label,value in diagnostics if value is not None)
  return rows
 
 def presentation_descriptor(optical:dict[str,Any])->dict[str,Any]:

@@ -1,5 +1,40 @@
 # OPENHTPC protected optical roadmap
 
+## 1.2.0 RC2 stabilization
+
+Status: `IMPLEMENTED — AWAITING PHYSICAL VALIDATION — NOT QUALIFIED`
+
+The RC1 physical release gate is `NO-GO`. Protected Blu-ray opened and
+produced image/audio, but decoded to PCM while the persistent OPENHTPC policy
+was set to bitstream. Local MKV and DVD controls bitstreamed correctly. The
+first divergence was the protected-optical backend: unlike both qualified
+paths, it loaded the PURE runtime but never resolved or appended the persistent
+playback policy. The stabilization fix applies that same policy after the
+runtime include, preserving command-line precedence and PCM behavior.
+
+The protected dispatcher now publishes the selected device and generation to
+`playback-context.json` before backend execution, so a multi-drive `/dev/sr1`
+selection cannot leave `/dev/sr0` as stale playback context. Attempt records
+and non-blocking Doctor rows retain device, generation, status, reason,
+process-started state, exit code and elapsed time. Disc-view transient render
+failures are contained at the process boundary and leave the generation-safe
+fallback available.
+
+Production file, DVD, Blu-ray/UHD and visual-review MPV paths do not emit
+`--disc-menu=no`, which mpv 0.41 rejects. No replacement is needed because the
+current production commands already express direct title/longest playback
+without that option.
+
+The observed UHD `OPEN_FAILED` is not an OPENHTPC P0: direct
+`mpv --bluray-device=/dev/sr1 bd://longest` reproduced libaacs refusal outside
+OPENHTPC with no matching processing key. `AVAILABLE` remains
+`READY_TO_ATTEMPT`; per-disc `OPEN_FAILED` is separate and never makes Doctor
+report the machine unavailable.
+
+The future `1.2.0-rc2` candidate is stabilization-only. It is not prepared or
+qualified. Physical protected Blu-ray bitstream and PCM validation remains
+required before promotion; UHD performance/drop-frame work remains deferred.
+
 ## UHD optical playback performance / dropped output frames
 
 Status: `KNOWN_LIMITATION — DEFER / OBSERVE`

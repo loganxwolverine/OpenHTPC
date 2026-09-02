@@ -13,12 +13,12 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE",
+  "current_phase": "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
   "dev14_physical_qualification": "PASS",
   "hardware_io_ownership_change": false,
-  "next_action": "RC_PHYSICAL_RELEASE_GATE",
+  "next_action": "RC2_PHYSICAL_STABILIZATION_VALIDATION",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
@@ -26,7 +26,7 @@
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
   "next_action_kind": "PHYSICAL",
-  "next_step_after_software": "STOP_FOR_RC_PHYSICAL_RELEASE_GATE",
+  "next_step_after_software": "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION",
   "ownership_migration_status": "COMPLETE",
   "physical_validation_required_after_implementation": true,
   "plugin_cutover_status": "COMPLETE",
@@ -74,11 +74,22 @@
     "functional_changes_since_qualified_baseline": false,
     "origin_qualified_commit": "e47ebe11c39b493746a1e38f258d462be0c86ea2",
     "origin_qualified_version": "1.2.0-dev14",
-    "physical_qualification": "PENDING",
-    "status": "PROMOTED_FROM_PHYSICALLY_QUALIFIED_BASELINE_AWAITING_RELEASE_GATE",
+    "physical_qualification": "NO_GO",
+    "physical_release_gate_reasons": [
+      "OPENHTPC protected Blu-ray bitstream regression",
+      "UHD OPEN_FAILED reproduced outside OPENHTPC and reclassified as an external AACS per-disc/environment limitation"
+    ],
+    "status": "RC1_PHYSICAL_RELEASE_GATE_NO_GO",
     "version": "1.2.0-rc1"
   },
-  "required_gate_reason": "PHYSICAL_VALIDATION",
+  "next_candidate": {
+    "artifact_prepared": false,
+    "physical_qualification": "PENDING",
+    "purpose": "STABILIZATION_ONLY_NO_NEW_FEATURES",
+    "status": "IMPLEMENTED_NOT_QUALIFIED_NOT_PREPARED",
+    "version": "1.2.0-rc2"
+  },
+  "required_gate_reason": "PHYSICAL_BITSTREAM_AND_STABILIZATION_VALIDATION",
   "required_human_gate_stage": "BEFORE_EXECUTION",
   "schema_version": 1,
   "security_boundary_change": false,

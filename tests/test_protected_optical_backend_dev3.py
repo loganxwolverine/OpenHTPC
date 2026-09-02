@@ -29,6 +29,20 @@ class Fixture(unittest.TestCase):
   return run
 
 class Backend(Fixture):
+ def capture(self,mode):
+  config=self.home/".config/openhtpc/user-config.json";config.parent.mkdir(parents=True,exist_ok=True)
+  config.write_text(json.dumps({"audio_output_mode":mode}));seen=[]
+  def run(command,**_kwargs):
+   seen.extend(command);target=pathlib.Path(next(arg.split("=",1)[1] for arg in command if arg.startswith("--log-file=")))
+   target.write_text("Video: libbluray fixture\nAO: [pipewire] fixture\n")
+   return type("Result",(),{"returncode":0})()
+  result=BACKEND.open_disc(self.home,{"device":"/dev/sr1","media_type":"BLURAY","protection":"PROTECTED","provider_status":"AVAILABLE"},runner=run,finder=lambda _name:"mpv",clock=iter((0.0,1.0)).__next__)
+  return result,seen
+ def test_bitstream_policy_reaches_protected_bluray_after_runtime_include(self):
+  _result,command=self.capture("BITSTREAM");option="--audio-spdif=ac3,eac3,dts,dts-hd,truehd"
+  self.assertIn(option,command);self.assertGreater(command.index(option),next(i for i,value in enumerate(command) if value.startswith("--include=")))
+ def test_pcm_policy_keeps_protected_bluray_passthrough_disabled(self):
+  _result,command=self.capture("PCM");self.assertFalse(any(value.startswith("--audio-spdif=") for value in command))
  def test_unprotected_bluray_without_external_configuration_opens(self):
   request={"device":"/dev/sr0","media_type":"BLURAY","protection":"UNPROTECTED","provider_status":"NOT_CONFIGURED"}
   result=BACKEND.open_disc(self.home,request,runner=self.runner(),finder=lambda _name:"/usr/bin/mpv",clock=iter((0.0,2.0)).__next__);self.assertEqual(result["status"],"OPEN_SUCCESS")
@@ -73,10 +87,19 @@ class Revalidation(Fixture):
   DISPATCH.dispatch(self.home,PAYLOAD,"/dev/sr0",9,self.token(state,model),backend=lambda *_args:{"status":"OPEN_FAILED","reason":"DISC_OPEN_REFUSED"},device_exists=lambda _device:True)
   snapshot=json.loads((self.home/".config/openhtpc/runtime/capabilities.json").read_text());self.assertEqual(snapshot["optical"]["protected_media"]["status"],"AVAILABLE")
   self.assertEqual(json.loads((self.home/".local/state/openhtpc/protected-optical-last-attempt.json").read_text())["status"],"OPEN_FAILED")
+ def test_selected_device_updates_playback_context_and_attempt_diagnostics(self):
+  state=optical(generation=12);state["device"]="/dev/sr1";model=capability();self.write(state,model)
+  DISPATCH.dispatch(self.home,PAYLOAD,"/dev/sr1",12,self.token(state,model),backend=lambda *_args:{"status":"OPEN_FAILED","reason":"DISC_OPEN_REFUSED","process_started":True,"exit_code":2,"elapsed_seconds":1.25},device_exists=lambda _device:True)
+  context=json.loads((self.home/".local/state/openhtpc/playback-context.json").read_text());attempt=json.loads((self.home/".local/state/openhtpc/protected-optical-last-attempt.json").read_text())
+  self.assertEqual((context["device"],context["generation"],context["kind"]),("/dev/sr1",12,"disc_sheet"))
+  for key,value in {"device":"/dev/sr1","generation":12,"status":"OPEN_FAILED","reason":"DISC_OPEN_REFUSED","process_started":True,"exit_code":2,"elapsed_seconds":1.25}.items():self.assertEqual(attempt[key],value)
 
 class Boundaries(unittest.TestCase):
  def test_backend_uses_normal_libbluray_mpv_source(self):
   source=(PAYLOAD/"openhtpc-protected-optical-backend.py").read_text();self.assertIn('"bd://"',source);self.assertIn('"--bluray-device=',source)
+ def test_mpv_041_incompatible_disc_menu_option_is_not_emitted(self):
+  production=(PAYLOAD/name for name in ("openhtpc-play","openhtpc-play-dvd","openhtpc-protected-optical-backend.py","openhtpc-visual-review.py"))
+  for path in production:self.assertNotIn("--disc-menu",path.read_text(),path.name)
  def test_key_database_is_never_opened_by_backend_or_dispatcher(self):
   source="\n".join((PAYLOAD/name).read_text() for name in ("openhtpc-protected-optical-backend.py","openhtpc-play-optical"));self.assertNotIn("KEYDB.cfg",source);self.assertNotIn("aacs/",source)
  def test_no_network_acquisition(self):

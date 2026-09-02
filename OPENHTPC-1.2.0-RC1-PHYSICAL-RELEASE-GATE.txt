@@ -1,5 +1,21 @@
 OPENHTPC 1.2.0 RC1 — MINIMAL PHYSICAL RELEASE GATE
 
+RESULT: NO-GO
+
+OPENHTPC-owned blocker:
+  Protected Blu-ray produced PCM with OPENHTPC configured for bitstream.
+  Local MKV and physical DVD bitstream controls passed.
+
+Reclassified non-OPENHTPC P0:
+  UHD detection/classification and action gating passed. UHD open failed in
+  libaacs, and the same refusal was reproduced with direct MPV outside
+  OPENHTPC. This is an external AACS per-disc/environment limitation;
+  AVAILABLE continues to mean READY_TO_ATTEMPT.
+
+Next candidate: 1.2.0-rc2, stabilization only. It is not prepared or
+qualified. Do not mark protected Blu-ray bitstream PASS without Steve's
+explicit physical observation.
+
 Identity expected after update:
   Version: 1.2.0-rc1
   Build: public-release-1.2.0-rc1

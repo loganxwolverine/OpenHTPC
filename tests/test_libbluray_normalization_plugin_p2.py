@@ -83,7 +83,7 @@ class BoundariesAndRegressions(unittest.TestCase):
  def test_phase3_through_phase8_contracts_still_exist(self):
   for name in ("doctor_rows","presentation_descriptor","capability_contribution","playback_decision","ui_contribution","classify_probe_facts"):self.assertTrue(callable(getattr(PLUGIN,name)))
  def test_non_optical_production_sources_unchanged(self):
-  names=("openhtpc-play-optical","openhtpc-protected-optical-backend.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
 

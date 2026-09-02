@@ -59,7 +59,7 @@ class Boundaries(unittest.TestCase):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
   for marker in ("pathlib","pil","image","flex","assets/",".png","subprocess","os.system","open(","write(","read_text(","keydb.cfg","find_library","ctypes","socket","urlopen","bd://","mpv","dispatcher"):self.assertNotIn(marker,source)
  def test_production_media_sources_unchanged(self):
-  names=("openhtpc-protected-optical.py","openhtpc-protected-optical-backend.py","openhtpc-play-optical","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
+  names=("openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
  def test_qualified_badge_assets_unchanged(self):

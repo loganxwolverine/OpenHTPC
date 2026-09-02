@@ -12,6 +12,7 @@ optical=load("dev4_optical",PAYLOAD/"openhtpc-optical.py")
 session=load("dev4_session",PAYLOAD/"openhtpc-session-engine.py")
 tmdb=load("dev4_tmdb",PAYLOAD/"openhtpc-tmdb.py")
 validator=load("dev4_validator",PAYLOAD/"openhtpc-validator")
+view=load("dev4_view",PAYLOAD/"openhtpc-disc-view.py")
 
 def state(generation,canonical,legacy,title=None):
  value=optical._state(canonical,"/dev/fixture",legacy,uhd_status="UNKNOWN")
@@ -19,6 +20,12 @@ def state(generation,canonical,legacy,title=None):
  value["generation"]=generation;value["ui_state_hash"]=optical.ui_state_hash(value);return value
 
 class PresentationConvergence(unittest.TestCase):
+ def test_disc_view_contains_transient_python_failures(self):
+  with tempfile.TemporaryDirectory() as raw:
+   home=pathlib.Path(raw);state_dir=home/".local/state/openhtpc";state_dir.mkdir(parents=True)
+   (state_dir/"optical-current.json").write_text(json.dumps({"generation":3,"canonical_state":"BLURAY_VIDEO"}))
+   with mock.patch.object(view,"metadata_for",side_effect=RuntimeError("physical-race")),mock.patch.object(view.optical_model,"trace_event") as trace,mock.patch.object(view.argparse.ArgumentParser,"parse_args",return_value=type("Args",(),{"home":home,"enrich":False,"disc_id":None,"generation":3})()):
+    self.assertEqual(view.main(),0);self.assertEqual(trace.call_args.args[1],"PRESENTATION_FAILED")
  def test_exact_physical_sequence_acknowledges_every_generation(self):
   sequence=((42,"DVD_VIDEO","DVD","DVD A"),(43,"DRIVE_PRESENT_NO_MEDIA","EMPTY",None),(44,"BLURAY_FAMILY","BLURAY","COLOMBIANA"),(45,"DRIVE_PRESENT_NO_MEDIA","EMPTY",None),(46,"BLURAY_FAMILY","BLURAY","SECOND DISC"),(47,"DRIVE_PRESENT_NO_MEDIA","EMPTY",None))
   with tempfile.TemporaryDirectory() as raw:

@@ -54,7 +54,7 @@ class GatingAndBoundaries(unittest.TestCase):
   source="\n".join((PAYLOAD/name).read_text().lower() for name in ("openhtpc-optical.py","openhtpc-play-optical","openhtpc-protected-optical-backend.py"))
   for marker in ("keydb.cfg","urlopen(","import requests","curl ","wget ","http://","https://","download_keydb","fetch_keys"):self.assertNotIn(marker,source)
  def test_dvd_tmdb_backend_and_gpu_sources_unchanged_from_dev3(self):
-  for name in ("openhtpc-play-dvd","openhtpc-tmdb.py","openhtpc-protected-optical-backend.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):
+  for name in ("openhtpc-play-dvd","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):
    baseline=subprocess.run(["git","show",f"5c67efd82fa2c34d1f4e40b3f3e837ed3c0259f8:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
    self.assertEqual((PAYLOAD/name).read_text(),baseline)
 

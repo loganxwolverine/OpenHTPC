@@ -345,7 +345,7 @@ def metadata_for(home,install,state,enrich=False,generation=None):
  poster=tmdb.poster(home,data) if data.get("status")=="PASS" and (guard is None or guard()) else None
  if poster: data["poster_file"]=str(poster)
  return data
-def main():
+def _main():
     p = argparse.ArgumentParser()
     p.add_argument("--home", type=pathlib.Path)
     p.add_argument("--enrich", action="store_true")
@@ -395,6 +395,17 @@ def main():
     optical_model.trace_event(home,"DISC_SHEET_REGENERATED",optical_generation=generation,canonical_state=provenance["canonical_state"],presentation_state="READY",render_generation=generation,metadata_job_state=provenance["metadata_status"])
     print(json.dumps(rendered, ensure_ascii=False))
     return 0
+
+def main():
+ try:return _main()
+ except Exception as error:
+  # Optical activity is asynchronous; a transient render/input failure must not
+  # escape into the session engine or replace the generation-safe fallback.
+  try:
+   home=pathlib.Path(os.environ.get("OPENHTPC_HOME",pathlib.Path.home()))
+   optical_model.trace_event(home,"PRESENTATION_FAILED",presentation_state="FAILED",event_reason=type(error).__name__)
+  except Exception:pass
+  return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

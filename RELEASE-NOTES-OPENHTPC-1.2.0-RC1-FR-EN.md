@@ -9,7 +9,11 @@ Original project by Steve Dehanne.
 # OPENHTPC 1.2.0 RC1
 
 Pre-release: **Yes**
-RC1 physical release gate: **PENDING**
+RC1 physical release gate: **NO-GO**
+
+RC1 is retained as the tested candidate identity. Protected Blu-ray bitstream
+is an OPENHTPC-owned release blocker; the future `1.2.0-rc2` is reserved for
+stabilization only and is not prepared or qualified.
 
 ## Français
 
