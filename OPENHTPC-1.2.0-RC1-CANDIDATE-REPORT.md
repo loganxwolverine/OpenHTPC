@@ -35,3 +35,19 @@ guaranteed success for every disc.
 
 RC1 physical qualification is **PENDING**. No tag, publication or RC1 physical
 PASS is claimed by this assembly record.
+
+## Packaging hygiene audit
+
+The packaged README now derives its active identity from the RC1 release
+metadata and documents only current installation, update and public-command
+contracts.
+
+`payload/openhtpc-ui.py` retains a historical `1.1.2-dev1` fallback in the
+low-level About-page renderer. It is not reachable through the normal RC1
+product path: `openhtpc-system-page` reads installed `version.json`, falls back
+to installed `VERSION`, and `openhtpc-system-model.py` always supplies
+`model.technical.version`; session and SYSTÈME-action About rendering consume
+that complete model. Partial action models render playback/audio pages only.
+Direct invocation with a malformed model could expose the literal, so it is
+recorded as non-blocking technical debt. No functional payload file was changed
+for this packaging correction.

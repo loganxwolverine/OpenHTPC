@@ -1,10 +1,13 @@
-# Known limitations — OPENHTPC 1.1.3 RC2
+# Known limitations — OPENHTPC 1.2.0 RC1
 
 - Fedora 44 KDE Plasma on Wayland is the currently qualified platform.
 - Automatic French/TrueFrench audio selection is not qualified.
 - Automatic forced-subtitle selection is not qualified.
-- Blu-ray and UHD media may be detected and represented in the interface, but
-  complete physical Blu-ray/UHD playback is not qualified.
+- Protected optical dependencies added after Hardware Passport/runtime
+  snapshot generation currently require `openhtpc rebuild-passport` before
+  the refreshed capability is published.
+- UHD dropped frames observed on ZimaBoard 2 remain a deferred platform and
+  performance limitation.
 - Jellyfin, Plex and NAS plugins are not integrated.
 - HDR-to-SDR phase C6 is not implemented.
 - Plasma Bigscreen is not the canonical OPENHTPC desktop/session platform.

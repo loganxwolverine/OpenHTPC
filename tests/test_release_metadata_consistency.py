@@ -19,6 +19,11 @@ def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
             json_version="1.1.2-dev5", installer="1.1.2-dev5", build_id=BUILD_ID):
     (root / "payload").mkdir(parents=True)
     (root / "VERSION").write_text(top + "\n", encoding="utf-8")
+    (root / "README.md").write_text(
+        f"# OPENHTPC {top.replace('-', ' ').upper()}\nVersion: `{top}`\n"
+        f"sha256sum -c {MODULE.release_artifact_name(top)}.sha256\n",
+        encoding="utf-8",
+    )
     (root / "payload/VERSION").write_text(payload + "\n", encoding="utf-8")
     (root / "payload/version.json").write_text(json.dumps({"version": json_version, "build_id": build_id}), encoding="utf-8")
     (root / "payload/install-openhtpc-fedora.sh").write_text(
@@ -66,6 +71,15 @@ class ReleaseMetadataConsistency(unittest.TestCase):
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
         self.assertEqual(values["top_version"], "1.2.0-rc1")
+
+    def test_current_distribution_readme_matches_release_identity(self):
+        version = MODULE.canonical_version(ROOT)
+        MODULE.validate_distribution_readme((ROOT / "README.md").read_text(encoding="utf-8"), version)
+
+    def test_stale_distribution_readme_identity_is_rejected(self):
+        stale = "# OPENHTPC 1.1.2 AMD Base Validation Candidate\nVersion: `1.1.2-dev1`\n"
+        with self.assertRaisesRegex(ValueError, "RELEASE_README_ACTIVE_IDENTITY_MISMATCH"):
+            MODULE.validate_distribution_readme(stale, "1.2.0-rc1")
 
     def test_unchanged_flex_binary_records_rc1_product_identity(self):
         metadata = json.loads((ROOT / "payload/flex/BUILD-METADATA.json").read_text())

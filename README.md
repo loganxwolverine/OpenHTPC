@@ -1,53 +1,39 @@
-# OPENHTPC 1.1.2 AMD Base Validation Candidate
+<!--
+Copyright 2026 Steve Dehanne
+SPDX-License-Identifier: Apache-2.0
 
-This bounded post-1.1.1 candidate is version `1.1.2-dev1`, build
-`amd-base-runtime-validation-dev1`. It is derived from the frozen Audio P0 head
-and permits PURE runtime generation from observed capabilities instead of GPU
-vendor identity. It requires first physical validation on AMD hardware.
+Part of the OPENHTPC project.
+Original project by Steve Dehanne.
+-->
 
-The public RC3 tag `v1.1.0-rc3` and the qualified Audio P0 artifact remain
-immutable. This development candidate is not tagged or published.
+# OPENHTPC 1.2.0 RC1
 
-OPENHTPC was created as an original project by Steve Dehanne and is licensed
-under Apache-2.0. Third-party components retain their own copyrights and
-licenses; see `NOTICE`, `AUTHORS.md` and `THIRD_PARTY_NOTICES.md`.
+Version: `1.2.0-rc1`
+Build: `public-release-1.2.0-rc1`
+Status: **Release Candidate / prerelease — physical release gate pending**
 
-OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC. Its
-Core manages playback, capabilities and appliance lifecycle; the Hardware
-Passport records user-confirmed hardware choices; optional plugins extend the
-system without changing Core capability truth. Flex Launcher provides the
-ten-foot interface and MPV provides playback.
+OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
+Flex Launcher provides the ten-foot interface and MPV provides playback. The
+Hardware Passport, capabilities, media configuration and playback history stay
+on the local machine; normal operation does not require a cloud service.
 
-## Qualified platform and video modes
-
-The currently qualified platform is Fedora 44 KDE Plasma on Wayland. Other
-platforms are not claimed as validated.
-
-`PURE` is the default presentation and uses the qualified native MPV path.
-`CINÉMA AUTO` combines content scope, the project Recipe Catalogue and the
-current local Performance Map. It selects the highest-quality project-qualified
-presentation that is technically stable on the local hardware. It does not
-mean that a shader is always enabled; PURE is a valid CINÉMA AUTO result.
-
-Calibration is local, signature-driven and based on observed playback
-stability. It uses no cloud or AI service. The Hardware Passport and Performance
-Map remain user-local. `openhtpc doctor` reports product health; an unknown or
-unsupported capability is not automatically a product failure.
-
-Appliance mode inhibits desktop idle/suspend while OPENHTPC owns the couch
-session. Explicit quit restores the KDE Plasma desktop lifecycle.
+The qualified Dev14 baseline passed on Fedora 44 KDE Plasma/Wayland with
+Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. RC1 promotes that baseline
+without functional changes, but RC1 itself remains a prerelease until its
+separate physical release gate passes.
 
 ## Verify the download
 
-Keep the archive and its `.sha256` file together, then run:
+Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.1-PublicR2-Dev31.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0-RC1.tar.gz.sha256
 ```
 
 ## Install
 
-Extract the archive, enter the extracted directory and inspect first:
+Extract `OpenHTPC-1.2.0-RC1.tar.gz`, enter the extracted directory and inspect
+the installation first:
 
 ```bash
 ./install.sh --check
@@ -59,52 +45,28 @@ Install with the normal user account, not a root shell:
 ./install.sh
 ```
 
-The installer accepts only Fedora 44 with KDE Plasma. It may propose specific
-missing packages, RPM Fusion repositories and `libdvdcss`. Every system or
-repository mutation is explained and requires interactive consent before
-`sudo`/DNF is invoked. OPENHTPC never performs a general Fedora upgrade.
+The supported release platform is Fedora 44 with KDE Plasma on Wayland. The
+installer explains required system changes and requests consent before package
+or repository mutations. It does not perform a general Fedora upgrade.
 
-The installation lives under `~/.local/lib/openhtpc`; commands are linked under
-`~/.local/bin`. Reconnect the session or add that directory to `PATH` if it is
-not already present. OPENHTPC installs a managed KDE autostart entry and starts
-on the next login. First installation runs local hardware discovery and initial
-setup; updates preserve the existing Hardware Passport when present.
+OPENHTPC is installed under `~/.local/lib/openhtpc`; public command links are
+created under `~/.local/bin`. A managed KDE autostart entry starts the couch UI
+at the next login. Initial setup performs local hardware discovery and creates
+the Hardware Passport.
 
-## Update and uninstall
+## Update
 
-From the extracted candidate directory:
+From the extracted RC1 directory:
 
 ```bash
 ./update.sh
-./uninstall.sh
-./uninstall.sh --purge-config
 ```
 
-Update preserves user configuration, configured media sources, Hardware
-Passport, Performance Map, runtime and system dependencies. A versioned
-managed-file manifest removes only files proven to have belonged to the prior
-OPENHTPC installation and absent from the target payload. Unknown files and
-all user-persistent paths are outside this cleanup contract.
+Update preserves user configuration, MEDIA sources, the Hardware Passport,
+recorded video validations and other persistent user state. It replaces only
+managed product files according to the packaged manifest.
 
-Normal uninstall removes the managed product, command links and autostart entry
-while preserving user configuration. `--purge-config` also removes OPENHTPC
-configuration, cache, state and shared data. Neither mode removes media files,
-Fedora packages, RPM Fusion repositories or `libdvdcss`.
-
-## Graphical Media Sources
-
-The MÉDIA page supports zero to multiple configured filesystem sources. From
-the couch UI you can add a source, open it, navigate folders and files, or use
-RIGHT on a source to expose the non-destructive removal action. Removal only
-updates OPENHTPC configuration: it never deletes, moves or modifies media.
-Duplicate additions produce an explicit `SOURCE DÉJÀ AJOUTÉE` result.
-
-Sources must already be accessible as local filesystem paths. An existing CIFS
-or NFS mount can be selected through the picker, but OPENHTPC does not configure
-or mount SMB/NFS shares itself. SMB/NFS service integration remains future
-plugin work.
-
-## Public commands in dev31
+## Public commands
 
 ```text
 openhtpc start
@@ -114,21 +76,47 @@ openhtpc doctor
 openhtpc doctor --json
 openhtpc version
 openhtpc plugins
+openhtpc plugins --refresh
+openhtpc plugin enable <plugin-id>
+openhtpc plugin disable <plugin-id>
 openhtpc capabilities
 openhtpc capabilities --json
 openhtpc capabilities --refresh
+openhtpc capabilities --refresh --json
+openhtpc rebuild-passport
 openhtpc support-bundle
 ```
 
-There is no `openhtpc status` or `openhtpc update` command in this baseline.
+Additional expert video commands are listed by the command usage output.
+There is no `openhtpc status` or `openhtpc update` command; use `./update.sh`.
 
-See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md),
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[assets/ASSET_PROVENANCE.md](assets/ASSET_PROVENANCE.md) before distribution.
+## Blu-ray, UHD and protected media
 
-## Candidate status
+`plugin.bluray` is an opt-in plugin. Enable it explicitly to expose Blu-ray/UHD
+policy, presentation and play actions; DVD remains Core-owned. Generic device
+access, security, rendering and bounded playback execution remain Core
+services. If the plugin is absent, disabled or broken, Blu-ray/UHD play actions
+are not exposed.
 
-This package preserves the qualified dev27 Media Sources behavior while adding
-public packaging, managed-update hygiene and provenance-safe UI polish. The
-RC2 candidate completed physical validation and is frozen. This status does
-not constitute a final `1.1.0` release announcement.
+OPENHTPC does not provide, download, update, link to, parse, copy or modify a
+user KEYDB. It detects presence/readability metadata only. Users may configure
+their libaacs environment independently outside OPENHTPC. Protected optical
+`AVAILABLE` means `READY_TO_ATTEMPT`, never guaranteed decryptability or
+playback for every disc.
+
+## Known limitations
+
+- Run `openhtpc rebuild-passport` when protected-optical dependencies are
+  added after Hardware Passport/runtime snapshot generation.
+- UHD dropped frames observed on ZimaBoard 2 remain a deferred platform
+  performance limitation.
+- Plasma Login Manager on the qualified NVIDIA system required an external
+  SDDM workaround; OPENHTPC does not require that login manager.
+
+See [RC1 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC1-FR-EN.md),
+[known limitations](KNOWN_LIMITATIONS.md),
+[third-party notices](THIRD_PARTY_NOTICES.md) and
+[asset provenance](assets/ASSET_PROVENANCE.md).
+
+OPENHTPC was created as an original project by Steve Dehanne and is licensed
+under Apache-2.0. Third-party components retain their respective licenses.

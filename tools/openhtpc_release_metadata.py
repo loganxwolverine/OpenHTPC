@@ -72,6 +72,25 @@ def validate_installed_layout(install: pathlib.Path, expected_version: str, expe
         raise ValueError("INSTALLED_RELEASE_BUILD_ID_MISMATCH")
 
 
+def release_artifact_name(version: str) -> str:
+    base, separator, suffix = version.partition("-")
+    display_suffix = suffix.upper() if separator else ""
+    return f"OpenHTPC-{base}{('-' + display_suffix) if display_suffix else ''}.tar.gz"
+
+
+def validate_distribution_readme(text: str, version: str) -> None:
+    base, separator, suffix = version.partition("-")
+    display_version = f"{base} {suffix.upper()}" if separator else base
+    headings = re.findall(r"(?m)^# OPENHTPC (.+)$", text)
+    if not headings or headings[0] != display_version:
+        raise ValueError("RELEASE_README_ACTIVE_IDENTITY_MISMATCH")
+    if f"Version: `{version}`" not in text:
+        raise ValueError("RELEASE_README_CANONICAL_VERSION_MISSING")
+    checksum = release_artifact_name(version) + ".sha256"
+    if f"sha256sum -c {checksum}" not in text:
+        raise ValueError("RELEASE_README_CHECKSUM_COMMAND_MISMATCH")
+
+
 def validate_archive(archive: pathlib.Path, expected_build_id: str) -> dict[str, str]:
     with tempfile.TemporaryDirectory(prefix="openhtpc-metadata-") as raw:
         destination = pathlib.Path(raw)
@@ -81,7 +100,7 @@ def validate_archive(archive: pathlib.Path, expected_build_id: str) -> dict[str,
             if len(roots) != 1:
                 raise ValueError("RELEASE_ARCHIVE_LAYOUT_INVALID")
             root_name = next(iter(roots)); extracted = destination / root_name
-            for relative in ("VERSION", "payload/VERSION", "payload/version.json", "payload/install-openhtpc-fedora.sh"):
+            for relative in ("VERSION", "README.md", "payload/VERSION", "payload/version.json", "payload/install-openhtpc-fedora.sh"):
                 member = members.get(f"{root_name}/{relative}")
                 if member is None:
                     raise ValueError(f"RELEASE_ARCHIVE_METADATA_MISSING {relative}")
@@ -91,6 +110,7 @@ def validate_archive(archive: pathlib.Path, expected_build_id: str) -> dict[str,
                 target = extracted / relative; target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(stream.read())
         values = validate_tree(extracted, expected_build_id)
+        validate_distribution_readme((extracted / "README.md").read_text(encoding="utf-8"), values["top_version"])
         validate_installed_layout(extracted / "payload", values["top_version"], expected_build_id)
         return values
 
