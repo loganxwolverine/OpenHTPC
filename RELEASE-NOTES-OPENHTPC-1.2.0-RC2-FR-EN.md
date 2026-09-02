@@ -1,7 +1,7 @@
 # OPENHTPC 1.2.0 RC2
 
 Pre-release: **Yes**  
-Physical validation: **PENDING**
+Physical validation: **NO-GO — AVR STEREO in BITSTREAM mode**
 
 ## Français
 

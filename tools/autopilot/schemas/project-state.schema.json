@@ -4,12 +4,12 @@
   "properties": {
     "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION"], "type": "string"},
+    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_PHYSICAL_GATE_NO_GO_RC3_STABILIZATION_IMPLEMENTED"], "type": "string"},
     "default_behavior_change_expected": {"type": "boolean"},
     "dev13_physical_qualification": {"const": "FAILED_DISABLED_UI_GATING"},
     "dev14_physical_qualification": {"enum": ["PENDING", "PASS"], "type": "string"},
     "hardware_io_ownership_change": {"type": "boolean"},
-    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION"], "type": "string"},
+    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION", "AWAIT_RC3_PREPARATION_AUTHORIZATION"], "type": "string"},
     "next_action_context": {
       "additionalProperties": false,
       "properties": {
@@ -22,7 +22,7 @@
       "type": "object"
     },
     "next_action_kind": {"enum": ["PHYSICAL", "RELEASE_PREPARATION"], "type": "string"},
-    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION"], "type": "string"},
+    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION", "STOP_BEFORE_RC3_PREPARATION"], "type": "string"},
     "ownership_migration_status": {"const": "COMPLETE"},
     "physical_validation_required_after_implementation": {"type": "boolean"},
     "plugin_cutover_status": {"const": "COMPLETE"},
@@ -105,20 +105,33 @@
       "required": ["version", "build", "artifact_filename", "status", "physical_qualification", "origin_qualified_version", "origin_qualified_commit", "functional_changes_since_qualified_baseline"],
       "type": "object"
     },
-    "next_candidate": {
+    "rc2_candidate": {
       "additionalProperties": false,
       "properties": {
         "artifact_prepared": {"type": "boolean"},
         "build": {"minLength": 1, "type": "string"},
         "filename": {"minLength": 1, "type": "string"},
-        "physical_qualification": {"const": "PENDING"},
-        "protected_bluray_bitstream_fix": {"const": "SOFTWARE_PASS_PHYSICAL_VALIDATION_REQUIRED"},
+        "physical_evidence": {"items": {"type": "string"}, "type": "array"},
+        "physical_qualification": {"const": "PHYSICAL_GATE_NO_GO"},
+        "protected_bluray_bitstream_fix": {"const": "SOFTWARE_PASS_PHYSICAL_FAIL_STEREO"},
         "purpose": {"const": "STABILIZATION_ONLY_NO_NEW_FEATURES"},
-        "status": {"enum": ["IMPLEMENTED_NOT_QUALIFIED_NOT_PREPARED", "PENDING_PHYSICAL_VALIDATION"]},
+        "status": {"const": "PHYSICAL_GATE_NO_GO"},
         "uhd_open_failed": {"const": "EXTERNAL_AACS_PER_DISC_OR_ENVIRONMENT_LIMITATION_NON_BLOCKING"},
         "version": {"const": "1.2.0-rc2"}
       },
-      "required": ["artifact_prepared", "physical_qualification", "protected_bluray_bitstream_fix", "purpose", "status", "uhd_open_failed", "version"],
+      "required": ["artifact_prepared", "build", "filename", "physical_evidence", "physical_qualification", "protected_bluray_bitstream_fix", "purpose", "status", "uhd_open_failed", "version"],
+      "type": "object"
+    },
+    "next_candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_prepared": {"const": false},
+        "physical_qualification": {"const": "NOT_STARTED"},
+        "purpose": {"const": "PROTECTED_BLURAY_AUDIO_STABILIZATION_ONLY"},
+        "status": {"const": "NOT_PREPARED_NOT_QUALIFIED"},
+        "version": {"const": "1.2.0-rc3"}
+      },
+      "required": ["artifact_prepared", "physical_qualification", "purpose", "status", "version"],
       "type": "object"
     },
     "required_gate_reason": {"enum": ["PHYSICAL_VALIDATION", "RELEASE", "PHYSICAL_BITSTREAM_AND_STABILIZATION_VALIDATION"], "type": "string"},

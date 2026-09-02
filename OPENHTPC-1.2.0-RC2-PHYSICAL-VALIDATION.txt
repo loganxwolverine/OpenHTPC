@@ -1,5 +1,11 @@
 OPENHTPC 1.2.0 RC2 — SHORT TV PHYSICAL GATE
 
+RESULT: NO-GO
+
+Protected Blu-ray BITSTREAM opened with image/audio and returned to Flex, but
+the AVR reported STEREO. Protected Blu-ray PCM remained functional. RC3 is
+reserved for protected Blu-ray audio stabilization and is not prepared.
+
 Expected: 1.2.0-rc2 / public-release-1.2.0-rc2
 
 A. Verify checksum, extract, then run ./update.sh from RC2.

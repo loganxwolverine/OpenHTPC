@@ -1,5 +1,33 @@
 # OPENHTPC protected optical roadmap
 
+## 1.2.0 RC2 physical failure / RC3 audio stabilization
+
+Status: `RC2 PHYSICAL_GATE_NO_GO — RC3 NOT PREPARED`
+
+On the Fedora 44 / Denon HDMI validator, RC2 protected Blu-ray BITSTREAM
+opened with image and audio but the AVR reported STEREO. The same disc in PCM
+mode produced working PCM. Local MKV and physical DVD bitstream controls remain
+PASS. The RC2 policy change therefore affected behavior but did not establish
+protected passthrough: `SOFTWARE_PASS_PHYSICAL_FAIL_STEREO`.
+
+The installed PURE runtime contains no audio channel, device, track or SPDIF
+option. The inserted Blu-ray's selected main-title stream is MPV `aid=1`, DTS,
+six channels; a direct reconstruction can negotiate `spdif-dtshd`. RC2 deleted
+its per-run MPV log and retained neither final argv nor selected-track/AO
+evidence, so the physical stereo fallback cannot be attributed to a profile
+setting that is absent.
+
+The protected path now closes that ambiguity without changing file/DVD paths:
+both modes explicitly retain MPV primary-track auto-selection; BITSTREAM places
+`audio-channels=auto` and the qualified SPDIF codec allowlist at the end of
+option parsing after the runtime include; PCM explicitly clears SPDIF. The
+sanitized final argv, selected audio line and effective AO line are retained
+for the next physical gate.
+
+The next candidate is `1.2.0-rc3`, limited to protected Blu-ray audio
+stabilization. It is not prepared or qualified. No RC3 artifact may be built
+without explicit authorization.
+
 ## 1.2.0 RC2 stabilization
 
 Status: `IMPLEMENTED — AWAITING PHYSICAL VALIDATION — NOT QUALIFIED`

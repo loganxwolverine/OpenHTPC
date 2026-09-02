@@ -9,6 +9,7 @@ import json
 import importlib.util
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -43,6 +44,34 @@ def playback_policy(home:pathlib.Path)->tuple[Any,dict[str,Any]]:
         return (None,{"mpv_args":[]})
 
 
+def effective_policy_args(decision:dict[str,Any])->list[str]:
+    """Make protected optical audio intent explicit after every included option."""
+    args=[value for value in decision.get("mpv_args",[]) if not value.startswith(("--audio-spdif=","--audio-channels=","--aid="))]
+    args.append("--aid=auto")
+    requested=(decision.get("audio_output") or {}).get("requested","PCM")
+    if requested=="BITSTREAM":
+        args.extend(("--audio-channels=auto","--audio-spdif=ac3,eac3,dts,dts-hd,truehd"))
+    else:
+        args.append("--audio-spdif=")
+    return args
+
+
+def atomic_diagnostic(home:pathlib.Path,command:list[str],request:dict[str,Any],decision:dict[str,Any],raw:str,result:dict[str,Any])->None:
+    target=home/".local/state/openhtpc/protected-optical-last-command.json";target.parent.mkdir(parents=True,exist_ok=True)
+    selected=next((line.strip() for line in raw.splitlines() if re.search(r"(?:Selected audio|^Audio:)",line,re.I)),"UNKNOWN")
+    decoder=next((line.strip() for line in raw.splitlines() if "Selected decoder:" in line),"UNKNOWN")
+    output=next((line.strip() for line in raw.splitlines() if line.strip().startswith("AO:")),"UNKNOWN")
+    data={"schema":1,"argv":command,"device":request.get("device"),"generation":request.get("generation"),
+          "requested_audio_mode":(decision.get("audio_output") or {}).get("requested","PCM"),
+          "selected_audio":selected,"selected_decoder":decoder,"effective_audio_output":output,**result}
+    fd,name=tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as stream:json.dump(data,stream,ensure_ascii=False,sort_keys=True);stream.write("\n")
+        os.chmod(name,0o600);os.replace(name,target)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
+
 def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]=subprocess.run,
               finder:Callable[[str],str|None]=shutil.which,clock:Callable[[],float]=time.monotonic)->dict[str,Any]:
     """Ask MPV's normal libbluray integration to open a validated device."""
@@ -57,10 +86,10 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     except ValueError as error:return {"status":"OPEN_FAILED","process_started":False,"reason":str(error)}
     state_root=home/".local/state/openhtpc";state_root.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix="optical-mpv.",suffix=".log",dir=state_root);os.close(fd);attempt=pathlib.Path(name)
-    policy,decision=playback_policy(home);policy_args=decision.get("mpv_args",[])
-    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",*policy_args,
+    policy,decision=playback_policy(home);policy_args=effective_policy_args(decision)
+    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",
              "--cache=yes","--demuxer-readahead-secs=12.0","--demuxer-max-bytes=268435456","--demuxer-max-back-bytes=67108864",
-             f"--log-file={attempt}",f"--bluray-device={request['device']}","--","bd://"]
+             f"--log-file={attempt}",*policy_args,f"--bluray-device={request['device']}","--","bd://"]
     started=clock()
     try:
         completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
@@ -78,5 +107,8 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     if not opened:reason="DISC_OPEN_REFUSED" if exit_code!=127 else reason
     elif elapsed<0.75:reason="MPV_EXITED_IMMEDIATELY"
     status="OPEN_SUCCESS" if opened and elapsed>=0.75 else "OPEN_FAILED"
-    return {"status":status,"process_started":exit_code!=127,"media_opened":opened,"exit_code":exit_code,
+    result={"status":status,"process_started":exit_code!=127,"media_opened":opened,"exit_code":exit_code,
             "elapsed_seconds":round(elapsed,3),"reason":reason,"media_type":media_type,"protection":protection}
+    try:atomic_diagnostic(home,command,request,decision,raw,result)
+    except (OSError,TypeError,ValueError):pass
+    return result

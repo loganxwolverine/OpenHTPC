@@ -9,8 +9,9 @@ only: shared playback-policy application, authoritative protected playback
 context, expanded non-blocking attempt diagnostics, and disc-view exception
 containment.
 
-The protected Blu-ray bitstream fix is `SOFTWARE PASS / PHYSICAL VALIDATION
-REQUIRED`. RC2 is `PENDING PHYSICAL VALIDATION` and no physical bitstream PASS
+Physical validation closed RC2 `NO-GO`: BITSTREAM playback opened with image
+and audio, but the AVR reported STEREO. PCM playback remained functional. The
+fix status is `SOFTWARE_PASS_PHYSICAL_FAIL_STEREO`; no physical bitstream PASS
 is claimed.
 
 The UHD `OPEN_FAILED` reproduced outside OPENHTPC remains an external AACS
