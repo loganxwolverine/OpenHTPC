@@ -264,13 +264,13 @@ class CanonicalProjectState(unittest.TestCase):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="PHYSICAL_VALIDATION",physical_validation_required=True,default_behavior_change=True)
   decision=A.policy_evaluate(value);self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("HUMAN_GATE","BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
  def test_57_software_cutover_is_complete(self):
-  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("RC_PHYSICAL_RELEASE_GATE","PHYSICAL",False))
+  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("RC2_PHYSICAL_STABILIZATION_VALIDATION","PHYSICAL",False))
  def test_58_physical_task_can_require_before_execution(self):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="SYSTEM_CONFIGURATION")
   self.assertEqual(A.policy_evaluate(value)["stage"],"BEFORE_EXECUTION")
  def test_59_current_state_records_rc_physical_validation_gate(self):
-  self.assertTrue(self.state["physical_validation_required_after_implementation"]);self.assertEqual(self.state["qualification"]["status"],"PASS");self.assertEqual(self.state["release_candidate"]["physical_qualification"],"PENDING")
- def test_60_current_state_records_release_preparation_gate(self):self.assertEqual((self.state["required_human_gate_stage"],self.state["required_gate_reason"]),("BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
+  self.assertTrue(self.state["physical_validation_required_after_implementation"]);self.assertEqual(self.state["qualification"]["status"],"PASS");self.assertEqual(self.state["next_candidate"]["physical_qualification"],"PENDING")
+ def test_60_current_state_records_release_preparation_gate(self):self.assertEqual((self.state["required_human_gate_stage"],self.state["required_gate_reason"]),("BEFORE_EXECUTION","PHYSICAL_BITSTREAM_AND_STABILIZATION_VALIDATION"))
  def test_61_current_state_rejects_default_behavior_downgrade(self):
   with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
    A.validate_plan_against_state(self.state,self.cutover_plan(default_behavior_change=False))
@@ -292,8 +292,8 @@ class CanonicalProjectState(unittest.TestCase):
   self.assertEqual(qualification["qualified_commit"],"e47ebe11c39b493746a1e38f258d462be0c86ea2")
   self.assertEqual(qualification["artifact"]["sha256"],"94e030482c46b041ea0d791e261d0fea11e6c545270f036ef99543e324a65194")
   self.assertEqual({item["family"]:item["status"] for item in qualification["platforms"]},{"INTEL":"PASS","AMD":"PASS","NVIDIA":"PASS"})
- def test_69_rc1_is_promoted_but_not_physically_qualified(self):
-  candidate=self.state["release_candidate"]
-  self.assertEqual((candidate["version"],candidate["build"]),("1.2.0-rc1","public-release-1.2.0-rc1"));self.assertEqual(candidate["physical_qualification"],"PENDING");self.assertFalse(candidate["functional_changes_since_qualified_baseline"])
+ def test_69_rc1_is_no_go_and_rc2_is_pending(self):
+  self.assertEqual(self.state["release_candidate"]["physical_qualification"],"NO_GO");candidate=self.state["next_candidate"]
+  self.assertEqual((candidate["version"],candidate["build"]),("1.2.0-rc2","public-release-1.2.0-rc2"));self.assertEqual(candidate["physical_qualification"],"PENDING")
 
 if __name__=="__main__":unittest.main()

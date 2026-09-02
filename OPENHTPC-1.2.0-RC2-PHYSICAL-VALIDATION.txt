@@ -1,0 +1,16 @@
+OPENHTPC 1.2.0 RC2 — SHORT TV PHYSICAL GATE
+
+Expected: 1.2.0-rc2 / public-release-1.2.0-rc2
+
+A. Verify checksum, extract, then run ./update.sh from RC2.
+B. Run openhtpc version and openhtpc doctor; Doctor must be READY.
+C. Protected Blu-ray / BITSTREAM: opens, image, audio, receiver says bitstream, quit returns to Flex.
+D. Protected Blu-ray / PCM: opens and PCM audio works.
+E. Local MKV / BITSTREAM control.
+F. Physical DVD / BITSTREAM control.
+G. Disable plugin.bluray: Blu-ray badge/action remain absent; then re-enable it.
+H. If drive 2 remains connected, select /dev/sr1 and verify routing/context/attempt use /dev/sr1.
+I. On any protected OPEN_FAILED, verify recorded diagnostics and Doctor remains READY.
+
+The known external UHD AACS failure is not an RC2 release-blocker retest.
+Record each result separately. Do not tag or call RC2 qualified.

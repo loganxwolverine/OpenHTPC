@@ -1,4 +1,4 @@
-# Known limitations — OPENHTPC 1.2.0 RC1
+# Known limitations — OPENHTPC 1.2.0 RC2
 
 - Fedora 44 KDE Plasma on Wayland is the currently qualified platform.
 - Automatic French/TrueFrench audio selection is not qualified.

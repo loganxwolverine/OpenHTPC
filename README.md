@@ -6,11 +6,11 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.2.0 RC1
+# OPENHTPC 1.2.0 RC2
 
-Version: `1.2.0-rc1`
-Build: `public-release-1.2.0-rc1`
-Status: **Release Candidate / prerelease — physical release gate pending**
+Version: `1.2.0-rc2`
+Build: `public-release-1.2.0-rc2`
+Status: **Release Candidate / prerelease — physical validation pending**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
 Flex Launcher provides the ten-foot interface and MPV provides playback. The
@@ -18,21 +18,21 @@ Hardware Passport, capabilities, media configuration and playback history stay
 on the local machine; normal operation does not require a cloud service.
 
 The qualified Dev14 baseline passed on Fedora 44 KDE Plasma/Wayland with
-Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. RC1 promotes that baseline
-without functional changes, but RC1 itself remains a prerelease until its
-separate physical release gate passes.
+Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. RC2 adds only the protected
+optical stabilization required after the RC1 physical gate closed NO-GO. RC2
+remains a prerelease until Steve's separate physical validation passes.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.2.0-RC1.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0-RC2.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.2.0-RC1.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.2.0-RC2.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -56,7 +56,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted RC1 directory:
+From the extracted RC2 directory:
 
 ```bash
 ./update.sh
@@ -113,7 +113,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [RC1 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC1-FR-EN.md),
+See [RC2 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC2-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).

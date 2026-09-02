@@ -13,7 +13,7 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION",
+  "current_phase": "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
   "dev14_physical_qualification": "PASS",
@@ -83,10 +83,14 @@
     "version": "1.2.0-rc1"
   },
   "next_candidate": {
-    "artifact_prepared": false,
+    "artifact_prepared": true,
+    "build": "public-release-1.2.0-rc2",
+    "filename": "OpenHTPC-1.2.0-RC2.tar.gz",
     "physical_qualification": "PENDING",
+    "protected_bluray_bitstream_fix": "SOFTWARE_PASS_PHYSICAL_VALIDATION_REQUIRED",
     "purpose": "STABILIZATION_ONLY_NO_NEW_FEATURES",
-    "status": "IMPLEMENTED_NOT_QUALIFIED_NOT_PREPARED",
+    "status": "PENDING_PHYSICAL_VALIDATION",
+    "uhd_open_failed": "EXTERNAL_AACS_PER_DISC_OR_ENVIRONMENT_LIMITATION_NON_BLOCKING",
     "version": "1.2.0-rc2"
   },
   "required_gate_reason": "PHYSICAL_BITSTREAM_AND_STABILIZATION_VALIDATION",
