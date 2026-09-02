@@ -348,7 +348,7 @@ bc35137cc2fc0545258d0014cce2b4254686ac822fe99392fe979b5489051bda  tools/autopilo
 733a38663c2dc564949ee9613079c6fd4b13a0cd7d3bffc90b07d8afb38522e0  tools/build-1.2.0-rc1.py
 73378625fd126e7366bc2bf732c8d77c2e830c75e07c16eec48821aa26446a6d  tools/build-1.2.0-rc2.py
 2c7c04e85955e2cbec69f75380d520b74451ff9bd65eb5091e2f78011ee24a6f  tools/build-1.2.0-rc3.py
-78598d3e7e00123045d874cbbea976d2f5a2eeaece3b356d0cd65f23eeadeff5  tools/build-1.2.0-rc4.py
+2c130bc51dd8f53591c517e090a3249e51cff43d51fe7ba7b3398fbde6565551  tools/build-1.2.0-rc4.py
 5370222b81fa8b3ee450725edc77216f91fcc07c5961a096ee1c175e4695fbaf  tools/build-amd-base-p0-dev1.py
 9bbe3a687267ef2d12af2a0b5b4dec1d4ed512bc7fa558f234f20c8a70e132db  tools/build-amd-codec-phase2b-dev2.py
 79f45bb34fcf68ea22bae6b148697ff3e69fbc604d6ef4735f3dfe9546cae3fb  tools/build-amd-codec-phase2b-dev3.py

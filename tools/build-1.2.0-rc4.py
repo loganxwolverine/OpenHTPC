@@ -8,7 +8,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 NAME = "OpenHTPC-1.2.0-RC4"
 BUILD = "public-release-1.2.0-rc4"
 ARTIFACTS=ROOT/"artifacts"
-EXCLUDED={".git","artifacts","__pycache__","diagnostics"}
+EXCLUDED={".git","artifacts","__pycache__","diagnostics",".pytest_cache",".openhtpc-autopilot"}
 def digest(path):
  value=hashlib.sha256()
  with path.open("rb") as stream:
