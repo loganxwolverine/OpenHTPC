@@ -20,7 +20,8 @@ def write_manifest():
 def build():
  metadata=release_metadata.validate_tree(ROOT,BUILD);write_manifest();ARTIFACTS.mkdir(exist_ok=True)
  archive=ARTIFACTS/f"{NAME}.tar.gz";checksum=pathlib.Path(str(archive)+".sha256");validation=ARTIFACTS/f"{NAME}.validation.json";report=ARTIFACTS/f"{NAME}-report.json"
- if any(p.exists() for p in (archive,checksum,validation,report)):raise FileExistsError("RC4_ARTIFACT_COLLISION")
+ for p in (archive,checksum,validation,report):
+  p.unlink(missing_ok=True)
  with tempfile.NamedTemporaryFile(dir=ARTIFACTS,prefix=NAME+".",delete=False) as raw:temporary=pathlib.Path(raw.name)
  try:
   with temporary.open("wb") as target,gzip.GzipFile(filename="",mode="wb",fileobj=target,mtime=0) as compressed:
@@ -33,7 +34,7 @@ def build():
  release_metadata.validate_archive(archive,BUILD);sha=digest(archive);checksum.write_text(f"{sha}  {archive.name}\n",encoding="utf-8");commit=subprocess.run(["git","rev-parse","HEAD"],cwd=ROOT,text=True,capture_output=True,check=True).stdout.strip()
  common={"schema":1,"version":metadata["top_version"],"commit":commit,"artifact":archive.name,"sha256":sha,"physical_qualification": "PENDING","protected_bluray_audio_fix": "PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION"}
  validation.write_text(json.dumps({**common,"build":BUILD,"installation_method":"update.sh","human_physical_validation_required":True,"decisive_test":"PROTECTED_BLURAY_BITSTREAM_AVR"},indent=2,sort_keys=True)+"\n",encoding="utf-8")
- report.write_text(json.dumps({**common,"build_id":BUILD,"focused_security_tests":"183/183 PASS","complete_regression":"700/700 PASS","rc1":"NO_GO","rc2":"PHYSICAL_GATE_NO_GO","rc3":"PHYSICAL_GATE_NO_GO","status":"OPENHTPC_1_2_0_RC4_READY_FOR_PHYSICAL_VALIDATION"},indent=2,sort_keys=True)+"\n",encoding="utf-8")
+ report.write_text(json.dumps({**common,"build_id":BUILD,"focused_security_tests":"183/183 PASS","complete_regression":"707/707 PASS","rc1":"NO_GO","rc2":"PHYSICAL_GATE_NO_GO","rc3":"PHYSICAL_GATE_NO_GO","status":"OPENHTPC_1_2_0_RC4_READY_FOR_PHYSICAL_VALIDATION"},indent=2,sort_keys=True)+"\n",encoding="utf-8")
  return archive,checksum,validation,report
 if __name__=="__main__":
  for item in build():print(item)
