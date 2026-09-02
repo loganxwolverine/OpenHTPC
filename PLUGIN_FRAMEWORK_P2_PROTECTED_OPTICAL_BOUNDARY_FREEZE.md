@@ -1,6 +1,6 @@
 # Plugin Framework P2 protected-optical architectural boundary freeze
 
-Status: `PHASE 12 — ARCHITECTURE FROZEN / CUTOVER INCOMPLETE`
+Status: `PHASE 12 — ARCHITECTURE FROZEN / DEV14 CUTOVER PHYSICALLY QUALIFIED`
 
 This document freezes the boundary reached after Phases 1–11. It changes no
 runtime behavior. The qualified Core path and every fallback remain present,
@@ -36,7 +36,7 @@ These Core responsibilities are not currently migration failures. Low-level
 I/O, security and execution may remain shared platform services requested
 through validated plugin/Core contracts.
 
-## Actual behavior matrix before production cutover
+## Historical behavior matrix before production cutover
 
 This matrix follows the production selectors in `openhtpc-optical.py`,
 `openhtpc-core.py`, `openhtpc-disc-view.py` and `openhtpc-play-optical`.
@@ -73,12 +73,12 @@ canonical publication, generic registry/contract validation, resource
 validation/loading, Flex rendering, token security, dispatcher revalidation,
 generic execution/MPV service and result recording.
 
-Some remaining Core implementation is media-specific even where its system
-calls may intentionally remain Core: libbluray/AACS/BD+ and KEYDB acquisition
-adapters, the current Blu-ray-shaped raw-fact merge, `bd://` adapter, and all
-migration fallback functions above. Production cutover should hide those
-services behind validated plugin requests and retire user-visible fallback
-policy; it need not move their system calls into plugin code.
+At the time of this audit, some remaining Core implementation was
+media-specific even where its system calls could intentionally remain Core:
+libbluray/AACS/BD+ and KEYDB acquisition adapters, the Blu-ray-shaped raw-fact
+merge, `bd://` adapter, and the migration fallback functions above. The later
+production cutover hid those services behind validated plugin requests without
+moving their system calls into plugin code.
 
 ## Fallback retirement readiness
 
@@ -94,22 +94,19 @@ policy; it need not move their system calls into plugin code.
 | Structural normalization | Yes | Yes | Yes | Core filesystem acquisition | Yes indirectly | Required with classifier cutover |
 | Static assets | Yes, exact SHA | Yes | Yes | Core validator/loader/renderer | Yes | Badge validation required |
 
-Automated equivalence and isolation are complete, but retirement is not ready
-under the current default because the plugin is disabled. A central feature
-authority must first define absent/disabled/broken as unavailable rather than
-silently selecting media-specific Core behavior. Core fallbacks must remain
-until that bounded cutover is deliberately implemented and qualified.
+This table records readiness at the frozen pre-cutover audit. Automated
+equivalence and isolation were complete, but retirement still required the
+central feature authority later implemented by Dev13 and corrected by Dev14.
 
 ## Desired long-term plugin semantics and cutover status
 
-The target is: absent means `NOT_INSTALLED` with no Blu-ray/UHD feature
+The target was: absent means `NOT_INSTALLED` with no Blu-ray/UHD feature
 exposure; disabled means no active contribution; enabled means plugin policy
 with generic Core services; broken means feature unavailable while Core and
-generic optical services remain healthy. Current behavior differs in all
-negative plugin states because the complete Core media-specific fallback is
-still selected.
+generic optical services remain healthy. Dev14 physically qualified those
+production semantics, including disabled UI gating.
 
-`PLUGIN_CUTOVER_STATUS=INCOMPLETE`
+`PLUGIN_CUTOVER_STATUS=COMPLETE_PHYSICALLY_QUALIFIED_DEV14`
 
 ## Installation model recommendation
 
@@ -120,10 +117,20 @@ updates while keeping base installations and Doctor truthful. Model 1 leaves
 a qualified selected feature unexpectedly inactive; Model 3 requires a mature
 separate plugin-package installer and lifecycle that does not yet exist.
 
-## Future physical qualification matrix
+## Dev14 physical qualification closure
 
-No physical validation is required for this documentation phase. A future
-production cutover requires:
+Dev13 implemented the production cutover. Its first physical validation found
+a real regression: legacy UI constructors recreated a Blu-ray play action when
+`plugin.bluray` was disabled. Dev14 corrected that UI-gating defect.
+
+The exact Dev14 artifact was subsequently physically qualified on ZimaBoard 2,
+Ryzen AMD and NVIDIA RTX 3050. The enabled protected Blu-ray/UHD paths, negative
+disabled-plugin gating, Core/Flex/MEDIA behavior and DVD regression all passed.
+The complete evidence is recorded in
+`OPENHTPC-1.2.0-DEV14-MULTI-PLATFORM-PHYSICAL-QUALIFICATION-REPORT.md`.
+
+The following matrix was the pre-cutover qualification requirement and is
+retained as historical architecture context:
 
 - ZimaBoard 2, plugin enabled: protected Blu-ray and protected UHD detection,
   classification, exact badge, enabled action, launch, image/audio,
@@ -140,6 +147,7 @@ production cutover requires:
 ## Frozen conclusion
 
 No meaningful media-state pure/declarative responsibility remains in Core.
-The next useful change is not more raw-I/O migration. It is a bounded feature
-cutover that makes `plugin.bluray` required for Blu-ray/UHD policy and feature
-exposure while retaining generic Core I/O, security, rendering and execution.
+The bounded feature cutover now makes `plugin.bluray` required for Blu-ray/UHD
+policy and feature exposure while retaining generic Core I/O, security,
+rendering and execution. Dev14 is a qualified candidate for the separate
+OPENHTPC 1.2.0 RC-preparation step; it is not itself an RC.

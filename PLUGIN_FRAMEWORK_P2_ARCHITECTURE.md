@@ -325,11 +325,11 @@ remain after this phase.
 ## Protected Optical migration boundary
 
 The post-Phase-11 boundary and production cutover audit are frozen in
-`PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md`. The current cutover
-status is `INCOMPLETE`: absent, disabled or broken plugin states still select
-media-specific Core migration fallbacks. This is intentional safety behavior
-until a separately qualified production cutover; it is not evidence that
-generic Core I/O, security, execution or rendering services must migrate.
+`PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md`. Dev13 completed the
+production cutover but physical testing exposed a disabled-plugin UI-gating
+defect. Dev14 corrected that defect and the resulting cutover was physically
+qualified on Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. Generic Core
+I/O, security, execution and rendering services remain intentionally in Core.
 
 Protected Optical is the first P2 migration candidate. Phase 3 moves only its
 Doctor presentation; no media behavior changes. Generic optical state, provider contract, dispatcher

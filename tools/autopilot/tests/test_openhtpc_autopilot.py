@@ -264,12 +264,13 @@ class CanonicalProjectState(unittest.TestCase):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="PHYSICAL_VALIDATION",physical_validation_required=True,default_behavior_change=True)
   decision=A.policy_evaluate(value);self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("HUMAN_GATE","BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
  def test_57_software_cutover_is_complete(self):
-  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("PHYSICAL_VALIDATION","PHYSICAL",False))
+  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("RC_PREPARATION","RELEASE_PREPARATION",False))
  def test_58_physical_task_can_require_before_execution(self):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="SYSTEM_CONFIGURATION")
   self.assertEqual(A.policy_evaluate(value)["stage"],"BEFORE_EXECUTION")
- def test_59_current_state_records_physical_validation(self):self.assertTrue(self.state["physical_validation_required_after_implementation"])
- def test_60_current_state_records_physical_gate(self):self.assertEqual((self.state["required_human_gate_stage"],self.state["required_gate_reason"]),("BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
+ def test_59_current_state_records_completed_physical_validation(self):
+  self.assertFalse(self.state["physical_validation_required_after_implementation"]);self.assertEqual(self.state["qualification"]["status"],"PASS")
+ def test_60_current_state_records_release_preparation_gate(self):self.assertEqual((self.state["required_human_gate_stage"],self.state["required_gate_reason"]),("BEFORE_EXECUTION","RELEASE"))
  def test_61_current_state_rejects_default_behavior_downgrade(self):
   with self.assertRaisesRegex(A.AutopilotError,"PLAN_CONTRADICTS_CANONICAL_STATE"):
    A.validate_plan_against_state(self.state,self.cutover_plan(default_behavior_change=False))
@@ -283,5 +284,13 @@ class CanonicalProjectState(unittest.TestCase):
   self.assertFalse(self.state["hardware_io_ownership_change"]);self.assertFalse(self.state["security_boundary_change"])
  def test_65_stop_policy_is_post_implementation(self):self.assertTrue(A.plan_has_executable_step(self.cutover_plan()))
  def test_66_ordinary_stop_plan_has_no_executable_step(self):self.assertFalse(A.plan_has_executable_step(plan(next_step_policy="STOP")))
+ def test_67_legacy_pending_project_state_remains_valid(self):
+  value=dict(self.state);value.pop("qualification");value.update({"current_phase":"P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE","dev14_physical_qualification":"PENDING","next_action":"PHYSICAL_VALIDATION","next_action_kind":"PHYSICAL","next_step_after_software":"STOP_FOR_PHYSICAL_VALIDATION","physical_validation_required_after_implementation":True,"required_gate_reason":"PHYSICAL_VALIDATION"})
+  self.assertEqual(A.validate_document(self.root,value,"project-state.schema.json"),value)
+ def test_68_qualification_identity_and_matrix_are_canonical(self):
+  qualification=self.state["qualification"]
+  self.assertEqual(qualification["qualified_commit"],"e47ebe11c39b493746a1e38f258d462be0c86ea2")
+  self.assertEqual(qualification["artifact"]["sha256"],"94e030482c46b041ea0d791e261d0fea11e6c545270f036ef99543e324a65194")
+  self.assertEqual({item["family"]:item["status"] for item in qualification["platforms"]},{"INTEL":"PASS","AMD":"PASS","NVIDIA":"PASS"})
 
 if __name__=="__main__":unittest.main()

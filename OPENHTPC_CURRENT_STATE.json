@@ -13,25 +13,62 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE",
+  "current_phase": "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
-  "dev14_physical_qualification": "PENDING",
+  "dev14_physical_qualification": "PASS",
   "hardware_io_ownership_change": false,
-  "next_action": "PHYSICAL_VALIDATION",
+  "next_action": "RC_PREPARATION",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
     "enabled_valid": "plugin policy exposes feature; generic Core services execute securely",
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
-  "next_action_kind": "PHYSICAL",
-  "next_step_after_software": "STOP_FOR_PHYSICAL_VALIDATION",
+  "next_action_kind": "RELEASE_PREPARATION",
+  "next_step_after_software": "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION",
   "ownership_migration_status": "COMPLETE",
-  "physical_validation_required_after_implementation": true,
+  "physical_validation_required_after_implementation": false,
   "plugin_cutover_status": "COMPLETE",
   "plugin_policy_feature_owner": "plugin.bluray",
-  "required_gate_reason": "PHYSICAL_VALIDATION",
+  "qualification": {
+    "artifact": {
+      "build": "plugin-framework-p2-production-cutover-ui-gating-dev14",
+      "filename": "OpenHTPC-1.2.0-Plugin-Framework-P2-Production-Cutover-UI-Gating-Dev14.tar.gz",
+      "sha256": "94e030482c46b041ea0d791e261d0fea11e6c545270f036ef99543e324a65194",
+      "version": "1.2.0-dev14"
+    },
+    "candidate_status": "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION",
+    "limitations": [
+      {
+        "blocking": false,
+        "description": "Run openhtpc rebuild-passport when protected-optical dependencies are added after Hardware Passport/runtime snapshot generation; recorded video validations are preserved.",
+        "id": "PROTECTED_OPTICAL_POST_SNAPSHOT_REBUILD_PASSPORT",
+        "status": "OPERATIONAL_REQUIREMENT"
+      },
+      {
+        "blocking": false,
+        "description": "UHD dropped frames observed on ZimaBoard 2 remain a deferred platform/performance limitation.",
+        "id": "ZIMABOARD_UHD_DROPPED_FRAMES",
+        "status": "KNOWN_LIMITATION"
+      }
+    ],
+    "platforms": [
+      {"family": "INTEL", "model": "ZimaBoard 2", "status": "PASS"},
+      {"family": "AMD", "model": "Ryzen", "status": "PASS"},
+      {"family": "NVIDIA", "model": "RTX 3050", "status": "PASS"}
+    ],
+    "qualified_commit": "e47ebe11c39b493746a1e38f258d462be0c86ea2",
+    "scenarios": [
+      {"id": "CORE_FLEX_MEDIA", "status": "PASS"},
+      {"id": "PLUGIN_DISABLED_UI_GATING", "status": "PASS"},
+      {"id": "PROTECTED_BLURAY", "status": "PASS"},
+      {"id": "PROTECTED_UHD_BLURAY", "status": "PASS"},
+      {"id": "DVD", "status": "PASS"}
+    ],
+    "status": "PASS"
+  },
+  "required_gate_reason": "RELEASE",
   "required_human_gate_stage": "BEFORE_EXECUTION",
   "schema_version": 1,
   "security_boundary_change": false,

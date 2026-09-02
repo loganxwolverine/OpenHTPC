@@ -3,7 +3,8 @@
 # OPENHTPC Plugin Framework P2 UI Gating — 1.2.0-dev14
 
 - Prevents protected-optical play actions from remaining visible when `plugin.bluray` is disabled, absent or broken.
-- Preserves Core-owned DVD behavior and awaits physical qualification.
+- Preserves Core-owned DVD behavior.
+- Records multi-platform physical qualification on Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050; Dev14 is a qualified candidate for a separate RC-preparation step, not an RC.
 
 # OPENHTPC Plugin Framework P2 Production Cutover — 1.2.0-dev13
 

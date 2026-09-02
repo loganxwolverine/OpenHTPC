@@ -4,12 +4,12 @@
   "properties": {
     "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-    "current_phase": {"const": "P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE"},
+    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED"], "type": "string"},
     "default_behavior_change_expected": {"type": "boolean"},
     "dev13_physical_qualification": {"const": "FAILED_DISABLED_UI_GATING"},
-    "dev14_physical_qualification": {"const": "PENDING"},
+    "dev14_physical_qualification": {"enum": ["PENDING", "PASS"], "type": "string"},
     "hardware_io_ownership_change": {"type": "boolean"},
-    "next_action": {"const": "PHYSICAL_VALIDATION"},
+    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION"], "type": "string"},
     "next_action_context": {
       "additionalProperties": false,
       "properties": {
@@ -21,13 +21,75 @@
       "required": ["plugin_absent", "disabled", "enabled_valid", "broken"],
       "type": "object"
     },
-    "next_action_kind": {"const": "PHYSICAL"},
-    "next_step_after_software": {"const": "STOP_FOR_PHYSICAL_VALIDATION"},
+    "next_action_kind": {"enum": ["PHYSICAL", "RELEASE_PREPARATION"], "type": "string"},
+    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION"], "type": "string"},
     "ownership_migration_status": {"const": "COMPLETE"},
     "physical_validation_required_after_implementation": {"type": "boolean"},
     "plugin_cutover_status": {"const": "COMPLETE"},
     "plugin_policy_feature_owner": {"const": "plugin.bluray"},
-    "required_gate_reason": {"const": "PHYSICAL_VALIDATION"},
+    "qualification": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "additionalProperties": false,
+          "properties": {
+            "build": {"minLength": 1, "type": "string"},
+            "filename": {"minLength": 1, "type": "string"},
+            "sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "version": {"minLength": 1, "type": "string"}
+          },
+          "required": ["filename", "sha256", "version", "build"],
+          "type": "object"
+        },
+        "candidate_status": {"enum": ["QUALIFIED_CANDIDATE_FOR_RC_PREPARATION"], "type": "string"},
+        "limitations": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blocking": {"type": "boolean"},
+              "description": {"minLength": 1, "type": "string"},
+              "id": {"pattern": "^[A-Z0-9_]+$", "type": "string"},
+              "status": {"enum": ["DEFERRED", "KNOWN_LIMITATION", "OPERATIONAL_REQUIREMENT"], "type": "string"}
+            },
+            "required": ["id", "status", "blocking", "description"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "platforms": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "family": {"enum": ["INTEL", "AMD", "NVIDIA"], "type": "string"},
+              "model": {"minLength": 1, "type": "string"},
+              "status": {"enum": ["PENDING", "PASS", "FAIL"], "type": "string"}
+            },
+            "required": ["family", "model", "status"],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "qualified_commit": {"pattern": "^[0-9a-f]{40}$", "type": "string"},
+        "scenarios": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {"pattern": "^[A-Z0-9_]+$", "type": "string"},
+              "status": {"enum": ["PENDING", "PASS", "FAIL", "NOT_APPLICABLE"], "type": "string"}
+            },
+            "required": ["id", "status"],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "status": {"enum": ["PENDING", "PASS", "FAIL"], "type": "string"}
+      },
+      "required": ["status", "candidate_status", "qualified_commit", "artifact", "platforms", "scenarios", "limitations"],
+      "type": "object"
+    },
+    "required_gate_reason": {"enum": ["PHYSICAL_VALIDATION", "RELEASE"], "type": "string"},
     "required_human_gate_stage": {"const": "BEFORE_EXECUTION"},
     "schema_version": {"const": 1},
     "security_boundary_change": {"type": "boolean"},
