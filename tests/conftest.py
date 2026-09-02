@@ -10,22 +10,28 @@ from __future__ import annotations
 
 import os
 import pathlib
+import pwd
 import shutil
 import tempfile
 import pytest
+
+# Resolve the real host user home independently from system passwd database
+# (never depends on Path.home(), expanduser("~"), or os.environ["HOME"])
+try:
+    REAL_USER_HOME = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+except (KeyError, OSError):
+    REAL_USER_HOME = pathlib.Path("/home/steve").resolve()
+
+REAL_STATE_DIR = REAL_USER_HOME / ".local/state/openhtpc"
+REAL_CONFIG_DIR = REAL_USER_HOME / ".config/openhtpc"
 
 # Create a dedicated, hermetic session temporary directory
 SESSION_SANDBOX = tempfile.TemporaryDirectory(prefix="openhtpc-test-sandbox-")
 SANDBOX_PATH = pathlib.Path(SESSION_SANDBOX.name).resolve()
 
-# Real user home that must NEVER be written to or touched by tests
-REAL_USER_HOME = pathlib.Path.home().resolve()
-REAL_STATE_DIR = REAL_USER_HOME / ".local/state/openhtpc"
-REAL_CONFIG_DIR = REAL_USER_HOME / ".config/openhtpc"
-
 
 def _record_real_tree_state() -> dict[pathlib.Path, float]:
-    """Capture mtimes of existing files in real user state/config dirs if they exist."""
+    """Capture snapshot of existing files in real host user state/config dirs."""
     state = {}
     for root in (REAL_STATE_DIR, REAL_CONFIG_DIR):
         if root.is_dir():
@@ -65,19 +71,20 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True, scope="session")
 def session_isolation_guard():
-    """Ensure session sandbox is active and clean up on session finish."""
+    """Ensure session sandbox is active and verify zero modification to real host user directories."""
     before_state = _record_real_tree_state()
     yield
     after_state = _record_real_tree_state()
     SESSION_SANDBOX.cleanup()
 
-    # Verify no file in real user state/config was modified or created during test session
+    # Verify no file in real host user state/config was modified, created, or deleted during test session
     new_files = set(after_state.keys()) - set(before_state.keys())
+    deleted_files = set(before_state.keys()) - set(after_state.keys())
     modified_files = [p for p in before_state if p in after_state and before_state[p] != after_state[p]]
-    if new_files or modified_files:
+    if new_files or modified_files or deleted_files:
         raise RuntimeError(
-            f"TEST ISOLATION LEAK DETECTED: Files written to real user directories during tests: "
-            f"new={new_files}, modified={modified_files}"
+            f"TEST ISOLATION LEAK DETECTED: Files modified/created in real host user directories during tests: "
+            f"new={new_files}, modified={modified_files}, deleted={deleted_files}"
         )
 
 

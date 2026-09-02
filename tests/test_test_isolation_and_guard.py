@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -19,18 +20,21 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAYLOAD = ROOT / "payload"
 
+try:
+    HOST_USER_HOME = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+except (KeyError, OSError):
+    HOST_USER_HOME = pathlib.Path("/home/steve").resolve()
+
 
 class TestIsolationGuards(unittest.TestCase):
     def test_environment_is_sandboxed_and_not_real_home(self):
         """Verify that current test environment has HOME redirected away from real user directory."""
         current_home = pathlib.Path(os.environ.get("HOME", "")).resolve()
-        real_user_home = pathlib.Path("/home/steve").resolve()
         
-        # When running under the test harness, HOME must not be /home/steve
-        if real_user_home.exists():
+        if HOST_USER_HOME.exists():
             self.assertNotEqual(
                 current_home,
-                real_user_home,
+                HOST_USER_HOME,
                 f"HOME leaked into real user directory: {current_home}",
             )
 
@@ -39,8 +43,8 @@ class TestIsolationGuards(unittest.TestCase):
         openhtpc_home = os.environ.get("OPENHTPC_HOME")
         self.assertIsNotNone(openhtpc_home, "OPENHTPC_HOME must be set during test execution")
         openhtpc_path = pathlib.Path(openhtpc_home).resolve()
-        if pathlib.Path("/home/steve").exists():
-            self.assertNotEqual(openhtpc_path, pathlib.Path("/home/steve").resolve())
+        if HOST_USER_HOME.exists():
+            self.assertNotEqual(openhtpc_path, HOST_USER_HOME)
 
     def test_display_variables_are_scrubbed_preventing_dialogs(self):
         """Verify that DISPLAY and WAYLAND_DISPLAY are absent to prevent graphical modal popups."""
@@ -53,9 +57,9 @@ class TestIsolationGuards(unittest.TestCase):
             val = os.environ.get(var)
             if val:
                 path = pathlib.Path(val).resolve()
-                if pathlib.Path("/home/steve").exists():
+                if HOST_USER_HOME.exists():
                     self.assertFalse(
-                        str(path).startswith("/home/steve/.local") or str(path).startswith("/home/steve/.config"),
+                        str(path).startswith(str(HOST_USER_HOME / ".local")) or str(path).startswith(str(HOST_USER_HOME / ".config")),
                         f"{var} points to real user directory: {path}",
                     )
 
@@ -67,37 +71,31 @@ class TestIsolationGuards(unittest.TestCase):
             install.mkdir()
             play_script = PAYLOAD / "openhtpc-play"
             
-            # Execute with no DISPLAY
             env = {
                 "HOME": str(home),
                 "OPENHTPC_HOME": str(home),
                 "OPENHTPC_INSTALL_DIR": str(install),
                 "PATH": os.environ.get("PATH", "/bin:/usr/bin"),
             }
-            # Calling openhtpc-play with invalid token should exit cleanly or fail without graphical modal
             result = subprocess.run(
                 [sys.executable, str(play_script), "mact_invalid_token_test"],
                 env=env,
                 capture_output=True,
                 text=True,
             )
-            # Must not have attempted kdialog
             self.assertNotIn("kdialog: cannot connect to X server", result.stderr)
 
     def test_real_user_state_directory_is_untouched(self):
-        """Verify that running test operations never creates or modifies files in /home/steve/.local/state/openhtpc."""
-        real_state = pathlib.Path("/home/steve/.local/state/openhtpc")
+        """Verify that running test operations never creates or modifies files in real user state directory."""
+        real_state = HOST_USER_HOME / ".local/state/openhtpc"
         if real_state.exists():
-            # Get list of current files
             files_before = {p: p.stat().st_mtime_ns for p in real_state.rglob("*") if p.is_file()}
             
-            # Run a simulated dispatch with temporary home
             with tempfile.TemporaryDirectory() as raw:
                 temp_home = pathlib.Path(raw)
                 (temp_home / ".local/state/openhtpc").mkdir(parents=True)
                 (temp_home / ".config/openhtpc").mkdir(parents=True)
                 
-                # Check that temp home receives state files, not real state
                 state_file = temp_home / ".local/state/openhtpc/test-state.json"
                 state_file.write_text('{"test": true}\n')
                 self.assertTrue(state_file.is_file())
