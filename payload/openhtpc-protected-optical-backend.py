@@ -76,116 +76,168 @@ def inspect_sink(target:str="@DEFAULT_AUDIO_SINK@",*,runner:Callable[...,Any]=su
         return {}
 
 
-def prepare_pipewire_hdmi_bitstream(
-    requested_mode:str,
-    *,
-    sink_target:str="@DEFAULT_AUDIO_SINK@",
-    runner:Callable[...,Any]=subprocess.run,
-    finder:Callable[[str],str|None]=shutil.which,
-)->dict[str,Any]:
-    """Inspect and prepare PipeWire HDMI sink for bitstream HD passthrough if required."""
-    timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
-    sink=inspect_sink(sink_target,runner=runner)
-    sink_id=sink.get("id")
-    sink_name=sink.get("name")
-    sink_desc=sink.get("description")
-    sink_profile=sink.get("profile")
-    sink_media_class=sink.get("media_class")
-    is_hdmi=bool(sink.get("is_hdmi",False))
-    codecs_before=list(sink.get("codecs",[]))
-    req_codecs=list(REQUIRED_BITSTREAM_CODECS)
+def parse_spa_codecs(enum_params_text: str) -> list[str]:
+    """Parse effective IEC958 codecs from `pw-cli enum-params <id> Props` output."""
+    if not enum_params_text:
+        return []
+    matches = re.findall(r"(?:Spa:Enum:)?AudioIEC958Codec:([A-Za-z0-9_-]+)", enum_params_text, re.I)
+    if not matches:
+        raw_matches = re.findall(r"\biec958Codecs\s*[:=]\s*\[([^\]]+)\]", enum_params_text, re.I)
+        if raw_matches:
+            matches = [c for c in re.findall(r"[A-Za-z0-9_-]+", raw_matches[0]) if c.lower() not in {"iec958codecs", "codecs"}]
+    codecs: list[str] = []
+    seen: set[str] = set()
+    for raw in matches:
+        canon = CANONICAL_CODECS_MAP.get(raw.lower(), raw)
+        if canon.upper() not in seen:
+            seen.add(canon.upper())
+            codecs.append(canon)
+    return codecs
 
-    base_diag={
-        "audio_sink_id":sink_id,
-        "audio_sink_name":sink_name,
-        "audio_sink_description":sink_desc,
-        "audio_sink_profile":sink_profile,
-        "audio_sink_media_class":sink_media_class,
-        "audio_sink_is_hdmi":is_hdmi,
-        "iec958_codecs_before":codecs_before,
-        "iec958_codecs_requested":req_codecs if requested_mode=="BITSTREAM" else [],
-        "iec958_codecs_after":codecs_before,
-        "iec958_prepare_attempted":False,
-        "iec958_prepare_status":"SKIPPED",
-        "iec958_prepare_reason":"PCM_MODE",
-        "iec958_prepare_method":None,
-        "timestamp":timestamp,
+
+def get_effective_spa_codecs(
+    sink_id: int | str | None,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+    finder: Callable[[str], str | None] = shutil.which,
+) -> list[str]:
+    """Query active node Props from PipeWire via `pw-cli enum-params <id> Props`."""
+    if sink_id is None:
+        return []
+    pw_cli = finder("pw-cli")
+    if not pw_cli:
+        return []
+    try:
+        proc = runner(
+            [pw_cli, "enum-params", str(sink_id), "Props"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if getattr(proc, "returncode", 1) != 0:
+            return []
+        stdout = getattr(proc, "stdout", "") or ""
+        return parse_spa_codecs(stdout)
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def prepare_pipewire_hdmi_bitstream(
+    requested_mode: str,
+    *,
+    sink_target: str = "@DEFAULT_AUDIO_SINK@",
+    runner: Callable[..., Any] = subprocess.run,
+    finder: Callable[[str], str | None] = shutil.which,
+) -> dict[str, Any]:
+    """Inspect and prepare PipeWire HDMI sink for bitstream HD passthrough if required."""
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    sink = inspect_sink(sink_target, runner=runner)
+    sink_id = sink.get("id")
+    sink_name = sink.get("name")
+    sink_desc = sink.get("description")
+    sink_profile = sink.get("profile")
+    sink_media_class = sink.get("media_class")
+    is_hdmi = bool(sink.get("is_hdmi", False))
+    property_codecs = list(sink.get("codecs", []))
+    req_codecs = list(REQUIRED_BITSTREAM_CODECS)
+
+    base_diag = {
+        "audio_sink_id": sink_id,
+        "audio_sink_name": sink_name,
+        "audio_sink_description": sink_desc,
+        "audio_sink_profile": sink_profile,
+        "audio_sink_media_class": sink_media_class,
+        "audio_sink_is_hdmi": is_hdmi,
+        "iec958_property_codecs": property_codecs,
+        "iec958_codecs_before": [],
+        "iec958_codecs_requested": req_codecs if requested_mode == "BITSTREAM" else [],
+        "iec958_codecs_after": [],
+        "iec958_prepare_attempted": False,
+        "iec958_prepare_status": "SKIPPED",
+        "iec958_prepare_reason": "PCM_MODE",
+        "iec958_prepare_method": None,
+        "timestamp": timestamp,
     }
 
-    if requested_mode!="BITSTREAM":
+    if requested_mode != "BITSTREAM":
         return base_diag
 
     if not sink or sink_id is None:
         base_diag.update({
-            "iec958_prepare_status":"SKIPPED",
-            "iec958_prepare_reason":"SINK_UNRESOLVED",
+            "iec958_prepare_status": "SKIPPED",
+            "iec958_prepare_reason": "SINK_UNRESOLVED",
         })
         return base_diag
 
     if not is_hdmi:
         base_diag.update({
-            "iec958_prepare_status":"SKIPPED",
-            "iec958_prepare_reason":"SINK_NOT_HDMI",
+            "iec958_prepare_status": "SKIPPED",
+            "iec958_prepare_reason": "SINK_NOT_HDMI",
         })
         return base_diag
+
+    pw_cli = finder("pw-cli")
+    if not pw_cli:
+        base_diag.update({
+            "iec958_prepare_attempted": True,
+            "iec958_prepare_status": "FAILED",
+            "iec958_prepare_reason": "PW_CLI_UNAVAILABLE",
+            "iec958_prepare_method": "pw-cli",
+        })
+        return base_diag
+
+    codecs_before = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
+    base_diag["iec958_codecs_before"] = codecs_before
+    base_diag["iec958_codecs_after"] = codecs_before
 
     if all(codec in codecs_before for codec in req_codecs):
         base_diag.update({
-            "iec958_prepare_attempted":False,
-            "iec958_prepare_status":"SUCCESS",
-            "iec958_prepare_reason":"ALREADY_SATISFIED",
-            "iec958_prepare_method":"pw-cli",
+            "iec958_prepare_attempted": False,
+            "iec958_prepare_status": "SUCCESS",
+            "iec958_prepare_reason": "ALREADY_COMPATIBLE",
+            "iec958_prepare_method": "pw-cli",
         })
         return base_diag
 
-    pw_cli=finder("pw-cli")
-    if not pw_cli:
-        base_diag.update({
-            "iec958_prepare_attempted":True,
-            "iec958_prepare_status":"FAILED",
-            "iec958_prepare_reason":"PW_CLI_UNAVAILABLE",
-            "iec958_prepare_method":"pw-cli",
-        })
-        return base_diag
-
-    target_codecs:list[str]=[]
-    seen:set[str]=set()
-    for c in codecs_before+req_codecs:
-        c_norm=CANONICAL_CODECS_MAP.get(c.lower(),c)
+    target_codecs: list[str] = []
+    seen: set[str] = set()
+    for c in codecs_before + req_codecs:
+        c_norm = CANONICAL_CODECS_MAP.get(c.lower(), c)
         if c_norm.upper() not in seen:
             seen.add(c_norm.upper())
             target_codecs.append(c_norm)
 
-    codecs_payload=" ".join(target_codecs)
-    cmd=[pw_cli,"s",str(sink_id),"Props",f"{{ iec958Codecs : [ {codecs_payload} ] }}"]
+    codecs_payload = " ".join(target_codecs)
+    cmd = [pw_cli, "s", str(sink_id), "Props", f"{{ iec958Codecs : [ {codecs_payload} ] }}"]
 
     try:
-        proc=runner(cmd,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
-        returncode=getattr(proc,"returncode",1)
-    except (OSError,ValueError,TypeError):
-        returncode=1
+        proc = runner(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        returncode = getattr(proc, "returncode", 1)
+    except (OSError, ValueError, TypeError):
+        returncode = 1
 
-    if returncode!=0:
+    if returncode != 0:
         base_diag.update({
-            "iec958_prepare_attempted":True,
-            "iec958_prepare_status":"FAILED",
-            "iec958_prepare_reason":"PW_CLI_MUTATION_FAILED",
-            "iec958_prepare_method":"pw-cli",
+            "iec958_prepare_attempted": True,
+            "iec958_prepare_status": "FAILED",
+            "iec958_prepare_reason": "PW_CLI_MUTATION_FAILED",
+            "iec958_prepare_method": "pw-cli",
         })
         return base_diag
 
-    after_sink=inspect_sink(str(sink_id),runner=runner)
-    codecs_after=list(after_sink.get("codecs",[])) if after_sink else []
-    base_diag["iec958_codecs_after"]=codecs_after
-    base_diag["iec958_prepare_attempted"]=True
-    base_diag["iec958_prepare_method"]="pw-cli"
+    codecs_after = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
+    base_diag["iec958_codecs_after"] = codecs_after
+    base_diag["iec958_prepare_attempted"] = True
+    base_diag["iec958_prepare_method"] = "pw-cli"
 
     if all(codec in codecs_after for codec in req_codecs):
-        base_diag["iec958_prepare_status"]="SUCCESS"
-        base_diag["iec958_prepare_reason"]="CODECS_APPLIED"
+        base_diag["iec958_prepare_status"] = "SUCCESS"
+        base_diag["iec958_prepare_reason"] = "CODECS_APPLIED"
     else:
-        base_diag["iec958_prepare_status"]="FAILED"
-        base_diag["iec958_prepare_reason"]="MUTATION_NOT_EFFECTIVE"
+        base_diag["iec958_prepare_status"] = "FAILED"
+        base_diag["iec958_prepare_reason"] = "MUTATION_NOT_EFFECTIVE"
 
     return base_diag
 
@@ -241,6 +293,7 @@ def atomic_diagnostic(home:pathlib.Path,command:list[str],request:dict[str,Any],
           "audio_sink_profile":pw.get("audio_sink_profile"),
           "audio_sink_media_class":pw.get("audio_sink_media_class"),
           "audio_sink_is_hdmi":pw.get("audio_sink_is_hdmi"),
+          "iec958_property_codecs":pw.get("iec958_property_codecs"),
           "iec958_codecs_before":pw.get("iec958_codecs_before"),
           "iec958_codecs_requested":pw.get("iec958_codecs_requested"),
           "iec958_codecs_after":pw.get("iec958_codecs_after"),

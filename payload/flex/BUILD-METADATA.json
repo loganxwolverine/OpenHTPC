@@ -6,7 +6,7 @@
   "compile_sdl_ttf": "2.24.0",
   "compiler": "cc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2)",
   "flex_source_fingerprint": "9bfc1cace4a4421f15c81a7a2f213e10ce696d1bd51e5412769cf63068a3c506",
-  "product_version": "1.2.0-rc4",
+  "product_version": "1.2.0-rc5",
   "schema": 1,
   "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-running-flex-media-generation-sync-dev16",
   "target": "Fedora 44 x86_64",

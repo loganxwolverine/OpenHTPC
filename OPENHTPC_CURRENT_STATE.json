@@ -13,12 +13,12 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_RC4_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION",
+  "current_phase": "P2_RC5_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
   "dev14_physical_qualification": "PASS",
   "hardware_io_ownership_change": false,
-  "next_action": "RC4_PHYSICAL_VALIDATION",
+  "next_action": "RC5_PHYSICAL_VALIDATION",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
@@ -26,7 +26,7 @@
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
   "next_action_kind": "PHYSICAL",
-  "next_step_after_software": "STOP_FOR_RC4_PHYSICAL_VALIDATION",
+  "next_step_after_software": "STOP_FOR_RC5_PHYSICAL_VALIDATION",
   "ownership_migration_status": "COMPLETE",
   "physical_validation_required_after_implementation": true,
   "plugin_cutover_status": "COMPLETE",
@@ -111,15 +111,31 @@
     "status": "PHYSICAL_GATE_NO_GO",
     "version": "1.2.0-rc3"
   },
-  "next_candidate": {
+  "rc4_candidate": {
     "artifact_prepared": true,
     "build": "public-release-1.2.0-rc4",
     "filename": "OpenHTPC-1.2.0-RC4.tar.gz",
-    "physical_qualification": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
-    "protected_bluray_audio_fix": "PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION",
+    "physical_evidence": [
+      "Protected Blu-ray bitstream physical playback: PASS",
+      "Image / video playback: PASS",
+      "Denon AVR format: DTS-HD PASS",
+      "PipeWire HDMI preparation: physically functional without manual intervention",
+      "Diagnostic observation: wpctl inspect reported stale iec958.codecs property [PCM, DTS, AC3] causing false negative MUTATION_NOT_EFFECTIVE despite effective SPA parameter containing 6 codecs"
+    ],
+    "physical_qualification": "PHYSICAL_BITSTREAM_PASS_DIAG_FALSE_NEGATIVE",
     "purpose": "PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION",
-    "status": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "status": "PHYSICAL_BITSTREAM_PASS_DIAG_FALSE_NEGATIVE",
     "version": "1.2.0-rc4"
+  },
+  "next_candidate": {
+    "artifact_prepared": true,
+    "build": "public-release-1.2.0-rc5",
+    "filename": "OpenHTPC-1.2.0-RC5.tar.gz",
+    "physical_qualification": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "protected_bluray_audio_fix": "PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION",
+    "purpose": "PROTECTED_BLURAY_PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION",
+    "status": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
+    "version": "1.2.0-rc5"
   },
   "required_gate_reason": "PHYSICAL_VALIDATION",
   "required_human_gate_stage": "BEFORE_EXECUTION",

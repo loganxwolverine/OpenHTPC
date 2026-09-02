@@ -4,12 +4,12 @@
   "properties": {
     "architectural_boundary": {"const": "FROZEN_AFTER_PHASE11"},
     "core_remains_owner_of": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_PHYSICAL_GATE_NO_GO_RC3_STABILIZATION_IMPLEMENTED", "P2_RC3_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC4_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION"], "type": "string"},
+    "current_phase": {"enum": ["P2_PRODUCTION_CUTOVER_SOFTWARE_COMPLETE", "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED", "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE", "P2_RC2_STABILIZATION_IMPLEMENTED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC2_PHYSICAL_GATE_NO_GO_RC3_STABILIZATION_IMPLEMENTED", "P2_RC3_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC4_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION", "P2_RC5_CANDIDATE_PREPARED_AWAITING_PHYSICAL_VALIDATION"], "type": "string"},
     "default_behavior_change_expected": {"type": "boolean"},
     "dev13_physical_qualification": {"const": "FAILED_DISABLED_UI_GATING"},
     "dev14_physical_qualification": {"enum": ["PENDING", "PASS"], "type": "string"},
     "hardware_io_ownership_change": {"type": "boolean"},
-    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION", "AWAIT_RC3_PREPARATION_AUTHORIZATION", "RC3_PHYSICAL_VALIDATION", "RC4_PHYSICAL_VALIDATION"], "type": "string"},
+    "next_action": {"enum": ["PHYSICAL_VALIDATION", "RC_PREPARATION", "RC_PHYSICAL_RELEASE_GATE", "RC2_PHYSICAL_STABILIZATION_VALIDATION", "AWAIT_RC3_PREPARATION_AUTHORIZATION", "RC3_PHYSICAL_VALIDATION", "RC4_PHYSICAL_VALIDATION", "RC5_PHYSICAL_VALIDATION"], "type": "string"},
     "next_action_context": {
       "additionalProperties": false,
       "properties": {
@@ -22,7 +22,7 @@
       "type": "object"
     },
     "next_action_kind": {"enum": ["PHYSICAL", "RELEASE_PREPARATION"], "type": "string"},
-    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION", "STOP_BEFORE_RC3_PREPARATION", "STOP_FOR_RC3_PHYSICAL_VALIDATION", "STOP_FOR_RC4_PHYSICAL_VALIDATION"], "type": "string"},
+    "next_step_after_software": {"enum": ["STOP_FOR_PHYSICAL_VALIDATION", "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION", "STOP_FOR_RC_PHYSICAL_RELEASE_GATE", "STOP_FOR_RC2_PHYSICAL_STABILIZATION_VALIDATION", "STOP_BEFORE_RC3_PREPARATION", "STOP_FOR_RC3_PHYSICAL_VALIDATION", "STOP_FOR_RC4_PHYSICAL_VALIDATION", "STOP_FOR_RC5_PHYSICAL_VALIDATION"], "type": "string"},
     "ownership_migration_status": {"const": "COMPLETE"},
     "physical_validation_required_after_implementation": {"type": "boolean"},
     "plugin_cutover_status": {"const": "COMPLETE"},
@@ -137,17 +137,32 @@
       "required": ["artifact_prepared", "build", "filename", "physical_evidence", "physical_qualification", "purpose", "status", "version"],
       "type": "object"
     },
+    "rc4_candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_prepared": {"type": "boolean"},
+        "build": {"minLength": 1, "type": "string"},
+        "filename": {"minLength": 1, "type": "string"},
+        "physical_evidence": {"items": {"type": "string"}, "type": "array"},
+        "physical_qualification": {"enum": ["PHYSICAL_BITSTREAM_PASS_DIAG_FALSE_NEGATIVE", "PHYSICAL_GATE_NO_GO", "PASS", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
+        "purpose": {"minLength": 1, "type": "string"},
+        "status": {"minLength": 1, "type": "string"},
+        "version": {"const": "1.2.0-rc4"}
+      },
+      "required": ["artifact_prepared", "build", "filename", "physical_evidence", "physical_qualification", "purpose", "status", "version"],
+      "type": "object"
+    },
     "next_candidate": {
       "additionalProperties": false,
       "properties": {
         "artifact_prepared": {"type": "boolean"},
-        "build": {"const": "public-release-1.2.0-rc4"},
-        "filename": {"const": "OpenHTPC-1.2.0-RC4.tar.gz"},
+        "build": {"enum": ["public-release-1.2.0-rc4", "public-release-1.2.0-rc5"]},
+        "filename": {"enum": ["OpenHTPC-1.2.0-RC4.tar.gz", "OpenHTPC-1.2.0-RC5.tar.gz"]},
         "physical_qualification": {"enum": ["NOT_STARTED", "PENDING_PHYSICAL_VALIDATION", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
-        "protected_bluray_audio_fix": {"const": "PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION"},
-        "purpose": {"const": "PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION"},
+        "protected_bluray_audio_fix": {"enum": ["PIPEWIRE_HDMI_HD_PASSTHROUGH_PREPARATION", "PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION"]},
+        "purpose": {"enum": ["PROTECTED_BLURAY_PIPEWIRE_HD_PASSTHROUGH_PREPARATION", "PROTECTED_BLURAY_PIPEWIRE_EFFECTIVE_IEC958_VERIFICATION"]},
         "status": {"enum": ["NOT_PREPARED_NOT_QUALIFIED", "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED"]},
-        "version": {"const": "1.2.0-rc4"}
+        "version": {"enum": ["1.2.0-rc4", "1.2.0-rc5"]}
       },
       "required": ["artifact_prepared", "physical_qualification", "purpose", "status", "version"],
       "type": "object"

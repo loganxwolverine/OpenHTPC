@@ -264,7 +264,7 @@ class CanonicalProjectState(unittest.TestCase):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="PHYSICAL_VALIDATION",physical_validation_required=True,default_behavior_change=True)
   decision=A.policy_evaluate(value);self.assertEqual((decision["decision"],decision["stage"],decision["reason"]),("HUMAN_GATE","BEFORE_EXECUTION","PHYSICAL_VALIDATION"))
  def test_57_software_cutover_is_complete(self):
-  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("RC4_PHYSICAL_VALIDATION","PHYSICAL",False))
+  self.assertEqual((self.state["next_action"],self.state["next_action_kind"],self.state["software_implementation_allowed"]),("RC5_PHYSICAL_VALIDATION","PHYSICAL",False))
  def test_58_physical_task_can_require_before_execution(self):
   value=plan(risk_class="HUMAN_APPROVAL_BEFORE_EXECUTION",human_gate_stage="BEFORE_EXECUTION",gate_reason="SYSTEM_CONFIGURATION")
   self.assertEqual(A.policy_evaluate(value)["stage"],"BEFORE_EXECUTION")
@@ -292,8 +292,8 @@ class CanonicalProjectState(unittest.TestCase):
   self.assertEqual(qualification["qualified_commit"],"e47ebe11c39b493746a1e38f258d462be0c86ea2")
   self.assertEqual(qualification["artifact"]["sha256"],"94e030482c46b041ea0d791e261d0fea11e6c545270f036ef99543e324a65194")
   self.assertEqual({item["family"]:item["status"] for item in qualification["platforms"]},{"INTEL":"PASS","AMD":"PASS","NVIDIA":"PASS"})
- def test_69_rc1_rc2_and_rc3_are_no_go_and_rc4_is_pending(self):
-  self.assertEqual(self.state["release_candidate"]["physical_qualification"],"NO_GO");self.assertEqual(self.state["rc2_candidate"]["physical_qualification"],"PHYSICAL_GATE_NO_GO");self.assertEqual(self.state["rc3_candidate"]["physical_qualification"],"PHYSICAL_GATE_NO_GO");candidate=self.state["next_candidate"]
-  self.assertEqual(candidate["version"],"1.2.0-rc4");self.assertTrue(candidate["artifact_prepared"]);self.assertEqual(candidate["physical_qualification"],"PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED")
+ def test_69_rc1_rc2_and_rc3_are_no_go_and_rc5_is_pending(self):
+  self.assertEqual(self.state["release_candidate"]["physical_qualification"],"NO_GO");self.assertEqual(self.state["rc2_candidate"]["physical_qualification"],"PHYSICAL_GATE_NO_GO");self.assertEqual(self.state["rc3_candidate"]["physical_qualification"],"PHYSICAL_GATE_NO_GO");self.assertEqual(self.state["rc4_candidate"]["physical_qualification"],"PHYSICAL_BITSTREAM_PASS_DIAG_FALSE_NEGATIVE");candidate=self.state["next_candidate"]
+  self.assertEqual(candidate["version"],"1.2.0-rc5");self.assertTrue(candidate["artifact_prepared"]);self.assertEqual(candidate["physical_qualification"],"PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED")
 
 if __name__=="__main__":unittest.main()

@@ -1,5 +1,14 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 5 — 1.2.0-rc5
+
+- Corrects PipeWire IEC958 state authority to query active SPA parameters via `pw-cli enum-params <node_id> Props`.
+- Eliminates false-negative `MUTATION_NOT_EFFECTIVE` diagnostic when HDMI sink node already has 6 effective codecs (`PCM`, `DTS`, `AC3`, `EAC3`, `TrueHD`, `DTS-HD`).
+- Implements `ALREADY_COMPATIBLE` idempotent handling without redundant `pw-cli` mutation when effective SPA codecs are already present.
+- Preserves distinct reporting of static `iec958_property_codecs` and runtime effective `iec958_codecs_before` / `iec958_codecs_after`.
+- Retains exact bitstream MPV invocation contract and PCM pass-through isolation.
+- Awaits Steve's physical qualification on Fedora KDE with Denon AVR.
+
 # OPENHTPC 1.2.0 Release Candidate 4 — 1.2.0-rc4
 
 - Implements dynamic PipeWire HDMI sink resolution and deterministic `iec958.codecs` preparation for protected Blu-ray bitstream passthrough.
