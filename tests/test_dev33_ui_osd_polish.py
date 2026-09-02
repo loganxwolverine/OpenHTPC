@@ -75,7 +75,8 @@ class PlaybackPage(unittest.TestCase):
             marker = base / "refreshed"
             action = install / "openhtpc-system-action"
             action.write_text(f"#!/bin/sh\ntest \"$1\" = playback && touch '{marker}'\n", encoding="utf-8"); action.chmod(0o755)
-            env = {**os.environ, "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(install)}
+            env = {**os.environ, "HOME":str(home), "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(install)}
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             subprocess.run([str(PAYLOAD / "openhtpc-playback-setting"), "audio_language_policy", "FR"], env=env, check=True)
             self.assertEqual(policy.read_preferences(home)["audio_language_policy"], "FR")
             self.assertTrue(marker.is_file())

@@ -49,7 +49,8 @@ class MediaActionBinding(unittest.TestCase):
   model=self.generate("dispatch-current");token,item=self.actions(model)["Modern/Nested/300 Rise of an Empire (2014).mkv"];self.set_page(item["page_id"])
   runtime=self.home/".config/openhtpc/pure.conf";runtime.write_text("vo=null\n");(runtime.parent/"profile.json").write_text(json.dumps({"runtime":{"status":"ready"},"runtime_profiles":{"profiles":{"PURE":{"generation_status":"generated","config_path":str(runtime)}}}}))
   fake=self.home/"fakebin";fake.mkdir();mpv=fake/"mpv";mpv.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$OPENHTPC_TEST_ARGV\"\n");mpv.chmod(0o755);argv_log=self.home/"mpv.argv"
-  env={**os.environ,"OPENHTPC_HOME":str(self.home),"OPENHTPC_INSTALL_DIR":str(self.install),"OPENHTPC_TEST_ARGV":str(argv_log),"PATH":str(fake)+os.pathsep+os.environ["PATH"]}
+  env={**os.environ,"HOME":str(self.home),"OPENHTPC_HOME":str(self.home),"OPENHTPC_INSTALL_DIR":str(self.install),"OPENHTPC_TEST_ARGV":str(argv_log),"PATH":str(fake)+os.pathsep+os.environ["PATH"]}
+  env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
   result=subprocess.run([str(self.install/"openhtpc-play"),token],env=env,text=True,capture_output=True);self.assertEqual(result.returncode,0,result.stderr);args=argv_log.read_text().splitlines();self.assertEqual(args[-1],str((self.page_b/"300 Rise of an Empire (2014).mkv").resolve()));self.assertTrue(pathlib.Path(args[-1]).is_absolute());self.assertTrue(pathlib.Path(args[-1]).is_file())
   state=json.loads((self.home/".local/state/openhtpc/media-action-last.json").read_text());self.assertTrue(state["dispatcher_seen"]);self.assertTrue(state["path_resolved"]);self.assertTrue(state["path_absolute"]);self.assertTrue(state["file_exists"]);self.assertTrue(state["process_started"])
  def test_generated_flex_uses_tokens_and_never_raw_paths(self):

@@ -50,7 +50,7 @@ class Rc2InitialSetupContract(unittest.TestCase):
     def test_public_openhtpc_setup_reaches_assistant_without_attribute_error(self):
         for name in ("openhtpc", "openhtpc-core.py", "openhtpc-initial-setup.py"):
             shutil.copy2(PAYLOAD / name, self.install / name)
-        environment = {**os.environ, "OPENHTPC_HOME": str(self.home), "OPENHTPC_INSTALL_DIR": str(self.install)}
+        environment = {**os.environ, "HOME": str(self.home), "OPENHTPC_HOME": str(self.home), "OPENHTPC_INSTALL_DIR": str(self.install)}
         environment.pop("DISPLAY", None)
         environment.pop("WAYLAND_DISPLAY", None)
         result = subprocess.run(
@@ -64,7 +64,7 @@ class Rc2InitialSetupContract(unittest.TestCase):
         media = self.root / "media"
         media.mkdir()
         with mock.patch.object(SETUP, "graphical", return_value=([str(media)], None)) as graphical, \
-             mock.patch.dict(os.environ, {"DISPLAY": ":1", "OPENHTPC_INSTALL_DIR": str(self.install)}, clear=True), \
+             mock.patch.dict(os.environ, {"HOME": str(self.home), "OPENHTPC_HOME": str(self.home), "DISPLAY": ":1", "OPENHTPC_INSTALL_DIR": str(self.install)}, clear=True), \
              mock.patch.object(sys, "argv", ["setup", "--home", str(self.home)]):
             self.assertEqual(SETUP.main(), 0)
         graphical.assert_called_once_with(self.home)

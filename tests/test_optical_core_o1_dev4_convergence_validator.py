@@ -69,7 +69,10 @@ class BlurayFamilyTmdb(unittest.TestCase):
   self.assertIn('status in {"PENDING","STARTED"}',source);self.assertIn("La fiche optique est prête",source)
 
 class ValidatorHardening(unittest.TestCase):
- def env(self,home,lab):return {**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+ def env(self,home,lab):
+  e = {**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+  e.pop("DISPLAY",None); e.pop("WAYLAND_DISPLAY",None)
+  return e
  def test_physical_47_vs_44_is_detected_and_captured(self):
   with tempfile.TemporaryDirectory() as raw:
    home=pathlib.Path(raw);lab=home/"lab";runtime=home/".local/state/openhtpc";runtime.mkdir(parents=True)

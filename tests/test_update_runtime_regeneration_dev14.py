@@ -172,8 +172,9 @@ raise SystemExit(0)
             "lspci":"#!/bin/sh\nprintf '0000:01:00.0 VGA compatible controller [1002:ffff]\\n'\n",
         }.items():
             path=fakebin/name;path.write_text(body);path.chmod(0o755)
-        env = {**os.environ, "HOME":str(self.home), "OPENHTPC_INSTALL_DIR":str(install),
+        env = {**os.environ, "HOME":str(self.home), "OPENHTPC_HOME":str(self.home), "OPENHTPC_INSTALL_DIR":str(install),
                "OPENHTPC_TEST_OPTIONS":str(self.options), "PATH":str(fakebin)+os.pathsep+os.environ["PATH"]}
+        env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
         result = subprocess.run([str(candidate / "update.sh")], cwd=candidate, env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         for path, value in persistent.items(): self.assertEqual(json.loads(path.read_text()), value)

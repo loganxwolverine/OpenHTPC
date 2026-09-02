@@ -33,7 +33,8 @@ class AudioRefresh(unittest.TestCase):
             config = home / ".config/openhtpc"; config.mkdir(parents=True)
             flex = config / "flex-v1.ini"
             flex.write_text("[SYSTEM_AUDIO]\nEntry1=MODE AUDIO : PCM;i;:submenu AUDIO_OUTPUT_MODE\nEntry2=RETOUR;b;:back\n")
-            env = {**os.environ, "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(install)}
+            env = {**os.environ, "HOME":str(home), "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(install)}
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             for value in ("BITSTREAM", "PCM"):
                 subprocess.run([str(install / "openhtpc-playback-setting"), "audio_output_mode", value], env=env, check=True)
                 self.assertEqual(policy.read_preferences(home)["audio_output_mode"], value)

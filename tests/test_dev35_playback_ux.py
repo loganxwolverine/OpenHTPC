@@ -107,7 +107,8 @@ class DvdGlobalShortcut(unittest.TestCase):
             home = pathlib.Path(value); config = home / ".config/openhtpc"; config.mkdir(parents=True)
             flex = config / "flex-v1.ini"
             flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=MODE VIDÉO : CINÉMA AUTO;i;:submenu DVD_VIDEO_MODE\nEntry3=RETOUR;i;:back\n", encoding="utf-8")
-            env = {**os.environ, "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(PAYLOAD)}
+            env = {**os.environ, "HOME":str(home), "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(PAYLOAD)}
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             subprocess.run([str(PAYLOAD / "openhtpc-playback-setting"), "presentation_mode", "PURE"], env=env, check=True)
             self.assertEqual(policy.read_preferences(home)["presentation_mode"], "PURE")
             self.assertIn("MODE VIDÉO : PURE", flex.read_text(encoding="utf-8"))
@@ -117,7 +118,8 @@ class DvdGlobalShortcut(unittest.TestCase):
 
     def test_audio_and_subtitle_parent_render_refresh_without_display_probe(self):
         with tempfile.TemporaryDirectory() as value:
-            home = pathlib.Path(value); env = {**os.environ, "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(PAYLOAD)}
+            home = pathlib.Path(value); env = {**os.environ, "HOME":str(home), "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(PAYLOAD)}
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             setting = PAYLOAD / "openhtpc-playback-setting"
             subprocess.run([str(setting), "audio_language_policy", "FR"], env=env, check=True)
             page = home / ".cache/openhtpc/system-playback.png"; first = page.stat().st_ino

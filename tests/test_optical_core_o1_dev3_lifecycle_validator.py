@@ -63,13 +63,15 @@ class Validator(unittest.TestCase):
    archive=inbox/"candidate.tar.gz"
    with tarfile.open(archive,"w:gz") as output:output.add(source,arcname="candidate")
    digest=__import__("hashlib").sha256(archive.read_bytes()).hexdigest();manifest={"version":"1.1.3-dev3","build":"optical-state-lifecycle-validator-dev3","commit":"fixture","artifact":archive.name,"sha256":digest,"intended_validator_phase":"O1_DEV3","installation_method":"update.sh","required_pre_checks":[["/bin/true"]],"required_post_checks":[["/bin/true"]],"playback_allowed":False,"local_kde_observation_required":True,"stop_openhtpc":False}
-   (inbox/"candidate.validation.json").write_text(json.dumps(manifest));env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab)}
+   (inbox/"candidate.validation.json").write_text(json.dumps(manifest));env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab)}
+   env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
    result=subprocess.run([str(PAYLOAD/"openhtpc-validator"),"apply-latest"],env=env,text=True,capture_output=True)
    self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertTrue((lab/"state/update-ran").is_file());self.assertIn("VALIDATOR_APPLY PASS",result.stdout)
  def test_capture_is_one_archive_and_redacts_secret_lines(self):
   with tempfile.TemporaryDirectory() as raw:
    home=pathlib.Path(raw);install=home/".local/lib/openhtpc";install.mkdir(parents=True);(install/"version.json").write_text('{"token":"secret-value"}')
-   lab=home/"lab";env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   lab=home/"lab";env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
    result=subprocess.run([str(PAYLOAD/"openhtpc-validator"),"capture","--reason","TEST"],env=env,text=True,capture_output=True,timeout=30)
    self.assertEqual(result.returncode,0,result.stdout+result.stderr);archives=list((lab/"outbox").glob("openhtpc-validator-failure-*.tar.gz"));self.assertEqual(len(archives),1)
    with tarfile.open(archives[0]) as bundle:
@@ -80,7 +82,8 @@ class Validator(unittest.TestCase):
    home=pathlib.Path(raw);state=home/".local/state/openhtpc";state.mkdir(parents=True)
    (state/"optical-current.json").write_text(json.dumps({"generation":11,"canonical_state":"DRIVE_PRESENT_NO_MEDIA","state":"EMPTY"}))
    (state/"disc-sheet-state.json").write_text(json.dumps({"optical_generation":10,"canonical_state":"BLURAY_FAMILY"}))
-   lab=home/"lab";env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   lab=home/"lab";env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
    result=subprocess.run([str(PAYLOAD/"openhtpc-validator"),"observe","optical","--once"],env=env,text=True,capture_output=True,timeout=30)
    self.assertEqual(result.returncode,1);self.assertIn("PRESENTATION_GENERATION_STALE",result.stdout)
    self.assertEqual(len(list((lab/"outbox").glob("openhtpc-validator-failure-*.tar.gz"))),1)
@@ -88,7 +91,8 @@ class Validator(unittest.TestCase):
   with tempfile.TemporaryDirectory() as raw:
    home=pathlib.Path(raw);state=home/".local/state/openhtpc";state.mkdir(parents=True)
    (state/"optical-current.json").write_text(json.dumps({"generation":7,"canonical_state":"DETECTION_INDETERMINATE","state":"INITIALIZING","disc_title":"Frozen"}))
-   lab=home/"lab";env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   lab=home/"lab";env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_VALIDATOR_ROOT":str(lab),"OPENHTPC_VALIDATOR_DISABLE_UPLOAD":"1"}
+   env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
    result=subprocess.run([str(PAYLOAD/"openhtpc-validator"),"observe","optical","--once","--timeout","0"],env=env,text=True,capture_output=True,timeout=30)
    self.assertEqual(result.returncode,1);self.assertIn("INITIALIZING_TIMEOUT",result.stdout)
    self.assertTrue(list((lab/"outbox").glob("openhtpc-validator-failure-*.tar.gz")))

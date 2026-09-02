@@ -16,7 +16,8 @@ class PassportRebuildWorkflow(unittest.TestCase):
    capability.write_text("#!/bin/sh\nprintf 'refresh\\n' >>\"$OPENHTPC_HOME/order\"\n")
    builder.write_text("#!/bin/sh\n[ \"$1\" = --rebuild-passport ] || exit 2\nprintf 'rebuild\\n' >>\"$OPENHTPC_HOME/order\"\n")
    capability.chmod(0o755);builder.chmod(0o755)
-   env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(install)}
+   env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(install)}
+   env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
    result=subprocess.run([sys.executable,str(install/"openhtpc"),"rebuild-passport"],env=env,capture_output=True,text=True)
    self.assertEqual(result.returncode,0,result.stderr);self.assertEqual((home/"order").read_text(),"refresh\nrebuild\nrefresh\n")
    self.assertEqual(json.loads((config/"user-config.json").read_text()),user);self.assertEqual((config/"tmdb.json").read_text(),'{"state":"synthetic"}')

@@ -130,7 +130,8 @@ class EndToEndContract(unittest.TestCase):
             fake=base/"bin";fake.mkdir();arglog=base/"mpv-args"
             ffprobe=fake/"ffprobe";ffprobe.write_text('#!/bin/sh\nprintf \'%s\\n\' \'{"streams":[{"codec_type":"audio","tags":{"language":"eng"},"disposition":{}},{"codec_type":"audio","tags":{"language":"fra","title":"TrueFrench VFF"},"disposition":{}},{"codec_type":"subtitle","tags":{"language":"fr","title":"Français"},"disposition":{"forced":1}}]}\'\n');ffprobe.chmod(0o755)
             mpv=fake/"mpv";mpv.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >"{arglog}"\nfor arg in "$@";do case "$arg" in --log-file=*) printf "Video: fixture\\nAudio: fixture\\nVO: null\\nAO: null\\n" >"${{arg#--log-file=}}";;esac;done\n');mpv.chmod(0o755)
-            env={**os.environ,"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(PAYLOAD),"OPENHTPC_FLEX_RETAINED":"1","PATH":str(fake)+os.pathsep+os.environ["PATH"]}
+            env={**os.environ,"HOME":str(home),"OPENHTPC_HOME":str(home),"OPENHTPC_INSTALL_DIR":str(PAYLOAD),"OPENHTPC_FLEX_RETAINED":"1","PATH":str(fake)+os.pathsep+os.environ["PATH"]}
+            env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
             result=subprocess.run([str(PAYLOAD/"openhtpc-play"),str(media)],env=env,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
             raw_args=arglog.read_text();args=raw_args.splitlines();self.assertIn("--aid=2",args);self.assertIn("--sid=1",args);self.assertIn("--osd-playing-msg=Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Français forcés",raw_args)

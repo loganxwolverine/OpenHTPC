@@ -50,7 +50,8 @@ class PresentationTruth(unittest.TestCase):
     def test_setting_atomically_replaces_parent_background(self):
         with tempfile.TemporaryDirectory() as value:
             home = pathlib.Path(value)
-            env = {**os.environ, "OPENHTPC_HOME": str(home), "OPENHTPC_INSTALL_DIR": str(PAYLOAD)}
+            env = {**os.environ, "HOME": str(home), "OPENHTPC_HOME": str(home), "OPENHTPC_INSTALL_DIR": str(PAYLOAD)}
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             setting = PAYLOAD / "openhtpc-playback-setting"
             subprocess.run([str(setting), "presentation_mode", "PURE"], env=env, check=True)
             page = home / ".cache/openhtpc/system-playback.png"
