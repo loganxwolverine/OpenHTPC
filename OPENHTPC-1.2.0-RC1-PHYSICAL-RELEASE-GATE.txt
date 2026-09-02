@@ -1,0 +1,24 @@
+OPENHTPC 1.2.0 RC1 — MINIMAL PHYSICAL RELEASE GATE
+
+Identity expected after update:
+  Version: 1.2.0-rc1
+  Build: public-release-1.2.0-rc1
+
+Use only OpenHTPC-1.2.0-RC1.tar.gz and update from the qualified Dev14
+installation. Do not purge persistent state. On each validator, first confirm
+the exact version/build, one UI, one optical monitor and Doctor Overall READY.
+
+INTEL / ZIMABOARD 2, AMD / RYZEN, NVIDIA / RTX 3050
+  1. Confirm Dev14 -> RC1 update and retained platform runtime.
+  2. Smoke Core/Flex/MEDIA: navigation, local media image/audio/seek and return.
+  3. With plugin.bluray disabled and a real Blu-ray, confirm detection but no
+     badge, no play action, no autolaunch/error, and functional Flex.
+  4. Enable plugin.bluray and smoke one protected Blu-ray: exact identity,
+     PLUGIN_P2 authorities, OPEN_SUCCESS, image/audio and quit/return.
+  5. Smoke one protected UHD: UHD_BLURAY_VIDEO, INDX0300, CONFIRMED,
+     PLUGIN_P2 authorities, OPEN_SUCCESS, image/audio and quit/return.
+  6. Smoke DVD: DVD_VIDEO, Core provider, image/audio/seek and quit/return.
+
+Record every result separately. A failure remains a failure. RC1 stays
+physically unqualified until all three validators PASS. STOP after recording
+results; do not tag, push or publish from this gate.

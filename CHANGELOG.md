@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 1 — 1.2.0-rc1
+
+- Promotes the physically qualified Dev14 Plugin Framework P2 production-cutover baseline without functional changes.
+- Records `plugin.bluray` opt-in Blu-ray/UHD ownership, corrected disabled-plugin UI gating and Core-owned DVD behavior.
+- Preserves protected-media `AVAILABLE` as `READY_TO_ATTEMPT`, never guaranteed per-disc decryptability.
+- Awaits the separate RC1 physical release gate before any tag or publication.
+
 # OPENHTPC Plugin Framework P2 UI Gating — 1.2.0-dev14
 
 - Prevents protected-optical play actions from remaining visible when `plugin.bluray` is disabled, absent or broken.

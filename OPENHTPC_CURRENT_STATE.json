@@ -13,22 +13,22 @@
     "generic playback execution",
     "MPV launch"
   ],
-  "current_phase": "P2_PRODUCTION_CUTOVER_PHYSICALLY_QUALIFIED",
+  "current_phase": "P2_RC1_PREPARED_AWAITING_PHYSICAL_RELEASE_GATE",
   "default_behavior_change_expected": true,
   "dev13_physical_qualification": "FAILED_DISABLED_UI_GATING",
   "dev14_physical_qualification": "PASS",
   "hardware_io_ownership_change": false,
-  "next_action": "RC_PREPARATION",
+  "next_action": "RC_PHYSICAL_RELEASE_GATE",
   "next_action_context": {
     "broken": "feature unavailable/BROKEN; Core remains healthy; no silent complete Core replacement",
     "disabled": "no Blu-ray/UHD feature exposure",
     "enabled_valid": "plugin policy exposes feature; generic Core services execute securely",
     "plugin_absent": "no Blu-ray/UHD feature exposure"
   },
-  "next_action_kind": "RELEASE_PREPARATION",
-  "next_step_after_software": "QUALIFIED_CANDIDATE_FOR_RC_PREPARATION",
+  "next_action_kind": "PHYSICAL",
+  "next_step_after_software": "STOP_FOR_RC_PHYSICAL_RELEASE_GATE",
   "ownership_migration_status": "COMPLETE",
-  "physical_validation_required_after_implementation": false,
+  "physical_validation_required_after_implementation": true,
   "plugin_cutover_status": "COMPLETE",
   "plugin_policy_feature_owner": "plugin.bluray",
   "qualification": {
@@ -68,7 +68,17 @@
     ],
     "status": "PASS"
   },
-  "required_gate_reason": "RELEASE",
+  "release_candidate": {
+    "artifact_filename": "OpenHTPC-1.2.0-RC1.tar.gz",
+    "build": "public-release-1.2.0-rc1",
+    "functional_changes_since_qualified_baseline": false,
+    "origin_qualified_commit": "e47ebe11c39b493746a1e38f258d462be0c86ea2",
+    "origin_qualified_version": "1.2.0-dev14",
+    "physical_qualification": "PENDING",
+    "status": "PROMOTED_FROM_PHYSICALLY_QUALIFIED_BASELINE_AWAITING_RELEASE_GATE",
+    "version": "1.2.0-rc1"
+  },
+  "required_gate_reason": "PHYSICAL_VALIDATION",
   "required_human_gate_stage": "BEFORE_EXECUTION",
   "schema_version": 1,
   "security_boundary_change": false,
