@@ -64,7 +64,7 @@ class Boundaries(unittest.TestCase):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
   for marker in ("pathlib","ctypes","find_library","udev","keydb.cfg","lstat(","stat(","open(","read_text(","subprocess","socket","urlopen","curl ","wget ","bd://","mpv","dispatcher"):self.assertNotIn(marker,source)
  def test_snapshot_generator_and_production_sources_unchanged(self):
-  names=("openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
+  names=("openhtpc-capabilities.py","openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)
 

@@ -18,228 +18,32 @@ from typing import Any, Callable
 
 OPEN_MARKERS=("VO:","AO:","Video:","Audio:","Starting playback")
 MEDIA_TYPES={"BLURAY","UHD_BLURAY"}
-REQUIRED_BITSTREAM_CODECS=("PCM","DTS","AC3","EAC3","TrueHD","DTS-HD")
-CANONICAL_CODECS_MAP={
-    "pcm":"PCM",
-    "dts":"DTS",
-    "ac3":"AC3",
-    "eac3":"EAC3",
-    "truehd":"TrueHD",
-    "dts-hd":"DTS-HD",
-    "dtshd":"DTS-HD",
-}
 
 
-def parse_wpctl_sink(inspect_text:str)->dict[str,Any]:
-    """Parse output from `wpctl inspect <target>` dynamically."""
-    if not inspect_text:return {}
-    id_match=re.search(r"\bid\s+(\d+)",inspect_text,re.I)
-    sink_id=int(id_match.group(1)) if id_match else None
-    props:dict[str,str]={}
-    for line in inspect_text.splitlines():
-        match=re.match(r"^\s*\*?\s*([\w.]+)\s*=\s*(.+)$",line)
-        if match:
-            props[match.group(1).strip()]=match.group(2).strip()
-    media_class=props.get("media.class","").strip('"')
-    node_name=props.get("node.name","").strip('"')
-    node_desc=props.get("node.description","").strip('"')
-    node_nick=props.get("node.nick","").strip('"')
-    profile_name=props.get("device.profile.name","").strip('"')
-    profile_desc=props.get("device.profile.description","").strip('"')
-    alsa_path=props.get("api.alsa.path","").strip('"')
-    raw_codecs=props.get("iec958.codecs","")
-    codecs_tokens=[c for c in re.findall(r"[A-Za-z0-9_-]+",raw_codecs) if c.lower() not in {"iec958","codecs"}]
-    codecs=[CANONICAL_CODECS_MAP.get(c.lower(),c) for c in codecs_tokens]
-
-    combined=f"{profile_name} {node_name} {node_desc} {node_nick} {profile_desc} {alsa_path}".lower()
-    is_hdmi=media_class=="Audio/Sink" and bool(re.search(r"\bhdmi\b|hdmi-|\.hdmi|digital surround|displayport",combined))
-
-    return {
-        "id":sink_id,
-        "name":node_name or None,
-        "description":node_desc or node_nick or None,
-        "profile":profile_name or None,
-        "media_class":media_class or None,
-        "alsa_path":alsa_path or None,
-        "is_hdmi":is_hdmi,
-        "codecs":codecs,
-    }
-
-
-def inspect_sink(target:str="@DEFAULT_AUDIO_SINK@",*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
+def _load_playback_policy():
+    path = pathlib.Path(__file__).with_name("openhtpc-playback-policy.py")
     try:
-        proc=runner(["wpctl","inspect",target],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
-        if getattr(proc,"returncode",1)!=0:return {}
-        stdout=getattr(proc,"stdout","") or ""
-        return parse_wpctl_sink(stdout)
-    except (OSError,ValueError,TypeError):
-        return {}
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy", path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (OSError, AttributeError, ImportError, TypeError, ValueError):
+        return None
 
 
-def parse_spa_codecs(enum_params_text: str) -> list[str]:
-    """Parse effective IEC958 codecs from `pw-cli enum-params <id> Props` output."""
-    if not enum_params_text:
-        return []
-    matches = re.findall(r"(?:Spa:Enum:)?AudioIEC958Codec:([A-Za-z0-9_-]+)", enum_params_text, re.I)
-    if not matches:
-        raw_matches = re.findall(r"\biec958Codecs\s*[:=]\s*\[([^\]]+)\]", enum_params_text, re.I)
-        if raw_matches:
-            matches = [c for c in re.findall(r"[A-Za-z0-9_-]+", raw_matches[0]) if c.lower() not in {"iec958codecs", "codecs"}]
-    codecs: list[str] = []
-    seen: set[str] = set()
-    for raw in matches:
-        canon = CANONICAL_CODECS_MAP.get(raw.lower(), raw)
-        if canon.upper() not in seen:
-            seen.add(canon.upper())
-            codecs.append(canon)
-    return codecs
+_POLICY_MODULE = _load_playback_policy()
 
-
-def get_effective_spa_codecs(
-    sink_id: int | str | None,
-    *,
-    runner: Callable[..., Any] = subprocess.run,
-    finder: Callable[[str], str | None] = shutil.which,
-) -> list[str]:
-    """Query active node Props from PipeWire via `pw-cli enum-params <id> Props`."""
-    if sink_id is None:
-        return []
-    pw_cli = finder("pw-cli")
-    if not pw_cli:
-        return []
-    try:
-        proc = runner(
-            [pw_cli, "enum-params", str(sink_id), "Props"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if getattr(proc, "returncode", 1) != 0:
-            return []
-        stdout = getattr(proc, "stdout", "") or ""
-        return parse_spa_codecs(stdout)
-    except (OSError, ValueError, TypeError):
-        return []
-
-
-def prepare_pipewire_hdmi_bitstream(
-    requested_mode: str,
-    *,
-    sink_target: str = "@DEFAULT_AUDIO_SINK@",
-    runner: Callable[..., Any] = subprocess.run,
-    finder: Callable[[str], str | None] = shutil.which,
-) -> dict[str, Any]:
-    """Inspect and prepare PipeWire HDMI sink for bitstream HD passthrough if required."""
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    sink = inspect_sink(sink_target, runner=runner)
-    sink_id = sink.get("id")
-    sink_name = sink.get("name")
-    sink_desc = sink.get("description")
-    sink_profile = sink.get("profile")
-    sink_media_class = sink.get("media_class")
-    is_hdmi = bool(sink.get("is_hdmi", False))
-    property_codecs = list(sink.get("codecs", []))
-    req_codecs = list(REQUIRED_BITSTREAM_CODECS)
-
-    base_diag = {
-        "audio_sink_id": sink_id,
-        "audio_sink_name": sink_name,
-        "audio_sink_description": sink_desc,
-        "audio_sink_profile": sink_profile,
-        "audio_sink_media_class": sink_media_class,
-        "audio_sink_is_hdmi": is_hdmi,
-        "iec958_property_codecs": property_codecs,
-        "iec958_codecs_before": [],
-        "iec958_codecs_requested": req_codecs if requested_mode == "BITSTREAM" else [],
-        "iec958_codecs_after": [],
-        "iec958_prepare_attempted": False,
-        "iec958_prepare_status": "SKIPPED",
-        "iec958_prepare_reason": "PCM_MODE",
-        "iec958_prepare_method": None,
-        "timestamp": timestamp,
-    }
-
-    if requested_mode != "BITSTREAM":
-        return base_diag
-
-    if not sink or sink_id is None:
-        base_diag.update({
-            "iec958_prepare_status": "SKIPPED",
-            "iec958_prepare_reason": "SINK_UNRESOLVED",
-        })
-        return base_diag
-
-    if not is_hdmi:
-        base_diag.update({
-            "iec958_prepare_status": "SKIPPED",
-            "iec958_prepare_reason": "SINK_NOT_HDMI",
-        })
-        return base_diag
-
-    pw_cli = finder("pw-cli")
-    if not pw_cli:
-        base_diag.update({
-            "iec958_prepare_attempted": True,
-            "iec958_prepare_status": "FAILED",
-            "iec958_prepare_reason": "PW_CLI_UNAVAILABLE",
-            "iec958_prepare_method": "pw-cli",
-        })
-        return base_diag
-
-    codecs_before = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
-    base_diag["iec958_codecs_before"] = codecs_before
-    base_diag["iec958_codecs_after"] = codecs_before
-
-    if all(codec in codecs_before for codec in req_codecs):
-        base_diag.update({
-            "iec958_prepare_attempted": False,
-            "iec958_prepare_status": "SUCCESS",
-            "iec958_prepare_reason": "ALREADY_COMPATIBLE",
-            "iec958_prepare_method": "pw-cli",
-        })
-        return base_diag
-
-    target_codecs: list[str] = []
-    seen: set[str] = set()
-    for c in codecs_before + req_codecs:
-        c_norm = CANONICAL_CODECS_MAP.get(c.lower(), c)
-        if c_norm.upper() not in seen:
-            seen.add(c_norm.upper())
-            target_codecs.append(c_norm)
-
-    codecs_payload = " ".join(target_codecs)
-    cmd = [pw_cli, "s", str(sink_id), "Props", f"{{ iec958Codecs : [ {codecs_payload} ] }}"]
-
-    try:
-        proc = runner(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        returncode = getattr(proc, "returncode", 1)
-    except (OSError, ValueError, TypeError):
-        returncode = 1
-
-    if returncode != 0:
-        base_diag.update({
-            "iec958_prepare_attempted": True,
-            "iec958_prepare_status": "FAILED",
-            "iec958_prepare_reason": "PW_CLI_MUTATION_FAILED",
-            "iec958_prepare_method": "pw-cli",
-        })
-        return base_diag
-
-    codecs_after = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
-    base_diag["iec958_codecs_after"] = codecs_after
-    base_diag["iec958_prepare_attempted"] = True
-    base_diag["iec958_prepare_method"] = "pw-cli"
-
-    if all(codec in codecs_after for codec in req_codecs):
-        base_diag["iec958_prepare_status"] = "SUCCESS"
-        base_diag["iec958_prepare_reason"] = "CODECS_APPLIED"
-    else:
-        base_diag["iec958_prepare_status"] = "FAILED"
-        base_diag["iec958_prepare_reason"] = "MUTATION_NOT_EFFECTIVE"
-
-    return base_diag
+REQUIRED_BITSTREAM_CODECS = getattr(_POLICY_MODULE, "REQUIRED_BITSTREAM_CODECS", ("PCM", "DTS", "AC3", "EAC3", "TrueHD", "DTS-HD"))
+CANONICAL_CODECS_MAP = getattr(_POLICY_MODULE, "CANONICAL_CODECS_MAP", {
+    "pcm": "PCM", "dts": "DTS", "ac3": "AC3", "eac3": "EAC3", "truehd": "TrueHD", "dts-hd": "DTS-HD", "dtshd": "DTS-HD"
+})
+parse_wpctl_sink = getattr(_POLICY_MODULE, "parse_wpctl_sink", None)
+inspect_sink = getattr(_POLICY_MODULE, "inspect_sink", None)
+parse_spa_codecs = getattr(_POLICY_MODULE, "parse_spa_codecs", None)
+get_effective_spa_codecs = getattr(_POLICY_MODULE, "get_effective_spa_codecs", None)
+prepare_pipewire_hdmi_bitstream = getattr(_POLICY_MODULE, "prepare_pipewire_hdmi_bitstream", None)
 
 
 def runtime_config(home:pathlib.Path)->pathlib.Path:
@@ -255,15 +59,14 @@ def runtime_config(home:pathlib.Path)->pathlib.Path:
 
 def playback_policy(home:pathlib.Path)->tuple[Any,dict[str,Any]]:
     """Resolve the same persistent policy used by local files and DVD."""
-    path=pathlib.Path(__file__).with_name("openhtpc-playback-policy.py")
-    try:
-        spec=importlib.util.spec_from_file_location("openhtpc_protected_optical_policy",path)
-        if spec is None or spec.loader is None:raise ImportError
-        policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
-        decision=policy.resolve(home,None,"bluray")
-        return (policy,decision)
-    except (OSError,AttributeError,ImportError,TypeError,ValueError):
-        return (None,{"mpv_args":[]})
+    policy = _POLICY_MODULE or _load_playback_policy()
+    if policy is not None:
+        try:
+            decision = policy.resolve(home, None, "bluray")
+            return (policy, decision)
+        except (OSError, AttributeError, ImportError, TypeError, ValueError):
+            pass
+    return (None, {"mpv_args": []})
 
 
 def effective_policy_args(decision:dict[str,Any])->list[str]:

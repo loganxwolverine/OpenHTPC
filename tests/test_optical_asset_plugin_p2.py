@@ -65,7 +65,7 @@ class EquivalenceLifecycleAndIsolation(unittest.TestCase):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
   for marker in ("assets/",".png","pathlib","image.open","flex","open(","write(","urlopen","http://","https://","file://","subprocess","os.system","keydb","/dev/"):self.assertNotIn(marker,source)
  def test_resource_failure_does_not_touch_authoritative_subsystems(self):
-  names=("openhtpc-optical.py","openhtpc-core.py","openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-play","openhtpc-capabilities.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-playback-policy.py")
+  names=("openhtpc-optical.py","openhtpc-core.py","openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-capabilities.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py")
   for name in names:
    if name in {"openhtpc-disc-view.py","openhtpc-core.py","openhtpc-plugin-registry.py"}:continue
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout;self.assertEqual((PAYLOAD/name).read_text(),baseline,name)

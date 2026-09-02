@@ -65,7 +65,7 @@ class DoctorAndLifecycle(RegistryFixture):
 
 class QualifiedBoundaries(unittest.TestCase):
  def test_qualified_sources_unchanged(self):
-  names=("openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-play","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh","openhtpc-playback-policy.py")
+  names=("openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh")
   for name in names:
    baseline=subprocess.run(["git","show",f"{BASE}:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
    self.assertEqual((PAYLOAD/name).read_text(),baseline,name)

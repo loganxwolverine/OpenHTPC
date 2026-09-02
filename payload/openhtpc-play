@@ -294,8 +294,17 @@ def main(argv: list[str] | None = None) -> int:
     update_action_state(home,path_resolved=True,path_absolute=True,file_exists=True,extension=media.suffix.casefold(),runtime="pure",process_started=True,error_class="NONE")
     runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
     audio_output = decision.get("audio_output", {"requested":"PCM","source_codec":"UNKNOWN","resolved":"PCM","reason":"policy_fallback","audio_spdif":"none"})
+    requested_mode = audio_output.get("requested", "PCM")
+    pw_diag = None
+    if hasattr(policy, "prepare_pipewire_hdmi_bitstream"):
+        try:
+            pw_diag = policy.prepare_pipewire_hdmi_bitstream(requested_mode)
+        except Exception:
+            pw_diag = {"audio_sink_id": None, "audio_sink_is_hdmi": False, "iec958_prepare_attempted": False, "iec958_prepare_status": "FAILED", "iec958_prepare_reason": "PREPARATION_EXCEPTION"}
     runtime_event(home,install,"PLAYBACK_POLICY",presentation_requested=decision["presentation"]["requested"],presentation_resolved=decision["presentation"]["resolved"],presentation_reason=decision["presentation"]["reason"],audio_requested=decision["audio"]["requested"],audio_resolved=decision["audio"]["resolved"],audio_reason=decision["audio"]["reason"],subtitle_requested=decision["subtitle"]["requested"],subtitle_resolved=decision["subtitle"]["resolved"],subtitle_reason=decision["subtitle"]["reason"])
     runtime_event(home,install,"AUDIO_POLICY",requested=audio_output["requested"],source_codec=audio_output["source_codec"],resolved=audio_output["resolved"],reason=audio_output["reason"],audio_spdif=audio_output["audio_spdif"])
+    if pw_diag is not None:
+        runtime_event(home,install,"AUDIO_PIPEWIRE_PREPARATION",status=pw_diag.get("iec958_prepare_status"),reason=pw_diag.get("iec958_prepare_reason"),attempted=pw_diag.get("iec958_prepare_attempted"),sink_id=pw_diag.get("audio_sink_id"))
     runtime_event(home,install, "PLAYBACK_BEGIN")
     runtime_event(home,install,"PLAYBACK_DISPATCHED")
     append_event(log, **common, event="PROCESS_STARTED", process_started=True)
@@ -320,7 +329,26 @@ def main(argv: list[str] | None = None) -> int:
         try: subprocess.run([str(audio_refresh), "audio"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=False)
         except (OSError, subprocess.TimeoutExpired): pass
     append_event(log, **common, event="PROCESS_EXITED", process_started=True, media_opened=opened, exit_code=rc, elapsed=elapsed, error_class=error_class, diagnostic_lines=diagnostics)
-    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd})
+    pw_fields = {
+        "requested_audio_mode": requested_mode,
+        "audio_sink_id": pw_diag.get("audio_sink_id"),
+        "active_sink_id": pw_diag.get("audio_sink_id"),
+        "audio_sink_name": pw_diag.get("audio_sink_name"),
+        "active_sink_node_name": pw_diag.get("audio_sink_name"),
+        "audio_sink_description": pw_diag.get("audio_sink_description"),
+        "audio_sink_profile": pw_diag.get("audio_sink_profile"),
+        "audio_sink_media_class": pw_diag.get("audio_sink_media_class"),
+        "audio_sink_is_hdmi": pw_diag.get("audio_sink_is_hdmi"),
+        "iec958_property_codecs": pw_diag.get("iec958_property_codecs"),
+        "iec958_codecs_before": pw_diag.get("iec958_codecs_before"),
+        "iec958_codecs_requested": pw_diag.get("iec958_codecs_requested"),
+        "iec958_codecs_after": pw_diag.get("iec958_codecs_after"),
+        "iec958_prepare_attempted": pw_diag.get("iec958_prepare_attempted"),
+        "iec958_prepare_status": pw_diag.get("iec958_prepare_status"),
+        "iec958_prepare_reason": pw_diag.get("iec958_prepare_reason"),
+        "iec958_prepare_method": pw_diag.get("iec958_prepare_method"),
+    } if pw_diag else {}
+    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, **pw_fields})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)
     update_action_state(home,media_opened=opened,exit_code=rc,elapsed=elapsed,error_class=error_class)
     runtime_event(home,install,"PLAYBACK_PROCESS_EXITED",exit_code=rc,elapsed=elapsed,error_class=error_class)
