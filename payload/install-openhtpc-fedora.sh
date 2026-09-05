@@ -37,6 +37,8 @@ readonly OPENHTPC_COMMAND_PATH="${BIN_DIR}/openhtpc"
 readonly VALIDATOR_COMMAND_PATH="${BIN_DIR}/openhtpc-validator"
 readonly AUTOSTART_DIR="${HOME}/.config/autostart"
 readonly AUTOSTART_PATH="${AUTOSTART_DIR}/openhtpc.desktop"
+readonly APPLICATIONS_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
+readonly APPLICATION_DESKTOP_PATH="${APPLICATIONS_DIR}/openhtpc.desktop"
 TEMP_DIR="$(mktemp -d -t openhtpc-installer.XXXXXX)"
 readonly INSTALL_LOG_DIR="${HOME}/.local/state/openhtpc"
 readonly INSTALL_LOG="${INSTALL_LOG_DIR}/install.log"
@@ -66,6 +68,7 @@ die() {
     printf '[OPENHTPC] ERREUR : %s\n[OPENHTPC] Journal détaillé : %s\n' "$*" "$INSTALL_LOG" | tee -a "$INSTALL_LOG" >&2
     exit 1
 }
+
 
 stage() { RUN_STAGE=$1; python3 "$SCRIPT_DIR/openhtpc-installer-ui.py" --stage "$1" 2>/dev/null || true; printf '%s stage=%s\n' "$(date --iso-8601=seconds)" "$1" >>"$INSTALL_LOG"; }
 
@@ -540,6 +543,19 @@ if $DRY_RUN; then
     exit 0
 fi
 
+# Preflight desktop integration collision checks before any filesystem modification
+if [[ -L "$AUTOSTART_PATH" ]]; then
+    die "Refus d'écraser le lien symbolique autostart : $AUTOSTART_PATH"
+elif [[ -e "$AUTOSTART_PATH" ]] && ! grep -Fq 'X-OPENHTPC-Managed=true' "$AUTOSTART_PATH"; then
+    die "Refus d'écraser l'autostart externe non géré : $AUTOSTART_PATH"
+fi
+
+if [[ -L "$APPLICATION_DESKTOP_PATH" ]]; then
+    die "Refus d'écraser le lien symbolique du lanceur d'applications : $APPLICATION_DESKTOP_PATH"
+elif [[ -e "$APPLICATION_DESKTOP_PATH" ]] && ! grep -Fq 'X-OPENHTPC-Managed=true' "$APPLICATION_DESKTOP_PATH"; then
+    die "Refus d'écraser le lanceur d'applications externe non géré : $APPLICATION_DESKTOP_PATH"
+fi
+
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "${HOME}/.config/openhtpc"
 rm -f -- "$INSTALL_DIR/openhtpc-backdrop"
 stage INSTALLATION
@@ -617,19 +633,31 @@ ln -sfn "$INSTALL_DIR/openhtpc-media-browser" "$MEDIA_BROWSER_COMMAND_PATH"
 ln -sfn "$INSTALL_DIR/openhtpc" "$OPENHTPC_COMMAND_PATH"
 ln -sfn "$INSTALL_DIR/openhtpc-validator" "$VALIDATOR_COMMAND_PATH"
 mkdir -p "$AUTOSTART_DIR"
-if [[ -e $AUTOSTART_PATH ]] && ! grep -Fq 'X-OPENHTPC-Managed=true' "$AUTOSTART_PATH"; then
-    die "Refus d'écraser l'autostart externe : $AUTOSTART_PATH"
-fi
 cat >"$AUTOSTART_PATH" <<EOF
 [Desktop Entry]
 Type=Application
 Name=OPENHTPC Basic
-Exec=${BIN_DIR}/openhtpc-session-start
+Exec=openhtpc start
 Terminal=false
 X-KDE-autostart-after=panel
 X-OPENHTPC-Managed=true
 EOF
 chmod 0644 "$AUTOSTART_PATH"
+
+mkdir -p "$APPLICATIONS_DIR"
+cat >"$APPLICATION_DESKTOP_PATH" <<EOF
+[Desktop Entry]
+Type=Application
+Name=OPENHTPC
+Comment=Centre multimédia de salon OPENHTPC
+Exec=openhtpc start
+Icon=${INSTALL_DIR}/assets/branding/openhtpc-logo.png
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+StartupNotify=true
+X-OPENHTPC-Managed=true
+EOF
+chmod 0644 "$APPLICATION_DESKTOP_PATH"
 
 log "OPENHTPC ${OPENHTPC_VERSION} installé."
 capabilities_refreshed=false
