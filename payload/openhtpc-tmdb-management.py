@@ -17,7 +17,7 @@ VALIDATION_URL = "https://api.themoviedb.org/3/authentication"
 DISPLAY = {
     "NOT_CONFIGURED": "NON CONFIGURÉ",
     "VALID": "CONFIGURATION VALIDE",
-    "AUTH_REJECTED": "CLÉ / IDENTIFIANT REFUSÉ",
+    "AUTH_REJECTED": "CLÉ / JETON API REFUSÉ",
     "NETWORK_UNAVAILABLE": "RÉSEAU INDISPONIBLE",
     "SERVICE_UNAVAILABLE": "SERVICE TMDb INDISPONIBLE",
     "TIMEOUT": "DÉLAI DE CONNEXION DÉPASSÉ",
@@ -73,7 +73,7 @@ def record(home: pathlib.Path, state: str, detail: str) -> dict:
 
 def validate(candidate: str, opener=urllib.request.urlopen) -> dict:
     value = candidate.strip()
-    if not value: return {"state":"AUTH_REJECTED","detail":"Identifiant vide refusé"}
+    if not value: return {"state":"AUTH_REJECTED","detail":"Clé ou jeton API refusé par TMDb"}
     is_v4 = value.startswith("ey")
     url = VALIDATION_URL if is_v4 else VALIDATION_URL + "?api_key=" + value
     headers = {"Accept":"application/json"}
@@ -83,7 +83,7 @@ def validate(candidate: str, opener=urllib.request.urlopen) -> dict:
             json.load(response)
         return {"state":"VALID","detail":"Connexion à TMDb réussie"}
     except urllib.error.HTTPError as exc:
-        if exc.code in (401,403): return {"state":"AUTH_REJECTED","detail":"Identifiant refusé par TMDb"}
+        if exc.code in (401,403): return {"state":"AUTH_REJECTED","detail":"Clé ou jeton API refusé par TMDb"}
         if 500 <= exc.code <= 599: return {"state":"SERVICE_UNAVAILABLE","detail":"Service TMDb momentanément indisponible"}
         return {"state":"SERVICE_UNAVAILABLE","detail":f"Réponse TMDb indisponible ({exc.code})"}
     except (TimeoutError, socket.timeout):
@@ -99,11 +99,11 @@ def validate(candidate: str, opener=urllib.request.urlopen) -> dict:
 
 def status(home: pathlib.Path) -> dict:
     value = credential(home)
-    if not value: return {"state":"NOT_CONFIGURED","label":DISPLAY["NOT_CONFIGURED"],"masked":"","detail":"Aucun identifiant TMDb enregistré"}
+    if not value: return {"state":"NOT_CONFIGURED","label":DISPLAY["NOT_CONFIGURED"],"masked":"","detail":"Aucun accès API TMDb enregistré"}
     try: saved = json.loads(paths(home)[1].read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError): saved = {}
     state = saved.get("state") if saved.get("state") in DISPLAY else "UNKNOWN"
-    return {"state":state,"label":DISPLAY[state],"masked":masked(value),"detail":saved.get("detail") or "Identifiant enregistré, non testé"}
+    return {"state":state,"label":DISPLAY[state],"masked":masked(value),"detail":saved.get("detail") or "Accès API TMDb enregistré, non testé"}
 
 def test_stored(home: pathlib.Path, opener=urllib.request.urlopen) -> dict:
     value = credential(home)
@@ -132,13 +132,13 @@ def interactive(home: pathlib.Path, action: str) -> int:
     current = status(home)
     if action == "test": result = test_stored(home)
     elif action in {"configure","modify"}:
-        entered = _dialog(["--title","OPENHTPC — TMDb","--password","Identifiant TMDb :"], True)
+        entered = _dialog(["--title","OPENHTPC — TMDb","--password","Clé API v3 ou jeton d'accès v4 TMDb :"], True)
         if entered.returncode or not entered.stdout.strip(): return 0
         result = replace(home, entered.stdout.strip())
         if not result.get("committed"):
             _dialog(["--title","OPENHTPC — TMDb","--error",DISPLAY[result["candidate_state"]] + "\n" + result["candidate_detail"]]); return 2
     elif action == "delete":
-        answer = _dialog(["--title","OPENHTPC — TMDb","--warningyesno","Supprimer l’identifiant TMDb enregistré ?","--yes-label","SUPPRIMER","--no-label","ANNULER"])
+        answer = _dialog(["--title","OPENHTPC — TMDb","--warningyesno","Supprimer l'accès API TMDb enregistré ?","--yes-label","SUPPRIMER","--no-label","ANNULER"])
         if answer.returncode: return 0
         result = delete(home)
     else: result = current

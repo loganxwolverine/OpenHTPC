@@ -480,8 +480,8 @@ def system_page_png(
         tmdb = model.get("tmdb_management", {})
         rows = [("État", tmdb.get("label", "NON CONFIGURÉ"), "#78d9ae" if tmdb.get("state") == "VALID" else None)]
         if tmdb.get("masked"):
-            rows.append(("Identifiant", tmdb["masked"], None))
-            rows.append(("Dernier test", tmdb.get("detail", "Identifiant enregistré, non testé"), None))
+            rows.append(("Accès API TMDb", tmdb["masked"], None))
+            rows.append(("Dernier test", tmdb.get("detail", "Accès API TMDb enregistré, non testé"), None))
         else:
             rows.extend((("Service", "TMDb permet d’afficher affiches et informations des films", None),
                          ("Lecture", "TMDb est facultatif", None)))

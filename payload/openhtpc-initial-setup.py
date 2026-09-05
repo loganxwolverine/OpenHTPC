@@ -89,7 +89,7 @@ def graphical(home: pathlib.Path) -> tuple[list[str], str | None] | None:
     token = None
     benefit = "TMDb est facultatif.\n\nConnectez-le pour enrichir les fiches avec affiches, synopsis, année, genres et acteurs.\n\nVous pourrez aussi le configurer plus tard depuis OPENHTPC."
     if kd(["--title", "TMDb — Métadonnées enrichies", "--yesno", benefit, "--yes-label", "CONFIGURER", "--no-label", "PLUS TARD"]).returncode == 0:
-        result = kd(["--title", "OPENHTPC — TMDb", "--password", "Clé TMDb privée (facultative) :"], capture=True)
+        result = kd(["--title", "OPENHTPC — TMDb", "--password", "Clé API v3 ou jeton d'accès v4 TMDb (facultatif) :"], capture=True)
         if result.returncode == 0 and result.stdout.strip():
             token = result.stdout.strip()
     summary = "Aucune source média" if not sources else "Sources média :\n" + "\n".join(sources)
@@ -112,7 +112,7 @@ def terminal(home: pathlib.Path) -> tuple[list[str], str | None] | None:
             sources.append(str(path.resolve()))
         else:
             print("Dossier inexistant.", file=sys.stderr)
-    token = getpass.getpass("Clé TMDb facultative (vide = plus tard) : ").strip() or None
+    token = getpass.getpass("Clé API v3 ou jeton d'accès v4 TMDb (facultatif) : ").strip() or None
     return sources, token
 
 
