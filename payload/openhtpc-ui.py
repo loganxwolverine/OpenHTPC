@@ -293,7 +293,7 @@ def system_page_png(
                 value = value[:-2].rstrip() + "…"
         draw.text((xy(pos[0]), xy(pos[1])), value, font=font(n, bold), fill=color)
 
-    def card(box, title, rows):
+    def card(box, title, rows, label_ratio=0.42):
         x, y, w, h = box
         draw.rounded_rectangle(
             (xy(x), xy(y), xy(x + w), xy(y + h)),
@@ -305,10 +305,12 @@ def system_page_png(
         txt((x + 28, y + 22), title, 24, "#22c7ff", True, w - 56)
         available = h - 76
         step = max(54, min(80, available / max(1, len(rows))))
+        val_offset = label_ratio + 0.02
+        val_ratio = 1.0 - val_offset - 0.04
         for index, (label, value, status) in enumerate(rows):
             yy = y + 74 + index * step
-            txt((x + 28, yy), label, 18, "#93a9c2", False, w * 0.42)
-            txt((x + w * 0.44, yy - 2), value, 22, status or "#f7fbff", False, w * 0.52)
+            txt((x + 28, yy), label, 18, "#93a9c2", False, w * label_ratio)
+            txt((x + w * val_offset, yy - 2), value, 22, status or "#f7fbff", False, w * val_ratio)
 
     draw.rectangle((0, 0, width, height), fill="#020711")
     draw.rectangle((0, 0, width, xy(140)), fill="#041022")
@@ -649,14 +651,26 @@ def system_page_png(
         txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
     elif page == "about":
         version = model.get("technical", {}).get("version", "1.1.2-dev1")
-        card((70, 170, 1780, 680), "À PROPOS", [
-            ("Projet", "OPENHTPC", "#22c7ff"),
-            ("Version", version, None),
-            ("Origine", "Projet créé par Steve Dehanne", None),
-            ("Copyright", "Copyright 2026 Steve Dehanne", None),
-            ("Licence", "Apache 2.0", None),
-            ("Dépôt officiel", "github.com/loganxwolverine/OpenHTPC", None),
-        ])
+        card(
+            (70, 170, 730, 680),
+            "PROJET",
+            [
+                ("Projet", "OPENHTPC", "#22c7ff"),
+                ("Version", version, None),
+                ("Origine", "Projet créé par Steve Dehanne", None),
+            ],
+            label_ratio=0.28,
+        )
+        card(
+            (1120, 170, 730, 680),
+            "LICENCE & DÉPÔT",
+            [
+                ("Copyright", "Copyright 2026 Steve Dehanne", None),
+                ("Licence", "Apache 2.0", None),
+                ("Dépôt officiel", "github.com/loganxwolverine/OpenHTPC", None),
+            ],
+            label_ratio=0.28,
+        )
     elif page == "diagnostics":
         d = model["diagnostics"]
         allowed_checks = {
