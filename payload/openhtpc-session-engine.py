@@ -383,8 +383,16 @@ def protected_optical_menu_policy(home: pathlib.Path, install: pathlib.Path, opt
 def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path], home: pathlib.Path | None = None) -> str:
     state = _optical_model.canonical_state(optical); media = _optical_model.presentation(optical); entries = []
     play_icon, tmdb_icon, eject_icon, back_icon = icons
-    dvd_icon = install / "assets/ui/optical-dvd.png"
-    media_play_icon = dvd_icon if (state == "DVD_VIDEO" and dvd_icon.is_file()) else play_icon
+    play_action = install / "assets/ui/media.png"
+    media_play_icon = play_action if play_action.is_file() else play_icon
+    eject_action = install / "assets/ui/eject.png"
+    action_eject_icon = eject_action if eject_action.is_file() else eject_icon
+    back_action = install / "assets/ui/system-back.png"
+    action_back_icon = back_action if back_action.is_file() else back_icon
+    video_action = install / "assets/ui/system-processing.png"
+    if not video_action.is_file():
+        video_action = install / "assets/ui/traitement_video.png"
+    video_icon = video_action if video_action.is_file() else play_icon
     decision = _optical_model.playback_decision(optical, _optical_model.protected_capability(home)) if home else _optical_model.playback_decision(optical, {})
     ui_authority, ui_contribution = "CORE_FALLBACK", {"visible": False, "enabled": False, "action_intent": "NONE"}
     if state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} and home:
@@ -498,13 +506,12 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         except (OSError, AttributeError, ImportError, KeyError):
             pass
         label = "CINÉMA AUTO" if presentation == "CINEMA_AUTO" else "PURE"
-        video_icon = install / "assets/ui/playback-video.png"
         insert_at = next((index + 1 for index, item in enumerate(entries) if item[0] == "LIRE LE DVD"), len(entries))
         entries.insert(insert_at, (f"MODE VIDÉO : {label}", video_icon, ":submenu DVD_VIDEO_MODE"))
 
     device = shlex.quote(str(optical.get("device") or ""))
-    entries.append(("ÉJECTER", eject_icon, f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {device}" if device else ":fork true"))
-    entries.append(("RETOUR", back_icon, ":back"))
+    entries.append(("ÉJECTER", action_eject_icon, f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {device}" if device else ":fork true"))
+    entries.append(("RETOUR", action_back_icon, ":back"))
     return "\n".join(f"Entry{i}={ini_value(label)};{icon};{command}" for i, (label, icon, command) in enumerate(entries, 1))
 
 
@@ -968,7 +975,7 @@ Entry1=RETOUR;{icon_back};:back
 
 [DISQUE]
 BackgroundImage={disc_sheet}
-{disc_menu_entries(optical, install, (optical_icon, media_icon, eject_icon, logo), home)}
+{disc_menu_entries(optical, install, (media_icon, media_icon, eject_icon, icon_back), home)}
 
 [DVD_VIDEO_MODE]
 BackgroundImage={disc_sheet}

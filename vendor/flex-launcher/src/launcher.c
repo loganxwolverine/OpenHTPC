@@ -449,11 +449,11 @@ static bool __attribute__((unused)) is_system_dashboard(void)
     return false;
 }
 
-static bool is_system_subpage(void)
+static bool is_menu_system_subpage(const Menu *menu)
 {
-    if (current_menu == NULL || current_menu->name == NULL)
+    if (menu == NULL || menu->name == NULL)
         return false;
-    const char *name = current_menu->name;
+    const char *name = menu->name;
     return (strcmp(name, "SYSTEM_OVERVIEW") == 0 ||
             strcmp(name, "SYSTEM_CODECS") == 0 ||
             strcmp(name, "SYSTEM_DISPLAY") == 0 ||
@@ -472,6 +472,11 @@ static bool is_system_subpage(void)
             strcmp(name, "SYSTEM_TECHNICAL") == 0);
 }
 
+static bool is_system_subpage(void)
+{
+    return is_menu_system_subpage(current_menu);
+}
+
 static bool is_system_root(void)
 {
     return (
@@ -481,20 +486,40 @@ static bool is_system_root(void)
     );
 }
 
+static bool is_menu_disc_sheet(const Menu *menu)
+{
+    return menu != NULL && menu->name != NULL && strcmp(menu->name, "DISQUE") == 0;
+}
+
 static bool is_disc_sheet(void)
 {
     return current_menu != NULL && current_menu->name != NULL && strcmp(current_menu->name, "DISQUE") == 0;
 }
 
-static bool is_disc_ambiguous(void)
+static bool is_menu_disc_ambiguous(const Menu *menu)
 {
-    if (!is_disc_sheet() || current_menu == NULL) return false;
-    for (Entry *e = current_menu->first_entry; e != NULL; e = e->next) {
+    if (!is_menu_disc_sheet(menu) || menu == NULL) return false;
+    for (Entry *e = menu->first_entry; e != NULL; e = e->next) {
         if (e->cmd != NULL && strstr(e->cmd, "openhtpc-bind-disc") != NULL) {
             return true;
         }
     }
     return false;
+}
+
+static bool is_disc_ambiguous(void)
+{
+    return is_menu_disc_ambiguous(current_menu);
+}
+
+static bool is_menu_disc_action_sheet(const Menu *menu)
+{
+    return is_menu_disc_sheet(menu) && !is_menu_disc_ambiguous(menu);
+}
+
+static bool is_disc_action_sheet(void)
+{
+    return is_menu_disc_action_sheet(current_menu);
 }
 
 
@@ -1012,6 +1037,20 @@ static void calculate_button_geometry(Entry *entry, int buttons)
                 int stack_y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
                 entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
                 entry->text_rect.y = stack_y + icon_size + safety_margin;
+            } else if (is_disc_action_sheet()) {
+                if (entry->icon != NULL) {
+                    int icon_size = (geo.screen_height * 34) / 1000;
+                    int icon_gap = (geo.screen_width * 6) / 1000;
+                    int total_w = icon_size + icon_gap + entry->text_rect.w;
+                    int start_x = entry->icon_rect.x + (width - total_w) / 2;
+                    if (start_x < entry->icon_rect.x + (geo.screen_width * 1) / 100)
+                        start_x = entry->icon_rect.x + (geo.screen_width * 1) / 100;
+                    entry->text_rect.x = start_x + icon_size + icon_gap;
+                    entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
+                } else {
+                    entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
+                    entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
+                }
             } else {
                 entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
                 entry->text_rect.y = entry->icon_rect.y + (entry->icon_rect.h - entry->text_rect.h) / 2;
@@ -1296,12 +1335,12 @@ static void render_buttons(Menu *menu)
                 media_title.max_width = (geo.screen_width * 30) / 100;
                 media_title.oversize_mode = OVERSIZE_TRUNCATE;
             }
-            if (is_disc_ambiguous() && entry->cmd != NULL && strstr(entry->cmd, "openhtpc-bind-disc") != NULL) {
+            if (is_menu_disc_ambiguous(menu) && entry->cmd != NULL && strstr(entry->cmd, "openhtpc-bind-disc") != NULL) {
                 int card_w = (geo.screen_width * 64) / 100;
                 int icon_w = ((geo.screen_height * 115) / 1000 * 2) / 3;
                 media_title.max_width = card_w - icon_w - (geo.screen_width * 5) / 100;
                 media_title.oversize_mode = OVERSIZE_TRUNCATE;
-            } else if (is_disc_sheet() || is_system_subpage()) {
+            } else if (is_menu_disc_sheet(menu) || is_menu_system_subpage(menu)) {
                 int btn_count = 0;
                 for (Entry *e = menu->first_entry; e != NULL; e = e->next) {
                     if (e->cmd == NULL || strstr(e->cmd, "openhtpc-bind-disc") == NULL) btn_count++;
@@ -1311,7 +1350,12 @@ static void render_buttons(Menu *menu)
                 int avail_w = (geo.screen_width * 88) / 100;
                 int btn_w = (avail_w - (btn_count - 1) * gap) / (btn_count > 0 ? btn_count : 1);
                 if (btn_w > max_w) btn_w = max_w;
-                media_title.max_width = btn_w - (geo.screen_width * 2) / 100;
+                if (is_menu_disc_action_sheet(menu) && entry->icon != NULL) {
+                    int reserved_icon = (geo.screen_height * 34) / 1000 + (geo.screen_width * 6) / 1000;
+                    media_title.max_width = btn_w - (geo.screen_width * 2) / 100 - reserved_icon;
+                } else {
+                    media_title.max_width = btn_w - (geo.screen_width * 2) / 100;
+                }
                 media_title.oversize_mode = OVERSIZE_SHRINK;
             }
             entry->title_texture = render_text_texture(entry->title, &media_title, &entry->text_rect, &h);
@@ -1981,8 +2025,6 @@ static void draw_screen()
                 if (entry->cmd == NULL || strstr(entry->cmd, "openhtpc-bind-disc") == NULL) {
                     icon = NULL;
                 }
-            } else if (is_disc_sheet()) {
-                icon = NULL;
             }
             /*
              * OpenHTPC:
@@ -2002,6 +2044,13 @@ static void draw_screen()
                 int stack_height = icon_size + safety_margin + entry->text_rect.h;
                 artwork_rect.x = entry->icon_rect.x + (entry->icon_rect.w - icon_size) / 2;
                 artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
+                artwork_rect.w = icon_size;
+                artwork_rect.h = icon_size;
+            } else if (is_disc_action_sheet()) {
+                int icon_size = (geo.screen_height * 34) / 1000;
+                int icon_gap = (geo.screen_width * 6) / 1000;
+                artwork_rect.x = entry->text_rect.x - icon_gap - icon_size;
+                artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - icon_size) / 2;
                 artwork_rect.w = icon_size;
                 artwork_rect.h = icon_size;
             }
