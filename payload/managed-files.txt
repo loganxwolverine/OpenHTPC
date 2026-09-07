@@ -112,6 +112,7 @@ flex/bin/flex-launcher
 openhtpc
 openhtpc-validator
 openhtpc-appliance-mode
+openhtpc-audio.py
 openhtpc-benchmark.py
 openhtpc-bind-disc
 openhtpc-builder.sh

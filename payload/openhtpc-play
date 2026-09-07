@@ -295,14 +295,24 @@ def main(argv: list[str] | None = None) -> int:
     runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
     audio_output = decision.get("audio_output", {"requested":"PCM","source_codec":"UNKNOWN","resolved":"PCM","reason":"policy_fallback","audio_spdif":"none"})
     requested_mode = audio_output.get("requested", "PCM")
+    audio_target = decision.get("audio_target") or {}
+    sink_target = audio_target.get("sink_target") or "@DEFAULT_AUDIO_SINK@"
+    target_descriptor = audio_target.get("descriptor")
     pw_diag = None
-    if hasattr(policy, "prepare_pipewire_hdmi_bitstream"):
+    if hasattr(policy, "prepare_audio_target_bitstream"):
         try:
-            pw_diag = policy.prepare_pipewire_hdmi_bitstream(requested_mode)
+            pw_diag = policy.prepare_audio_target_bitstream(decision)
+        except Exception:
+            pw_diag = {"audio_sink_id": None, "audio_sink_is_hdmi": False, "iec958_prepare_attempted": False, "iec958_prepare_status": "FAILED", "iec958_prepare_reason": "PREPARATION_EXCEPTION"}
+    elif hasattr(policy, "prepare_pipewire_hdmi_bitstream"):
+        try:
+            pw_diag = policy.prepare_pipewire_hdmi_bitstream(requested_mode, sink_target=sink_target, target_descriptor=target_descriptor)
         except Exception:
             pw_diag = {"audio_sink_id": None, "audio_sink_is_hdmi": False, "iec958_prepare_attempted": False, "iec958_prepare_status": "FAILED", "iec958_prepare_reason": "PREPARATION_EXCEPTION"}
     runtime_event(home,install,"PLAYBACK_POLICY",presentation_requested=decision["presentation"]["requested"],presentation_resolved=decision["presentation"]["resolved"],presentation_reason=decision["presentation"]["reason"],audio_requested=decision["audio"]["requested"],audio_resolved=decision["audio"]["resolved"],audio_reason=decision["audio"]["reason"],subtitle_requested=decision["subtitle"]["requested"],subtitle_resolved=decision["subtitle"]["resolved"],subtitle_reason=decision["subtitle"]["reason"])
     runtime_event(home,install,"AUDIO_POLICY",requested=audio_output["requested"],source_codec=audio_output["source_codec"],resolved=audio_output["resolved"],reason=audio_output["reason"],audio_spdif=audio_output["audio_spdif"])
+    if audio_target:
+        runtime_event(home,install,"AUDIO_ROUTING",configured=audio_target.get("configured","SYSTEM"),configured_label=audio_target.get("configured_label","SYSTEM"),available=audio_target.get("available",True),effective=audio_target.get("effective","SYSTEM"),audio_mode=audio_target.get("audio_mode",requested_mode),fallback=audio_target.get("fallback",False))
     if pw_diag is not None:
         runtime_event(home,install,"AUDIO_PIPEWIRE_PREPARATION",status=pw_diag.get("iec958_prepare_status"),reason=pw_diag.get("iec958_prepare_reason"),attempted=pw_diag.get("iec958_prepare_attempted"),sink_id=pw_diag.get("audio_sink_id"))
     runtime_event(home,install, "PLAYBACK_BEGIN")
@@ -347,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
         "iec958_prepare_status": pw_diag.get("iec958_prepare_status"),
         "iec958_prepare_reason": pw_diag.get("iec958_prepare_reason"),
         "iec958_prepare_method": pw_diag.get("iec958_prepare_method"),
+        "target_configured": audio_target.get("configured", "SYSTEM"),
+        "target_configured_label": audio_target.get("configured_label", "SYSTEM"),
+        "target_available": audio_target.get("available", True),
+        "target_effective": audio_target.get("effective", "SYSTEM"),
+        "target_fallback": audio_target.get("fallback", False),
     } if pw_diag else {}
     private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, **pw_fields})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)

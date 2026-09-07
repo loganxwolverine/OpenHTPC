@@ -87,8 +87,14 @@ def atomic_diagnostic(home:pathlib.Path,command:list[str],request:dict[str,Any],
     decoder=next((line.strip() for line in raw.splitlines() if "Selected decoder:" in line),"UNKNOWN")
     output=next((line.strip() for line in raw.splitlines() if line.strip().startswith("AO:")),"UNKNOWN")
     pw=pipewire_diag or {}
+    target_info = decision.get("audio_target") or {}
     data={"schema":1,"argv":command,"device":request.get("device"),"generation":request.get("generation"),
           "requested_audio_mode":(decision.get("audio_output") or {}).get("requested","PCM"),
+          "target_configured":target_info.get("configured","SYSTEM"),
+          "target_configured_label":target_info.get("configured_label","SYSTEM"),
+          "target_available":target_info.get("available",True),
+          "target_effective":target_info.get("effective","SYSTEM"),
+          "target_fallback":target_info.get("fallback",False),
           "selected_audio":selected,"selected_decoder":decoder,"effective_audio_output":output,
           "audio_sink_id":pw.get("audio_sink_id"),
           "audio_sink_name":pw.get("audio_sink_name"),
@@ -134,7 +140,13 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     pw_diag=None
     try:
         effective_pw_runner=pw_runner if pw_runner is not None else subprocess.run
-        pw_diag=prepare_pipewire_hdmi_bitstream(requested_mode,runner=effective_pw_runner,finder=finder)
+        if hasattr(policy, "prepare_audio_target_bitstream"):
+            pw_diag=policy.prepare_audio_target_bitstream(decision,runner=effective_pw_runner,finder=finder)
+        else:
+            target_info = decision.get("audio_target") or {}
+            sink_target = target_info.get("sink_target") or "@DEFAULT_AUDIO_SINK@"
+            target_desc = target_info.get("descriptor")
+            pw_diag=prepare_pipewire_hdmi_bitstream(requested_mode,sink_target=sink_target,target_descriptor=target_desc,runner=effective_pw_runner,finder=finder)
     except Exception:
         pw_diag={"audio_sink_id":None,"audio_sink_is_hdmi":False,"iec958_prepare_attempted":False,"iec958_prepare_status":"FAILED","iec958_prepare_reason":"PREPARATION_EXCEPTION"}
     command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",

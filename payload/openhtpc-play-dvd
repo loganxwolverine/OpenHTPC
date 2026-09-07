@@ -144,6 +144,28 @@ output_spdif="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("a
     --field "requested=$output_requested" --field "source_codec=$output_codec" --field "resolved=$output_resolved" \
     --field "reason=$output_reason" --field "audio_spdif=$output_spdif"
 
+target_configured="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_target",{}).get("configured","SYSTEM"))' "$policy_json" 2>/dev/null || printf SYSTEM)"
+target_label="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_target",{}).get("configured_label","SYSTEM"))' "$policy_json" 2>/dev/null || printf SYSTEM)"
+target_available="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_target",{}).get("available",True))' "$policy_json" 2>/dev/null || printf True)"
+target_effective="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_target",{}).get("effective","SYSTEM"))' "$policy_json" 2>/dev/null || printf SYSTEM)"
+target_fallback="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_target",{}).get("fallback",False))' "$policy_json" 2>/dev/null || printf False)"
+
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event AUDIO_ROUTING \
+    --field "configured=$target_configured" --field "configured_label=$target_label" \
+    --field "available=$target_available" --field "effective=$target_effective" \
+    --field "audio_mode=$output_requested" --field "fallback=$target_fallback"
+
+pw_diag_json="$(python3 "$INSTALL/openhtpc-playback-policy.py" --home "$HOME_DIR" prepare-bitstream --decision "$policy_json" 2>/dev/null || printf '{}')"
+if [[ -n "$pw_diag_json" && "$pw_diag_json" != "{}" && -x $INSTALL/openhtpc-runtime.py ]]; then
+    pw_status="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_status",""))' "$pw_diag_json" 2>/dev/null || true)"
+    pw_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_reason",""))' "$pw_diag_json" 2>/dev/null || true)"
+    pw_attempted="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_attempted",""))' "$pw_diag_json" 2>/dev/null || true)"
+    pw_sink_id="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_sink_id",""))' "$pw_diag_json" 2>/dev/null || true)"
+    "$INSTALL/openhtpc-runtime.py" log --component playback --event AUDIO_PIPEWIRE_PREPARATION \
+        --field "status=$pw_status" --field "reason=$pw_reason" \
+        --field "attempted=$pw_attempted" --field "sink_id=$pw_sink_id"
+fi
+
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
 "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
