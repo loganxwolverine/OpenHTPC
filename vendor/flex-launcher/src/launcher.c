@@ -458,6 +458,7 @@ static bool is_menu_system_subpage(const Menu *menu)
             strcmp(name, "SYSTEM_CODECS") == 0 ||
             strcmp(name, "SYSTEM_DISPLAY") == 0 ||
             strcmp(name, "SYSTEM_AUDIO") == 0 ||
+            strcmp(name, "AUDIO_OUTPUT_TARGET") == 0 ||
             strcmp(name, "AUDIO_OUTPUT_MODE") == 0 ||
             strcmp(name, "SYSTEM_MEDIA_OPTICAL") == 0 ||
             strcmp(name, "SYSTEM_METADATA") == 0 ||

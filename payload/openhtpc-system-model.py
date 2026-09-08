@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Normalized SYSTÈME presenter; consumes canonical state and never probes hardware."""
 from __future__ import annotations
-import datetime, json, pathlib
+import datetime, importlib, importlib.util, json, pathlib
 
 CODEC_ORDER = ("mpeg2", "h264_8bit", "hevc_main", "hevc_main10", "vp9_profile0", "vp9_10bit", "av1_main")
 CODEC_NAMES = {
@@ -246,6 +246,72 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     if observed not in {"ACTIVE", "INACTIVE", "UNAVAILABLE", "UNKNOWN"}: observed = "UNKNOWN"
     if requested_audio_mode == "PCM": observed = "INACTIVE"
     elif not last_audio or last_audio.get("requested") != requested_audio_mode: observed = "UNKNOWN"
+
+    target_config = user_config.get("audio_output_target")
+    if not isinstance(target_config, dict):
+        target_config = {"mode": "SYSTEM", "node_name": None, "bus_path": None, "edid_name": None, "display_label": "SYSTEM", "device_type": "UNKNOWN"}
+
+    audio_mod = None
+    try:
+        import openhtpc_audio
+        audio_mod = openhtpc_audio
+    except ImportError:
+        pass
+    if audio_mod is None:
+        for candidate in (
+            install / "openhtpc-audio.py",
+            pathlib.Path(__file__).resolve().parent / "openhtpc-audio.py",
+            pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-audio.py",
+        ):
+            if candidate.is_file():
+                try:
+                    spec = importlib.util.spec_from_file_location("openhtpc_audio", candidate)
+                    if spec and spec.loader:
+                        audio_mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(audio_mod)
+                        break
+                except Exception:
+                    pass
+
+    outputs = []
+    if audio_mod and hasattr(audio_mod, "discover_outputs"):
+        try:
+            outputs = audio_mod.discover_outputs()
+        except Exception:
+            outputs = []
+
+    if audio_mod and hasattr(audio_mod, "resolve_audio"):
+        routing = audio_mod.resolve_audio(target_config, outputs)
+    else:
+        routing = {
+            "CONFIGURED": target_config,
+            "AVAILABLE": target_config.get("mode") == "SYSTEM",
+            "EFFECTIVE": target_config if target_config.get("mode") == "SYSTEM" else {"mode": "SYSTEM"},
+        }
+
+    configured_target = routing["CONFIGURED"]
+    audio_available = bool(routing["AVAILABLE"])
+    effective_target = routing["EFFECTIVE"]
+    is_fallback = bool(configured_target.get("mode") == "DEVICE" and not audio_available)
+
+    if configured_target.get("mode") == "DEVICE":
+        configured_label = configured_target.get("display_label") or configured_target.get("edid_name") or configured_target.get("node_name") or "DEVICE"
+    else:
+        configured_label = "Sortie système — Fedora"
+
+    state_label = "Disponible" if audio_available else "Indisponible"
+
+    if is_fallback:
+        effective_label = "Sortie système Fedora (repli temporaire)"
+    elif effective_target.get("mode") == "DEVICE":
+        effective_label = (
+            configured_label
+            if configured_target.get("node_name") == effective_target.get("node_name") and configured_target.get("display_label")
+            else (effective_target.get("display_label") or effective_target.get("edid_name") or effective_target.get("node_name") or "DEVICE")
+        )
+    else:
+        effective_label = "Sortie système — Fedora"
+
     audio_dict = {
         "audio_output": short_device(audio.get("default_sink")),
         "audio_backend": clean(audio.get("backend")),
@@ -254,6 +320,14 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
         "requested_mode": requested_audio_mode,
         "receiver": short_device(audio.get("default_sink")),
         "passthrough": {"ACTIVE":"Actif", "INACTIVE":"Inactif", "UNAVAILABLE":"Non disponible", "UNKNOWN":"Indéterminé"}[observed],
+        "configured_output": configured_target,
+        "configured_label": configured_label,
+        "state_label": state_label,
+        "is_available": audio_available,
+        "available": audio_available,
+        "is_fallback": is_fallback,
+        "effective_output": effective_target,
+        "effective_label": effective_label,
     }
 
     media_optical_dict = {
@@ -388,7 +462,6 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     decision_human = "PURE"
     if perf_map_present:
         try:
-            import importlib.util
             ca_path = install / "openhtpc-cinema-auto.py"
             if ca_path.exists():
                 spec = importlib.util.spec_from_file_location("ca", ca_path)
@@ -437,7 +510,6 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     result["processing"]["decision"] = decision_human
     result["processing"]["cal_ui_status"] = cal_ui_status
     try:
-        import importlib.util
         policy_path = install / "openhtpc-playback-policy.py"
         spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_model", policy_path)
         policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)

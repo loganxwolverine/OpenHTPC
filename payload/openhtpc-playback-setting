@@ -77,12 +77,137 @@ def refresh_audio_mode_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+def refresh_audio_target_label(home: pathlib.Path, target: dict) -> None:
+    """Synchronize the AUDIO target parent label and checkmarks in active Flex config."""
+    ini_path = home / ".config/openhtpc/flex-v1.ini"
+    try:
+        lines = ini_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError:
+        return
+    mode = target.get("mode", "SYSTEM")
+    if mode == "SYSTEM":
+        label = "Sortie système — Fedora"
+    else:
+        label = target.get("display_label") or target.get("edid_name") or target.get("node_name") or "DEVICE"
+    chosen_node = target.get("node_name")
+
+    section = ""
+    changed = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+        elif section == "SYSTEM_AUDIO" and stripped.startswith("Entry") and "=SORTIE AUDIO : " in line:
+            prefix, rest = line.split("=", 1)
+            _old, separator, suffix = rest.partition(";")
+            if separator:
+                lines[index] = f"{prefix}=SORTIE AUDIO : {label};{suffix}"
+                changed = True
+        elif section == "AUDIO_OUTPUT_TARGET" and stripped.startswith("Entry") and "=" in line:
+            prefix, rest = line.split("=", 1)
+            parts = rest.split(";")
+            if len(parts) >= 3:
+                entry_text, icon, command = parts[0], parts[1], ";".join(parts[2:])
+                if entry_text.strip() == "RETOUR":
+                    continue
+                if entry_text.startswith("• "):
+                    clean_text = entry_text[2:]
+                elif entry_text.startswith("✓ "):
+                    clean_text = entry_text[2:]
+                else:
+                    clean_text = entry_text
+                tokens = command.strip().split()
+                cmd_target = None
+                if "audio_output_target" in tokens:
+                    idx = tokens.index("audio_output_target")
+                    if idx + 1 < len(tokens):
+                        cmd_target = tokens[idx + 1]
+                is_match = False
+                if mode == "SYSTEM" and cmd_target == "SYSTEM":
+                    is_match = True
+                elif mode == "DEVICE" and chosen_node and cmd_target == chosen_node:
+                    is_match = True
+                new_text = f"• {clean_text}" if is_match else clean_text
+                new_line = f"{prefix}={new_text};{icon};{command}"
+                if new_line != line:
+                    lines[index] = new_line
+                    changed = True
+    if not changed:
+        return
+    fd, temporary = tempfile.mkstemp(prefix=ini_path.name + ".", dir=ini_path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.writelines(lines)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, ini_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         return 2
     home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
     install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", pathlib.Path(__file__).resolve().parent))
     policy = load(install / "openhtpc-playback-policy.py")
+
+    if sys.argv[1] == "audio_output_target":
+        raw_val = sys.argv[2]
+        audio_mod = None
+        try:
+            import openhtpc_audio
+            audio_mod = openhtpc_audio
+        except ImportError:
+            pass
+        if audio_mod is None:
+            for candidate in (
+                install / "openhtpc-audio.py",
+                pathlib.Path(__file__).resolve().parent / "openhtpc-audio.py",
+                pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-audio.py",
+            ):
+                if candidate.is_file():
+                    try:
+                        audio_mod = load(candidate)
+                        break
+                    except Exception:
+                        pass
+        if raw_val == "SYSTEM":
+            if audio_mod and hasattr(audio_mod, "system_descriptor"):
+                target = audio_mod.system_descriptor()
+            else:
+                target = {"mode": "SYSTEM", "node_name": None, "bus_path": None, "edid_name": None, "display_label": "SYSTEM", "device_type": "UNKNOWN"}
+        else:
+            outputs = []
+            if audio_mod and hasattr(audio_mod, "discover_outputs"):
+                try:
+                    outputs = audio_mod.discover_outputs()
+                except Exception:
+                    outputs = []
+            eligible = [o for o in outputs if isinstance(o, dict) and not o.get("is_network")]
+            matched = [o for o in eligible if o.get("node_name") == raw_val]
+            if len(matched) != 1:
+                return 2
+            if audio_mod and hasattr(audio_mod, "device_descriptor"):
+                target = audio_mod.device_descriptor(matched[0])
+            else:
+                target = {
+                    "mode": "DEVICE",
+                    "node_name": raw_val,
+                    "bus_path": matched[0].get("bus_path"),
+                    "edid_name": matched[0].get("edid_name"),
+                    "display_label": matched[0].get("display_label") or raw_val,
+                    "device_type": matched[0].get("device_type", "UNKNOWN"),
+                }
+        policy.write_audio_output_target(home, target)
+        refresh_audio_target_label(home, target)
+        refresh = install / "openhtpc-system-action"
+        if refresh.is_file():
+            subprocess.run([str(refresh), "audio"], check=False, timeout=15)
+        return 0
+
     policy.write_preference(home, sys.argv[1], sys.argv[2])
     if sys.argv[1] == "presentation_mode":
         refresh_dvd_mode_label(home, sys.argv[2])

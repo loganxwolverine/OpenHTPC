@@ -447,22 +447,33 @@ def system_page_png(
         )
     elif page == "audio":
         a = model.get("audio_section") or model.get("audio_media") or {}
+        configured_label = a.get("configured_label") or a.get("audio_output") or "Sortie système — Fedora"
+        state_label = a.get("state_label", "Disponible")
+        state_color = "#78d9ae" if state_label == "Disponible" else "#ffad42"
+        effective_label = a.get("effective_label") or configured_label
+        rows_output = [
+            ("Sortie configurée", configured_label, None),
+            ("État", state_label, state_color),
+        ]
+        if a.get("is_fallback"):
+            rows_output.append(("Cible effective", effective_label, "#ffad42"))
+        else:
+            rows_output.append(("Cible effective", effective_label, None))
+        rows_output.extend([
+            ("Serveur audio", a.get("audio_backend") or "PipeWire", None),
+            ("Type de connexion", a.get("connection") or "Indéterminé", None),
+        ])
         card(
             (70, 170, 860, 680),
             "SORTIE AUDIO",
-            [
-                ("Sortie active", a.get("audio_output"), None),
-                ("Serveur audio", a.get("audio_backend"), None),
-                ("Type de connexion", a.get("connection"), None),
-                ("Canaux actifs", a.get("channels"), None),
-            ],
+            rows_output,
         )
         card(
             (960, 170, 890, 680),
-            "PASSTHROUGH & CONFIGURATION",
+            "MODE AUDIO & CONFIGURATION",
             [
-                ("Mode demandé", a.get("requested_mode"), None),
-                ("Passthrough numérique", a.get("passthrough"), None),
+                ("Mode audio", a.get("requested_mode", "PCM"), None),
+                ("Passthrough numérique", a.get("passthrough", "Inactif"), None),
                 ("Récepteur", a.get("receiver"), None),
                 ("Contrôle du volume", "Géré par PipeWire", None),
                 ("Gestionnaire de flux", "PipeWire / WirePlumber", None),

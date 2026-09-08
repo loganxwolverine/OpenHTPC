@@ -796,11 +796,89 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         "back": icon_back,
     }
     playback_root, playback_video, playback_audio, playback_subtitles = _playback_policy_sections(home, install, playback_icons)
+    user_cfg = load_optional_object(home / ".config/openhtpc/user-config.json")
     try:
-        audio_mode = load_optional_object(home / ".config/openhtpc/user-config.json").get("audio_output_mode", "PCM")
+        audio_mode = user_cfg.get("audio_output_mode", "PCM")
     except (OSError, AttributeError):
         audio_mode = "PCM"
     if audio_mode not in {"PCM", "BITSTREAM"}: audio_mode = "PCM"
+
+    audio_target = user_cfg.get("audio_output_target")
+    if not isinstance(audio_target, dict):
+        audio_target = {"mode": "SYSTEM", "node_name": None, "bus_path": None, "edid_name": None, "display_label": "SYSTEM", "device_type": "UNKNOWN"}
+
+    audio_mod = None
+    try:
+        import openhtpc_audio
+        audio_mod = openhtpc_audio
+    except ImportError:
+        pass
+    if audio_mod is None:
+        for candidate in (
+            install / "openhtpc-audio.py",
+            pathlib.Path(__file__).resolve().parent / "openhtpc-audio.py",
+            pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-audio.py",
+        ):
+            if candidate.is_file():
+                try:
+                    spec = importlib.util.spec_from_file_location("openhtpc_audio", candidate)
+                    if spec and spec.loader:
+                        audio_mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(audio_mod)
+                        break
+                except Exception:
+                    pass
+
+    discovered_outputs = []
+    if audio_mod and hasattr(audio_mod, "discover_outputs"):
+        try:
+            discovered_outputs = audio_mod.discover_outputs()
+        except Exception:
+            discovered_outputs = []
+    physical_outputs = [o for o in discovered_outputs if isinstance(o, dict) and not o.get("is_network")]
+    kind_order = {"HDMI": 0, "USB": 1, "ANALOG": 2, "BLUETOOTH": 3, "UNKNOWN": 4}
+    physical_outputs.sort(key=lambda o: (kind_order.get(o.get("device_type"), 4), str(o.get("display_label", "")).lower(), str(o.get("node_name", "")).lower()))
+
+    routing = audio_mod.resolve_audio(audio_target, physical_outputs) if audio_mod and hasattr(audio_mod, "resolve_audio") else {
+        "CONFIGURED": audio_target,
+        "AVAILABLE": audio_target.get("mode") == "SYSTEM",
+        "EFFECTIVE": audio_target if audio_target.get("mode") == "SYSTEM" else {"mode": "SYSTEM"},
+    }
+
+    t_mode = audio_target.get("mode", "SYSTEM")
+    if t_mode == "SYSTEM":
+        target_display_label = "Sortie système — Fedora"
+    else:
+        target_display_label = audio_target.get("display_label") or audio_target.get("edid_name") or audio_target.get("node_name") or "DEVICE"
+
+    target_entries = []
+    entry_idx = 1
+    found_configured = False
+    for o in physical_outputs:
+        is_sel = (t_mode == "DEVICE" and routing.get("AVAILABLE") and routing.get("EFFECTIVE", {}).get("node_name") == o.get("node_name"))
+        if is_sel:
+            found_configured = True
+        prefix = "• " if is_sel else ""
+        label = (
+            audio_target.get("display_label")
+            if is_sel and audio_target.get("display_label")
+            else o["display_label"]
+        )
+        target_entries.append(f"Entry{entry_idx}={prefix}{ini_value(label)};{icon_audio};:applyback {install/'openhtpc-playback-setting'} audio_output_target {o['node_name']}")
+        entry_idx += 1
+
+    if t_mode == "DEVICE" and not found_configured:
+        unavail_entry = f"Entry{entry_idx}=• {ini_value(target_display_label)} (Indisponible);{icon_audio};:applyback {install/'openhtpc-playback-setting'} audio_output_target {audio_target.get('node_name', 'UNKNOWN')}"
+        target_entries.insert(0, unavail_entry)
+        target_entries = [f"Entry{i+1}=" + e.split("=", 1)[1] for i, e in enumerate(target_entries)]
+        entry_idx = len(target_entries) + 1
+
+    sys_sel = (t_mode == "SYSTEM")
+    sys_prefix = "• " if sys_sel else ""
+    target_entries.append(f"Entry{entry_idx}={sys_prefix}Sortie système — Fedora;{icon_audio};:applyback {install/'openhtpc-playback-setting'} audio_output_target SYSTEM")
+    entry_idx += 1
+    target_entries.append(f"Entry{entry_idx}=RETOUR;{icon_back};:back")
+    audio_output_target_section = os.linesep.join(target_entries)
     disc_sheet = home / ".cache/openhtpc/disc-sheet.png"
     if not disc_sheet_is_current(home,optical):
         for stale in (disc_sheet,home/".local/state/openhtpc/disc-sheet-state.json"):
@@ -916,8 +994,13 @@ Entry1=RETOUR;{local_icon};:back
 
 [SYSTEM_AUDIO]
 BackgroundImage={system_pages['audio']}
-Entry1=MODE AUDIO : {audio_mode};{playback_icons['audio']};:submenu AUDIO_OUTPUT_MODE
-Entry2=RETOUR;{icon_back};:back
+Entry1=SORTIE AUDIO : {target_display_label};{icon_audio};:submenu AUDIO_OUTPUT_TARGET
+Entry2=MODE AUDIO : {audio_mode};{playback_icons['audio']};:submenu AUDIO_OUTPUT_MODE
+Entry3=RETOUR;{icon_back};:back
+
+[AUDIO_OUTPUT_TARGET]
+BackgroundImage={system_pages['audio']}
+{audio_output_target_section}
 
 [AUDIO_OUTPUT_MODE]
 BackgroundImage={system_pages['audio']}
