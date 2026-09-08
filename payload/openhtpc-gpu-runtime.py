@@ -20,6 +20,7 @@ import os
 import pathlib
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, Callable
 
@@ -31,6 +32,7 @@ PCI_DISPLAY_CLASSES: dict[int, str] = {
 }
 
 StatProvider = Callable[[pathlib.Path], Any]
+VulkanRunner = Callable[[], tuple[int, str, str]]
 
 
 def normalize_pci_address(value: Any) -> str | None:
@@ -773,11 +775,824 @@ def compare_passport_gpus(
     }
 
 
+APPROVED_ID_SECTIONS = {
+    "VkPhysicalDeviceVulkan11Properties",
+    "VkPhysicalDeviceIDProperties",
+    "VkPhysicalDeviceIDPropertiesKHR",
+}
+
+UUID_REGEX = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+class VulkanDeviceList(list):
+    """List of parsed Vulkan devices with enumeration quality metadata."""
+
+    def __init__(
+        self,
+        devices: list[dict[str, Any]],
+        enumeration_reliable: bool = True,
+        invalid_device_count: int = 0,
+        unreliable_reason: str | None = None,
+    ):
+        super().__init__(devices)
+        self.enumeration_reliable = enumeration_reliable
+        self.invalid_device_count = invalid_device_count
+        self.unreliable_reason = unreliable_reason
+
+
+def default_vulkan_runner() -> tuple[int, str, str]:
+    """Execute vulkaninfo safely with timeout.
+
+    Returns (returncode, stdout, stderr).
+    Never raises; returns (-1, "", str(err)) on failure.
+    """
+    try:
+        proc = subprocess.run(
+            ["vulkaninfo"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+    except Exception as exc:
+        return -1, "", str(exc)
+
+
+class EvidenceState:
+    """Explicit state model for Vulkan device identity evidence."""
+
+    ABSENT = "ABSENT"
+    VALID = "VALID"
+    INVALID = "INVALID"
+    CONFLICT = "CONFLICT"
+
+
+def parse_vulkaninfo_text(text: str) -> VulkanDeviceList:
+    r"""Parse vulkaninfo text output into structured physical device records.
+
+    Rules:
+    - Isolates each physical GPU block delimited by ^\s*GPU\s*\d+:
+    - Clears all per-device and per-section state on each new GPU block.
+    - Fields are scoped to their legitimate property structures:
+      * deviceName, deviceType, vendorID, deviceID -> VkPhysicalDeviceProperties ONLY
+      * pciDomain, pciBus, pciDevice, pciFunction -> VkPhysicalDevicePCIBusInfoPropertiesEXT ONLY
+      * hasRender, hasPrimary, renderMajor, renderMinor, primaryMajor, primaryMinor -> VkPhysicalDeviceDrmPropertiesEXT ONLY
+      * deviceUUID -> approved ID structures ONLY (VkPhysicalDeviceVulkan11Properties, VkPhysicalDeviceIDProperties, VkPhysicalDeviceIDPropertiesKHR)
+    - Each section occurrence uses an isolated temporary accumulator; incomplete occurrences do not leak or reuse fields.
+    - Preserves explicit evidence quality state: ABSENT, VALID, INVALID, CONFLICT.
+    - No stale structure values survive a later invalid or contradictory occurrence.
+    - Full canonical UUID validation (8-4-4-4-12 hex). Strips whitespace only.
+    - Records enumeration quality and flags truncated/malformed GPU blocks.
+    """
+    valid_devices: list[dict[str, Any]] = []
+    invalid_device_count = 0
+    has_seen_gpu_header = False
+
+    current_dev: dict[str, Any] | None = None
+    current_section: str | None = None
+
+    current_props_acc: dict[str, str] = {}
+    current_pci_acc: dict[str, int] = {}
+    current_drm_acc: dict[str, Any] = {}
+    current_uuid_acc: dict[str, str] = {}
+
+    def flush_section():
+        nonlocal current_section, current_props_acc, current_pci_acc, current_drm_acc, current_uuid_acc
+        if current_dev is None or current_section is None:
+            current_props_acc.clear()
+            current_pci_acc.clear()
+            current_drm_acc.clear()
+            current_uuid_acc.clear()
+            return
+
+        if current_section == "VkPhysicalDeviceProperties":
+            cand_name = current_props_acc.get("deviceName")
+            cand_type = current_props_acc.get("deviceType")
+            cand_vendor = None
+            cand_dev = None
+            if "vendorID" in current_props_acc:
+                try:
+                    clean_v = current_props_acc["vendorID"].split()[0].removeprefix("0x").removeprefix("0X")
+                    if re.fullmatch(r"[0-9a-fA-F]+", clean_v):
+                        cand_vendor = f"{int(clean_v, 16):04x}"
+                except (ValueError, IndexError):
+                    pass
+            if "deviceID" in current_props_acc:
+                try:
+                    clean_d = current_props_acc["deviceID"].split()[0].removeprefix("0x").removeprefix("0X")
+                    if re.fullmatch(r"[0-9a-fA-F]+", clean_d):
+                        cand_dev = f"{int(clean_d, 16):04x}"
+                except (ValueError, IndexError):
+                    pass
+
+            if cand_name and cand_type:
+                if current_dev["properties_state"] == EvidenceState.ABSENT:
+                    current_dev["properties_state"] = EvidenceState.VALID
+                    current_dev["device_name"] = cand_name
+                    current_dev["device_type"] = cand_type
+                    current_dev["vendor_id"] = cand_vendor
+                    current_dev["device_id"] = cand_dev
+                elif current_dev["properties_state"] == EvidenceState.VALID:
+                    if (current_dev["device_name"], current_dev["device_type"]) == (cand_name, cand_type):
+                        if cand_vendor:
+                            current_dev["vendor_id"] = cand_vendor
+                        if cand_dev:
+                            current_dev["device_id"] = cand_dev
+                    else:
+                        current_dev["properties_state"] = EvidenceState.CONFLICT
+                        current_dev["device_name"] = None
+                        current_dev["device_type"] = None
+                        current_dev["vendor_id"] = None
+                        current_dev["device_id"] = None
+                else:
+                    current_dev["properties_state"] = EvidenceState.CONFLICT
+                    current_dev["device_name"] = None
+                    current_dev["device_type"] = None
+                    current_dev["vendor_id"] = None
+                    current_dev["device_id"] = None
+            else:
+                current_dev["properties_state"] = EvidenceState.INVALID
+                current_dev["device_name"] = None
+                current_dev["device_type"] = None
+                current_dev["vendor_id"] = None
+                current_dev["device_id"] = None
+            current_props_acc.clear()
+
+        elif current_section == "VkPhysicalDevicePCIBusInfoPropertiesEXT":
+            if all(k in current_pci_acc for k in ("pciDomain", "pciBus", "pciDevice", "pciFunction")):
+                dom = current_pci_acc["pciDomain"]
+                bus = current_pci_acc["pciBus"]
+                dev = current_pci_acc["pciDevice"]
+                fn = current_pci_acc["pciFunction"]
+                if 0 <= dom <= 0xFFFF and 0 <= bus <= 0xFF and 0 <= dev <= 0x1F and 0 <= fn <= 7:
+                    norm = normalize_pci_address(f"{dom:04x}:{bus:02x}:{dev:02x}.{fn:x}")
+                    if norm:
+                        if current_dev["pci_state"] == EvidenceState.ABSENT:
+                            current_dev["pci_state"] = EvidenceState.VALID
+                            current_dev["pci_domain"] = dom
+                            current_dev["pci_bus"] = bus
+                            current_dev["pci_device"] = dev
+                            current_dev["pci_function"] = fn
+                            current_dev["pci_address"] = norm
+                        elif current_dev["pci_state"] == EvidenceState.VALID:
+                            if current_dev["pci_address"] == norm:
+                                pass
+                            else:
+                                current_dev["pci_state"] = EvidenceState.CONFLICT
+                                current_dev["pci_address"] = None
+                                current_dev["pci_domain"] = None
+                                current_dev["pci_bus"] = None
+                                current_dev["pci_device"] = None
+                                current_dev["pci_function"] = None
+                        else:
+                            current_dev["pci_state"] = EvidenceState.CONFLICT
+                            current_dev["pci_address"] = None
+                    else:
+                        current_dev["pci_state"] = EvidenceState.INVALID
+                        current_dev["pci_address"] = None
+                else:
+                    current_dev["pci_state"] = EvidenceState.INVALID
+                    current_dev["pci_address"] = None
+            else:
+                current_dev["pci_state"] = EvidenceState.INVALID
+                current_dev["pci_address"] = None
+                current_dev["pci_domain"] = None
+                current_dev["pci_bus"] = None
+                current_dev["pci_device"] = None
+                current_dev["pci_function"] = None
+            current_pci_acc.clear()
+
+        elif current_section == "VkPhysicalDeviceDrmPropertiesEXT":
+            if current_dev["drm_state"] == EvidenceState.CONFLICT:
+                current_dev["drm_render_major"] = None
+                current_dev["drm_render_minor"] = None
+                current_dev["has_render"] = None
+                current_drm_acc.clear()
+            else:
+                has_render = current_drm_acc.get("hasRender")
+                if has_render == "false":
+                    # Case B: hasRender=false
+                    if current_dev["drm_state"] == EvidenceState.VALID:
+                        # VALID + hasRender=false => CONFLICT
+                        current_dev["drm_state"] = EvidenceState.CONFLICT
+                        current_dev["drm_render_major"] = None
+                        current_dev["drm_render_minor"] = None
+                        current_dev["has_render"] = None
+                    elif current_dev["drm_state"] == EvidenceState.ABSENT:
+                        if current_dev.get("has_render") is False:
+                            # ABSENT + ABSENT => ABSENT
+                            pass
+                        else:
+                            current_dev["has_render"] = False
+                    elif current_dev["drm_state"] == EvidenceState.INVALID:
+                        current_dev["drm_render_major"] = None
+                        current_dev["drm_render_minor"] = None
+                elif has_render == "true":
+                    if "renderMajor" in current_drm_acc and "renderMinor" in current_drm_acc:
+                        maj = current_drm_acc["renderMajor"]
+                        min_v = current_drm_acc["renderMinor"]
+                        if current_dev["drm_state"] == EvidenceState.ABSENT:
+                            if current_dev.get("has_render") is False:
+                                # hasRender=false + VALID => CONFLICT
+                                current_dev["drm_state"] = EvidenceState.CONFLICT
+                                current_dev["drm_render_major"] = None
+                                current_dev["drm_render_minor"] = None
+                                current_dev["has_render"] = None
+                            else:
+                                # ABSENT + VALID => VALID
+                                current_dev["drm_state"] = EvidenceState.VALID
+                                current_dev["has_render"] = True
+                                current_dev["drm_render_major"] = maj
+                                current_dev["drm_render_minor"] = min_v
+                        elif current_dev["drm_state"] == EvidenceState.VALID:
+                            if (current_dev["drm_render_major"], current_dev["drm_render_minor"]) == (maj, min_v):
+                                # VALID + identical VALID => VALID
+                                pass
+                            else:
+                                # VALID + different VALID => CONFLICT
+                                current_dev["drm_state"] = EvidenceState.CONFLICT
+                                current_dev["drm_render_major"] = None
+                                current_dev["drm_render_minor"] = None
+                                current_dev["has_render"] = None
+                        elif current_dev["drm_state"] == EvidenceState.INVALID:
+                            current_dev["drm_render_major"] = None
+                            current_dev["drm_render_minor"] = None
+                    else:
+                        # hasRender=true but missing or malformed major/minor
+                        # VALID + INVALID => INVALID
+                        current_dev["drm_state"] = EvidenceState.INVALID
+                        current_dev["drm_render_major"] = None
+                        current_dev["drm_render_minor"] = None
+                        current_dev["has_render"] = None
+                else:
+                    # hasRender missing or malformed
+                    current_dev["drm_state"] = EvidenceState.INVALID
+                    current_dev["drm_render_major"] = None
+                    current_dev["drm_render_minor"] = None
+                    current_dev["has_render"] = None
+
+            if current_drm_acc.get("hasPrimary") == "true":
+                if "primaryMajor" in current_drm_acc and "primaryMinor" in current_drm_acc:
+                    current_dev["has_primary"] = True
+                    current_dev["drm_primary_major"] = current_drm_acc["primaryMajor"]
+                    current_dev["drm_primary_minor"] = current_drm_acc["primaryMinor"]
+            current_drm_acc.clear()
+
+        elif current_section in APPROVED_ID_SECTIONS:
+            if "deviceUUID" in current_uuid_acc:
+                raw_uuid = current_uuid_acc["deviceUUID"]
+                stripped = raw_uuid.strip()
+                if UUID_REGEX.fullmatch(stripped):
+                    norm_uuid = stripped.lower()
+                    if current_dev["uuid_state"] == EvidenceState.ABSENT:
+                        current_dev["uuid_state"] = EvidenceState.VALID
+                        current_dev["device_uuid"] = norm_uuid
+                    elif current_dev["uuid_state"] == EvidenceState.VALID:
+                        if current_dev["device_uuid"] == norm_uuid:
+                            pass
+                        else:
+                            current_dev["uuid_state"] = EvidenceState.CONFLICT
+                            current_dev["device_uuid"] = None
+                    else:
+                        current_dev["uuid_state"] = EvidenceState.CONFLICT
+                        current_dev["device_uuid"] = None
+                else:
+                    current_dev["uuid_state"] = EvidenceState.INVALID
+                    current_dev["device_uuid"] = None
+            current_uuid_acc.clear()
+
+    def finalize_device():
+        nonlocal current_dev, invalid_device_count
+        if current_dev is None:
+            return
+        flush_section()
+        if current_dev["properties_state"] == EvidenceState.VALID:
+            current_dev["is_trustworthy"] = True
+            valid_devices.append(current_dev)
+        else:
+            current_dev["is_trustworthy"] = False
+            invalid_device_count += 1
+        current_dev = None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        gpu_m = re.match(r"^\s*GPU\s*(\d+):\s*$", line)
+        if gpu_m:
+            has_seen_gpu_header = True
+            finalize_device()
+            current_dev = {
+                "gpu_index": int(gpu_m.group(1)),
+                "properties_state": EvidenceState.ABSENT,
+                "device_name": None,
+                "device_type": None,
+                "vendor_id": None,
+                "device_id": None,
+                "pci_state": EvidenceState.ABSENT,
+                "pci_domain": None,
+                "pci_bus": None,
+                "pci_device": None,
+                "pci_function": None,
+                "pci_address": None,
+                "drm_state": EvidenceState.ABSENT,
+                "has_render": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "has_primary": None,
+                "drm_primary_major": None,
+                "drm_primary_minor": None,
+                "uuid_state": EvidenceState.ABSENT,
+                "device_uuid": None,
+                "is_trustworthy": False,
+            }
+            current_section = None
+            current_props_acc.clear()
+            current_pci_acc.clear()
+            current_drm_acc.clear()
+            current_uuid_acc.clear()
+            continue
+
+        if current_dev is None:
+            continue
+
+        if stripped.endswith(":") and "=" not in stripped and not re.fullmatch(r"[-=]+", stripped):
+            flush_section()
+            current_section = stripped[:-1].strip()
+            continue
+
+        if re.fullmatch(r"[-=]+", stripped):
+            continue
+
+        if "=" in stripped:
+            k, _, v = stripped.partition("=")
+            key = k.strip()
+            val = v.strip()
+
+            if current_section == "VkPhysicalDeviceProperties":
+                current_props_acc[key] = val
+
+            elif current_section == "VkPhysicalDevicePCIBusInfoPropertiesEXT":
+                if key in ("pciDomain", "pciBus", "pciDevice", "pciFunction"):
+                    try:
+                        current_pci_acc[key] = int(val.split()[0], 0)
+                    except (ValueError, IndexError):
+                        pass
+
+            elif current_section == "VkPhysicalDeviceDrmPropertiesEXT":
+                if key in ("hasRender", "hasPrimary"):
+                    current_drm_acc[key] = val.lower()
+                elif key in ("renderMajor", "renderMinor", "primaryMajor", "primaryMinor"):
+                    try:
+                        current_drm_acc[key] = int(val.split()[0], 0)
+                    except (ValueError, IndexError):
+                        pass
+
+            elif current_section in APPROVED_ID_SECTIONS:
+                if key == "deviceUUID":
+                    current_uuid_acc["deviceUUID"] = val
+
+    finalize_device()
+
+    enumeration_reliable = (invalid_device_count == 0) and (
+        len(valid_devices) > 0 or not has_seen_gpu_header
+    )
+    unreliable_reason = None
+    if invalid_device_count > 0 or (has_seen_gpu_header and len(valid_devices) == 0):
+        enumeration_reliable = False
+        unreliable_reason = "INCOMPLETE_VULKAN_ENUMERATION"
+
+    return VulkanDeviceList(
+        valid_devices,
+        enumeration_reliable=enumeration_reliable,
+        invalid_device_count=invalid_device_count,
+        unreliable_reason=unreliable_reason,
+    )
+
+
+def query_vulkan_devices(
+    runner: VulkanRunner | None = None,
+) -> tuple[str, VulkanDeviceList]:
+    """Query available Vulkan devices using vulkaninfo runner.
+
+    Returns (status, devices) where status is 'AVAILABLE' or 'UNAVAILABLE'.
+    Fails closed on command errors, timeouts, or unparseable output.
+    """
+    exec_runner = runner or default_vulkan_runner
+    rc, stdout, _ = exec_runner()
+    if rc != 0 or not stdout:
+        return "UNAVAILABLE", VulkanDeviceList(
+            [], enumeration_reliable=False, unreliable_reason="vulkan_query_unavailable"
+        )
+
+    devices = parse_vulkaninfo_text(stdout)
+    if not devices.enumeration_reliable or not devices:
+        return "UNAVAILABLE", devices
+
+    return "AVAILABLE", devices
+
+
+def resolve_vulkan_device_for_pci(
+    pci_address: str,
+    vulkan_devices: list[dict[str, Any]] | VulkanDeviceList | None = None,
+    runner: VulkanRunner | None = None,
+    _validated_drm: tuple[int, int] | None = None,
+    _allow_drm_fallback: bool = False,
+    _local_drm_valid: bool = False,
+) -> dict[str, Any]:
+    """Resolve the Vulkan physical device matching a given PCI address.
+
+    Semantic return:
+    {
+        "status": "RESOLVED" | "NOT_FOUND" | "AMBIGUOUS" | "UNAVAILABLE",
+        "pci_address": str | None,
+        "vulkan_device_name": str | None,
+        "vulkan_device_uuid": str | None,
+        "vendor_id": str | None,
+        "device_id": str | None,
+        "drm_render_major": int | None,
+        "drm_render_minor": int | None,
+        "evidence": list[str],
+    }
+
+    Rules:
+    - Never uses UUID byte patterns to infer PCI address.
+    - Software devices (PHYSICAL_DEVICE_TYPE_CPU, llvmpipe) without genuine physical PCI properties are excluded.
+    - Resolves primarily via independent PCI bus info properties matching target PCI.
+    - Raw unvalidated render minor is NOT accepted as identity proof.
+    - Corroborates with validated DRM render node only when provided by T8.1A validated GPU record.
+    - If PCI matches but DRM proof contradicts validated DRM node: fails closed with UNAVAILABLE + IDENTITY_CONFLICT and vulkan_device_uuid=None.
+    - If DRM evidence has CONFLICT or INVALID state: fails closed with UNAVAILABLE.
+    - If any device in enumeration has PCI CONFLICT or INVALID: fails closed with UNAVAILABLE.
+    - Never bypasses explicit contradictory evidence by switching to another evidence channel.
+    - Returns AMBIGUOUS if multiple devices independently satisfy identity evidence.
+    - Returns UNAVAILABLE if enumeration was incomplete or untrusted.
+    - Never silently chooses first GPU.
+    """
+    norm_pci = normalize_pci_address(pci_address)
+    if not norm_pci:
+        return {
+            "status": "NOT_FOUND",
+            "pci_address": pci_address if isinstance(pci_address, str) else None,
+            "vulkan_device_name": None,
+            "vulkan_device_uuid": None,
+            "vendor_id": None,
+            "device_id": None,
+            "drm_render_major": None,
+            "drm_render_minor": None,
+            "evidence": ["invalid_pci_address_format"],
+        }
+
+    if vulkan_devices is None:
+        v_status, devices = query_vulkan_devices(runner=runner)
+        if v_status != "AVAILABLE" or not getattr(devices, "enumeration_reliable", True):
+            reason = getattr(devices, "unreliable_reason", None) or "vulkan_query_unavailable"
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": [reason],
+            }
+    else:
+        devices = vulkan_devices
+        if hasattr(devices, "enumeration_reliable") and not devices.enumeration_reliable:
+            reason = getattr(devices, "unreliable_reason", None) or "INCOMPLETE_VULKAN_ENUMERATION"
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": [reason],
+            }
+
+    # Check for untrustworthy devices in enumeration
+    for d in devices:
+        if d.get("is_trustworthy") is False:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["INCOMPLETE_VULKAN_ENUMERATION"],
+            }
+
+    # Filter out software renderers without legitimate physical PCI hardware
+    physical_devices: list[dict[str, Any]] = []
+    for d in devices:
+        dev_type = d.get("device_type")
+        dev_name = (d.get("device_name") or "").lower()
+        if dev_type == "PHYSICAL_DEVICE_TYPE_CPU" or "llvmpipe" in dev_name:
+            if d.get("pci_state") != EvidenceState.VALID:
+                continue
+        physical_devices.append(d)
+
+    # 1. Primary path: Match on normalized PCI address from Vulkan PCI bus info
+    pci_matches = [
+        d for d in physical_devices
+        if d.get("pci_state") == EvidenceState.VALID and d.get("pci_address") == norm_pci
+    ]
+
+    if len(pci_matches) > 1:
+        trustworthy_matches = [
+            d for d in pci_matches
+            if d.get("uuid_state") == EvidenceState.VALID
+            and d.get("drm_state") in (EvidenceState.VALID, EvidenceState.ABSENT)
+        ]
+        if len(trustworthy_matches) > 1:
+            return {
+                "status": "AMBIGUOUS",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["multiple_vulkan_devices_matching_pci"],
+            }
+        elif len(trustworthy_matches) == 1:
+            pci_matches = trustworthy_matches
+        else:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["untrustworthy_pci_matches"],
+            }
+
+    if len(pci_matches) == 1:
+        candidate = pci_matches[0]
+
+        # Section 4 & 8: Check DRM state on candidate
+        if candidate.get("drm_state") == EvidenceState.CONFLICT:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": candidate.get("device_name"),
+                "vulkan_device_uuid": None,
+                "vendor_id": candidate.get("vendor_id"),
+                "device_id": candidate.get("device_id"),
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["pci_bus_info_match", "IDENTITY_EVIDENCE_CONFLICT"],
+            }
+
+        if candidate.get("drm_state") == EvidenceState.INVALID:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": candidate.get("device_name"),
+                "vulkan_device_uuid": None,
+                "vendor_id": candidate.get("vendor_id"),
+                "device_id": candidate.get("device_id"),
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["pci_bus_info_match", "INVALID_DRM_EVIDENCE"],
+            }
+
+        evidence = ["pci_bus_info_match"]
+        if candidate.get("drm_state") == EvidenceState.VALID:
+            if _validated_drm is not None:
+                val_maj, val_min = _validated_drm
+                if (candidate.get("drm_render_major"), candidate.get("drm_render_minor")) != (val_maj, val_min):
+                    return {
+                        "status": "UNAVAILABLE",
+                        "pci_address": norm_pci,
+                        "vulkan_device_name": candidate.get("device_name"),
+                        "vulkan_device_uuid": None,
+                        "vendor_id": candidate.get("vendor_id"),
+                        "device_id": candidate.get("device_id"),
+                        "drm_render_major": candidate.get("drm_render_major"),
+                        "drm_render_minor": candidate.get("drm_render_minor"),
+                        "evidence": ["pci_bus_info_match", "IDENTITY_CONFLICT"],
+                    }
+                else:
+                    evidence.append("drm_render_node_corroborated")
+            else:
+                evidence.append("drm_corroboration_unavailable")
+        else:
+            evidence.append("drm_corroboration_unavailable")
+
+        # Check candidate UUID state
+        if candidate.get("uuid_state") != EvidenceState.VALID:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": candidate.get("device_name"),
+                "vulkan_device_uuid": None,
+                "vendor_id": candidate.get("vendor_id"),
+                "device_id": candidate.get("device_id"),
+                "drm_render_major": candidate.get("drm_render_major"),
+                "drm_render_minor": candidate.get("drm_render_minor"),
+                "evidence": evidence + ["missing_device_uuid"],
+            }
+
+        return {
+            "status": "RESOLVED",
+            "pci_address": norm_pci,
+            "vulkan_device_name": candidate.get("device_name"),
+            "vulkan_device_uuid": candidate.get("device_uuid"),
+            "vendor_id": candidate.get("vendor_id"),
+            "device_id": candidate.get("device_id"),
+            "drm_render_major": candidate.get("drm_render_major"),
+            "drm_render_minor": candidate.get("drm_render_minor"),
+            "evidence": evidence,
+        }
+
+    # If 0 devices had valid PCI matching norm_pci:
+    # 2. Check for invalid or conflicting PCI evidence in any physical device:
+    conflict_or_invalid_pci = [
+        d for d in physical_devices
+        if d.get("pci_state") in (EvidenceState.CONFLICT, EvidenceState.INVALID)
+    ]
+    if conflict_or_invalid_pci:
+        reasons = ["INVALID_OR_CONFLICTING_PCI_EVIDENCE"]
+        if any(d.get("pci_state") == EvidenceState.CONFLICT for d in conflict_or_invalid_pci):
+            reasons.append("IDENTITY_EVIDENCE_CONFLICT")
+        return {
+            "status": "UNAVAILABLE",
+            "pci_address": norm_pci,
+            "vulkan_device_name": None,
+            "vulkan_device_uuid": None,
+            "vendor_id": None,
+            "device_id": None,
+            "drm_render_major": None,
+            "drm_render_minor": None,
+            "evidence": reasons,
+        }
+
+    # 3. Check for devices where PCI is genuinely ABSENT:
+    absent_pci_devices = [
+        d for d in physical_devices
+        if d.get("pci_state") == EvidenceState.ABSENT
+    ]
+    if absent_pci_devices:
+        if not _allow_drm_fallback or not _local_drm_valid or _validated_drm is None:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["LOCAL_DRM_IDENTITY_UNAVAILABLE"],
+            }
+
+        val_maj, val_min = _validated_drm
+        drm_matches = [
+            d for d in absent_pci_devices
+            if d.get("drm_state") == EvidenceState.VALID
+            and (d.get("drm_render_major"), d.get("drm_render_minor")) == (val_maj, val_min)
+        ]
+        if len(drm_matches) > 1:
+            return {
+                "status": "AMBIGUOUS",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["multiple_vulkan_devices_matching_drm_render_node"],
+            }
+        if len(drm_matches) == 1:
+            candidate = drm_matches[0]
+            if candidate.get("uuid_state") != EvidenceState.VALID:
+                return {
+                    "status": "UNAVAILABLE",
+                    "pci_address": norm_pci,
+                    "vulkan_device_name": candidate.get("device_name"),
+                    "vulkan_device_uuid": None,
+                    "vendor_id": candidate.get("vendor_id"),
+                    "device_id": candidate.get("device_id"),
+                    "drm_render_major": candidate.get("drm_render_major"),
+                    "drm_render_minor": candidate.get("drm_render_minor"),
+                    "evidence": ["validated_t8_1a_drm_fallback_match", "missing_device_uuid"],
+                }
+            return {
+                "status": "RESOLVED",
+                "pci_address": norm_pci,
+                "vulkan_device_name": candidate.get("device_name"),
+                "vulkan_device_uuid": candidate.get("device_uuid"),
+                "vendor_id": candidate.get("vendor_id"),
+                "device_id": candidate.get("device_id"),
+                "drm_render_major": candidate.get("drm_render_major"),
+                "drm_render_minor": candidate.get("drm_render_minor"),
+                "evidence": ["validated_t8_1a_drm_fallback_match"],
+            }
+
+        unprovable_devices = [
+            d for d in absent_pci_devices
+            if d.get("drm_state") != EvidenceState.VALID
+        ]
+        if unprovable_devices:
+            return {
+                "status": "UNAVAILABLE",
+                "pci_address": norm_pci,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["missing_identity_evidence"],
+            }
+
+        return {
+            "status": "NOT_FOUND",
+            "pci_address": norm_pci,
+            "vulkan_device_name": None,
+            "vulkan_device_uuid": None,
+            "vendor_id": None,
+            "device_id": None,
+            "drm_render_major": None,
+            "drm_render_minor": None,
+            "evidence": ["no_matching_vulkan_physical_device"],
+        }
+
+    # All physical devices had valid PCI that did not match norm_pci
+    return {
+        "status": "NOT_FOUND",
+        "pci_address": norm_pci,
+        "vulkan_device_name": None,
+        "vulkan_device_uuid": None,
+        "vendor_id": None,
+        "device_id": None,
+        "drm_render_major": None,
+        "drm_render_minor": None,
+        "evidence": ["no_matching_vulkan_physical_device"],
+    }
+
+
+def resolve_vulkan_device_for_gpu(
+    gpu: dict[str, Any],
+    vulkan_devices: list[dict[str, Any]] | VulkanDeviceList | None = None,
+    runner: VulkanRunner | None = None,
+) -> dict[str, Any]:
+    """Resolve Vulkan device consuming a validated T8.1A runtime GPU record.
+
+    DRM evidence is usable only when:
+    - gpu.pci_address is valid
+    - gpu.render_node_valid == True
+    - render major/minor are derived from that validated node
+    """
+    pci_addr = gpu.get("pci_address", "")
+    validated_drm = None
+    allow_drm_fallback = False
+    local_drm_valid = False
+
+    if gpu.get("render_node_valid") is True and gpu.get("render_node"):
+        render_node = str(gpu["render_node"])
+        m = re.search(r"renderD(\d+)", render_node)
+        if m:
+            validated_drm = (226, int(m.group(1)))
+            allow_drm_fallback = True
+            local_drm_valid = True
+
+    return resolve_vulkan_device_for_pci(
+        pci_address=pci_addr,
+        vulkan_devices=vulkan_devices,
+        runner=runner,
+        _validated_drm=validated_drm,
+        _allow_drm_fallback=allow_drm_fallback,
+        _local_drm_valid=local_drm_valid,
+    )
+
+
+
 def build_gpu_runtime_summary(
     sys_root: pathlib.Path = pathlib.Path("/sys"),
     dev_root: pathlib.Path = pathlib.Path("/dev"),
     passport_path: pathlib.Path | None = None,
     stat_provider: StatProvider | None = None,
+    resolve_vulkan: bool = False,
+    vulkan_devices: list[dict[str, Any]] | None = None,
+    vulkan_runner: VulkanRunner | None = None,
 ) -> dict[str, Any]:
     """Build a comprehensive passive runtime GPU summary."""
     detected = discover_gpus(sys_root=sys_root, dev_root=dev_root, stat_provider=stat_provider)
@@ -789,7 +1604,7 @@ def build_gpu_runtime_summary(
     if passport_path and passport_path.is_file():
         passport_coherence = compare_passport_gpus(detected, passport_path)
 
-    return {
+    summary: dict[str, Any] = {
         "detected_gpus": detected,
         "available_gpus": available,
         "display_status": display_status,
@@ -797,6 +1612,30 @@ def build_gpu_runtime_summary(
         "effective_candidate": effective,
         "passport_coherence": passport_coherence,
     }
+
+    if resolve_vulkan:
+        if effective:
+            summary["vulkan_resolution"] = resolve_vulkan_device_for_gpu(
+                effective, vulkan_devices=vulkan_devices, runner=vulkan_runner
+            )
+        elif display_gpu:
+            summary["vulkan_resolution"] = resolve_vulkan_device_for_gpu(
+                display_gpu, vulkan_devices=vulkan_devices, runner=vulkan_runner
+            )
+        else:
+            summary["vulkan_resolution"] = {
+                "status": "NOT_FOUND",
+                "pci_address": None,
+                "vulkan_device_name": None,
+                "vulkan_device_uuid": None,
+                "vendor_id": None,
+                "device_id": None,
+                "drm_render_major": None,
+                "drm_render_minor": None,
+                "evidence": ["no_candidate_gpu_for_vulkan_resolution"],
+            }
+
+    return summary
 
 
 def main() -> int:
@@ -810,13 +1649,28 @@ def main() -> int:
         default=pathlib.Path("~/.config/openhtpc/profile.json").expanduser(),
         help="Path to profile.json",
     )
+    parser.add_argument(
+        "--vulkan",
+        action="store_true",
+        help="Resolve Vulkan physical device for effective GPU candidate",
+    )
+    parser.add_argument(
+        "--vulkan-pci",
+        type=str,
+        default=None,
+        help="Resolve Vulkan physical device for specific PCI address",
+    )
     args = parser.parse_args()
 
     summary = build_gpu_runtime_summary(
         sys_root=args.sys_root,
         dev_root=args.dev_root,
         passport_path=args.passport if args.passport.exists() else None,
+        resolve_vulkan=bool(args.vulkan and not args.vulkan_pci),
     )
+
+    if args.vulkan_pci:
+        summary["vulkan_resolution"] = resolve_vulkan_device_for_pci(args.vulkan_pci)
 
     if args.json:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -851,6 +1705,17 @@ def main() -> int:
     if summary["passport_coherence"]:
         pc = summary["passport_coherence"]
         print(f"Passport Coherence: {pc['status']} (matches: {pc['matches']}, missing: {pc['missing']}, extra: {pc['extra']}, replaced: {pc['replaced']})")
+
+    if "vulkan_resolution" in summary:
+        vr = summary["vulkan_resolution"]
+        print(f"Vulkan Device Resolution: {vr['status']} (Target PCI: {vr['pci_address']})")
+        if vr.get("vulkan_device_name"):
+            print(f"  Name: {vr['vulkan_device_name']}")
+        if vr.get("vulkan_device_uuid"):
+            print(f"  UUID: {vr['vulkan_device_uuid']}")
+        if vr.get("drm_render_minor") is not None:
+            print(f"  DRM Render: {vr['drm_render_major']}:{vr['drm_render_minor']}")
+        print(f"  Evidence: {', '.join(vr.get('evidence', []))}")
 
     return 0
 

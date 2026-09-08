@@ -10,7 +10,10 @@ import importlib.util
 import json
 import os
 import pathlib
+import shutil
+import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -546,6 +549,911 @@ class TestHermeticGPURuntime(unittest.TestCase):
         self.assertEqual(passport_file.read_text(), content)
 
 
+class TestHermeticVulkanDeviceResolution(unittest.TestCase):
+    ARC_VULKAN_TEXT = """
+GPU0:
+VkPhysicalDeviceProperties:
+---------------------------
+\tapiVersion        = 1.4.354 (4211042)
+\tdriverVersion     = 26.1.6 (109056006)
+\tvendorID          = 0x8086
+\tdeviceID          = 0x56a6
+\tdeviceType        = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tdeviceName        = Intel(R) Arc(tm) A310 Graphics (DG2)
+
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+----------------------------------------
+\tpciDomain   = 0
+\tpciBus      = 3
+\tpciDevice   = 0
+\tpciFunction = 0
+
+VkPhysicalDeviceDrmPropertiesEXT:
+---------------------------------
+\thasPrimary   = true
+\thasRender    = true
+\tprimaryMajor = 226
+\tprimaryMinor = 1
+\trenderMajor  = 226
+\trenderMinor  = 129
+
+VkPhysicalDeviceVulkan11Properties:
+-----------------------------------
+\tdeviceUUID                        = 8680a656-0500-0000-0300-000000000000
+"""
+
+    DUAL_GPU_TEXT = """
+GPU0:
+VkPhysicalDeviceProperties:
+---------------------------
+\tapiVersion        = 1.4.354 (4211042)
+\tdriverVersion     = 26.1.6 (109056006)
+\tvendorID          = 0x8086
+\tdeviceID          = 0x1912
+\tdeviceType        = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+\tdeviceName        = Intel(R) HD Graphics 530 (SKL GT2)
+
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+----------------------------------------
+\tpciDomain   = 0
+\tpciBus      = 0
+\tpciDevice   = 2
+\tpciFunction = 0
+
+VkPhysicalDeviceDrmPropertiesEXT:
+---------------------------------
+\thasPrimary   = true
+\thasRender    = true
+\tprimaryMajor = 226
+\tprimaryMinor = 0
+\trenderMajor  = 226
+\trenderMinor  = 128
+
+VkPhysicalDeviceVulkan11Properties:
+-----------------------------------
+\tdeviceUUID                        = 86801219-0600-0000-0002-000000000000
+
+GPU1:
+VkPhysicalDeviceProperties:
+---------------------------
+\tapiVersion        = 1.4.354 (4211042)
+\tdriverVersion     = 26.1.6 (109056006)
+\tvendorID          = 0x8086
+\tdeviceID          = 0x56a6
+\tdeviceType        = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tdeviceName        = Intel(R) Arc(tm) A310 Graphics (DG2)
+
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+----------------------------------------
+\tpciDomain   = 0
+\tpciBus      = 3
+\tpciDevice   = 0
+\tpciFunction = 0
+
+VkPhysicalDeviceDrmPropertiesEXT:
+---------------------------------
+\thasPrimary   = true
+\thasRender    = true
+\tprimaryMajor = 226
+\tprimaryMinor = 1
+\trenderMajor  = 226
+\trenderMinor  = 129
+
+VkPhysicalDeviceVulkan11Properties:
+-----------------------------------
+\tdeviceUUID                        = 8680a656-0500-0000-0300-000000000000
+
+GPU2:
+VkPhysicalDeviceProperties:
+---------------------------
+\tapiVersion        = 1.4.354 (4211042)
+\tdriverVersion     = 26.1.6 (109056006)
+\tvendorID          = 0x10005
+\tdeviceID          = 0x0000
+\tdeviceType        = PHYSICAL_DEVICE_TYPE_CPU
+\tdeviceName        = llvmpipe (LLVM 22.1.8, 256 bits)
+
+VkPhysicalDeviceVulkan11Properties:
+-----------------------------------
+\tdeviceUUID                        = 6d657361-3236-2e31-2e36-000000000000
+"""
+
+    def test_01_single_vulkan_device_matching_pci_resolves(self):
+        devices = gpu_rt.parse_vulkaninfo_text(self.ARC_VULKAN_TEXT)
+        self.assertEqual(len(devices), 1)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["pci_address"], "0000:03:00.0")
+        self.assertEqual(res["vulkan_device_name"], "Intel(R) Arc(tm) A310 Graphics (DG2)")
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(res["vendor_id"], "8086")
+        self.assertEqual(res["device_id"], "56a6")
+        self.assertEqual(res["drm_render_major"], 226)
+        self.assertEqual(res["drm_render_minor"], 129)
+        self.assertIn("pci_bus_info_match", res["evidence"])
+
+    def test_02_two_vulkan_devices_one_pci_match(self):
+        devices = gpu_rt.parse_vulkaninfo_text(self.DUAL_GPU_TEXT)
+        res_arc = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res_arc["status"], "RESOLVED")
+        self.assertEqual(res_arc["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+
+        res_hd = gpu_rt.resolve_vulkan_device_for_pci("0000:00:02.0", vulkan_devices=devices)
+        self.assertEqual(res_hd["status"], "RESOLVED")
+        self.assertEqual(res_hd["vulkan_device_uuid"], "86801219-0600-0000-0002-000000000000")
+
+    def test_03_no_pci_match_returns_not_found(self):
+        devices = gpu_rt.parse_vulkaninfo_text(self.DUAL_GPU_TEXT)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:07:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "NOT_FOUND")
+        self.assertEqual(res["pci_address"], "0000:07:00.0")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("no_matching_vulkan_physical_device", res["evidence"])
+
+    def test_04_duplicate_pci_evidence_returns_ambiguous(self):
+        dup_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = GPU A
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 11111111-1111-1111-1111-111111111111
+
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = GPU B
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 22222222-2222-2222-2222-222222222222
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(dup_text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "AMBIGUOUS")
+        self.assertIn("multiple_vulkan_devices_matching_pci", res["evidence"])
+
+    def test_05_vulkan_unavailable(self):
+        def failing_runner():
+            return -1, "", "vulkaninfo: command not found"
+
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", runner=failing_runner)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("vulkan_query_unavailable", res["evidence"])
+
+    def test_06_llvmpipe_software_device_not_mapped_to_pci(self):
+        llvm_only = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = llvmpipe (LLVM 22.1.8)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_CPU
+\tvendorID = 0x10005
+\tdeviceID = 0x0000
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 6d657361-3236-2e31-2e36-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(llvm_only)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "NOT_FOUND")
+
+    def test_07_gpu_ordering_reversed_yields_same_result(self):
+        reversed_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) HD Graphics 530 (SKL GT2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 0
+\tpciDevice = 2
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 86801219-0600-0000-0002-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(reversed_text)
+        res_arc = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        res_hd = gpu_rt.resolve_vulkan_device_for_pci("0000:00:02.0", vulkan_devices=devices)
+        self.assertEqual(res_arc["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(res_hd["vulkan_device_uuid"], "86801219-0600-0000-0002-000000000000")
+
+    def test_08_identical_marketing_names_pci_determines_identity(self):
+        dual_identical_names = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = SuperGPU 9000
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 1
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = SuperGPU 9000
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 2
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(dual_identical_names)
+        res_1 = gpu_rt.resolve_vulkan_device_for_pci("0000:01:00.0", vulkan_devices=devices)
+        res_2 = gpu_rt.resolve_vulkan_device_for_pci("0000:02:00.0", vulkan_devices=devices)
+        self.assertEqual(res_1["vulkan_device_uuid"], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        self.assertEqual(res_2["vulkan_device_uuid"], "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+    def test_09_uuid_remains_opaque_no_pci_derivation_from_uuid(self):
+        opaque_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = deadbeef-cafe-babe-0123-456789abcdef
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(opaque_text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["vulkan_device_uuid"], "deadbeef-cafe-babe-0123-456789abcdef")
+        res_none = gpu_rt.resolve_vulkan_device_for_pci("0000:00:01.0", vulkan_devices=devices)
+        self.assertEqual(res_none["status"], "NOT_FOUND")
+
+    def test_10_vendor_device_alone_insufficient(self):
+        no_pci_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Duplicate Card
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tvendorID = 0x8086
+\tdeviceID = 0x56a6
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 11111111-1111-1111-1111-111111111111
+
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Duplicate Card
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tvendorID = 0x8086
+\tdeviceID = 0x56a6
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 22222222-2222-2222-2222-222222222222
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(no_pci_text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("LOCAL_DRM_IDENTITY_UNAVAILABLE", res["evidence"])
+
+    def test_11_drm_major_minor_corroboration_when_available(self):
+        devices = gpu_rt.parse_vulkaninfo_text(self.ARC_VULKAN_TEXT)
+        arc_record = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(arc_record, vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertIn("drm_render_node_corroborated", res["evidence"])
+
+    def test_12_conflicting_pci_vs_drm_evidence_fails_closed(self):
+        conflict_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Conflicting GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 128
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(conflict_text)
+        arc_record = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(arc_record, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("IDENTITY_CONFLICT", res["evidence"])
+        self.assertIsNone(res["vulkan_device_uuid"])
+
+    def test_13_non_zero_pci_domain_supported(self):
+        non_zero_domain_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Enterprise GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 1
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 12345678-1234-1234-1234-123456789abc
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(non_zero_domain_text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0001:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["pci_address"], "0001:03:00.0")
+
+    def test_14_malformed_vulkan_properties_no_crash(self):
+        garbage = "not a valid vulkaninfo output\nrandom garbage = 1234\nGPU:\n===\n"
+        devices = gpu_rt.parse_vulkaninfo_text(garbage)
+        self.assertEqual(devices, [])
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "NOT_FOUND")
+
+    def test_resolve_vulkan_device_for_gpu_helper(self):
+        devices = gpu_rt.parse_vulkaninfo_text(self.ARC_VULKAN_TEXT)
+        gpu_dict = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(gpu_dict, vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertIn("drm_render_node_corroborated", res["evidence"])
+
+    def test_supplementary_foreign_section_device_uuid_ignored(self):
+        foreign_uuid_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test Real GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+VkPhysicalDeviceUnapprovedForeignProperties:
+\tdeviceUUID = bad00000-0000-0000-0000-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(foreign_uuid_text)
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+
+    def test_supplementary_indented_gpu_headers_remain_separated(self):
+        indented_text = """
+  GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = GPU Zero
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 1
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 11111111-1111-1111-1111-111111111111
+
+    GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = GPU One
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 2
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 22222222-2222-2222-2222-222222222222
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(indented_text)
+        self.assertEqual(len(devices), 2)
+        res0 = gpu_rt.resolve_vulkan_device_for_pci("0000:01:00.0", vulkan_devices=devices)
+        res1 = gpu_rt.resolve_vulkan_device_for_pci("0000:02:00.0", vulkan_devices=devices)
+        self.assertEqual(res0["vulkan_device_uuid"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(res1["vulkan_device_uuid"], "22222222-2222-2222-2222-222222222222")
+
+    def test_supplementary_strict_uuid_validation_rejects_garbage(self):
+        bad_uuids = [
+            "prefix8680a656-0500-0000-0300-000000000000",
+            "8680a656-0500-0000-0300-000000000000suffix",
+            "[8680a656-0500-0000-0300-000000000000]",
+            "8680a656-0500-0000-0300-00000000000",
+            "8680a656-0500-0000-0300-0000000000000",
+            "8680a656-0500-0000-0300-00000000000g",
+        ]
+        for bad_uuid in bad_uuids:
+            text = f"""
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Bad UUID GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = {bad_uuid}
+"""
+            devices = gpu_rt.parse_vulkaninfo_text(text)
+            self.assertEqual(len(devices), 1)
+            self.assertIsNone(devices[0]["device_uuid"])
+            res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+            self.assertEqual(res["status"], "UNAVAILABLE")
+            self.assertIsNone(res["vulkan_device_uuid"])
+            self.assertIn("missing_device_uuid", res["evidence"])
+
+    # --- Section 13: 13 Required Reproductions (A through M) ---
+
+    def test_reproduction_A_two_contradictory_pci_structures(self):
+        # Two contradictory complete PCI structures
+        # => PCI state CONFLICT => UNAVAILABLE => DRM fallback forbidden
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 4
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["pci_state"], gpu_rt.EvidenceState.CONFLICT)
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("INVALID_OR_CONFLICTING_PCI_EVIDENCE", res["evidence"])
+        self.assertIn("IDENTITY_EVIDENCE_CONFLICT", res["evidence"])
+
+    def test_reproduction_B_valid_pci_structure_then_incomplete_pci_structure(self):
+        # Valid PCI structure then incomplete PCI structure
+        # => evidence no longer usable => UNAVAILABLE
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["pci_state"], gpu_rt.EvidenceState.INVALID)
+        self.assertIsNone(devices[0]["pci_address"])
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("INVALID_OR_CONFLICTING_PCI_EVIDENCE", res["evidence"])
+
+    def test_reproduction_C_two_contradictory_drm_structures(self):
+        # Two contradictory DRM structures
+        # => DRM CONFLICT => UNAVAILABLE => PCI-only bypass forbidden
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 128
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["drm_state"], gpu_rt.EvidenceState.CONFLICT)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("IDENTITY_EVIDENCE_CONFLICT", res["evidence"])
+
+    def test_reproduction_D_valid_drm_structure_then_has_render_false(self):
+        # Valid DRM structure then hasRender=false in SAME GPU block
+        # => DRM CONFLICT => UNAVAILABLE => no UUID
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = false
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["drm_state"], gpu_rt.EvidenceState.CONFLICT)
+        self.assertIsNone(devices[0]["drm_render_major"])
+        self.assertIsNone(devices[0]["drm_render_minor"])
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("IDENTITY_EVIDENCE_CONFLICT", res["evidence"])
+        self.assertIsNone(res["vulkan_device_uuid"])
+
+    def test_reproduction_D_reverse_order_has_render_false_then_valid_drm_is_conflict(self):
+        # hasRender=false then valid DRM structure in SAME GPU block
+        # => DRM CONFLICT => UNAVAILABLE => no UUID
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = false
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["drm_state"], gpu_rt.EvidenceState.CONFLICT)
+        self.assertIsNone(devices[0]["drm_render_major"])
+        self.assertIsNone(devices[0]["drm_render_minor"])
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIn("IDENTITY_EVIDENCE_CONFLICT", res["evidence"])
+        self.assertIsNone(res["vulkan_device_uuid"])
+
+    def test_single_has_render_false_occurrence_is_absent(self):
+        # A single occurrence: hasRender=false with no previous valid DRM
+        # => drm_state = ABSENT => allows PCI-only resolution
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = false
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["drm_state"], gpu_rt.EvidenceState.ABSENT)
+        self.assertIsNone(devices[0]["drm_render_major"])
+        self.assertIsNone(devices[0]["drm_render_minor"])
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertIn("pci_bus_info_match", res["evidence"])
+        self.assertIn("drm_corroboration_unavailable", res["evidence"])
+        self.assertNotIn("drm_render_node_corroborated", res["evidence"])
+
+    def test_reproduction_E_valid_drm_structure_then_incomplete_drm_structure(self):
+        # Valid DRM structure then incomplete DRM structure
+        # => stale render values cleared => UNAVAILABLE if target depends on it
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["drm_state"], gpu_rt.EvidenceState.INVALID)
+        self.assertIsNone(devices[0]["drm_render_major"])
+        self.assertIsNone(devices[0]["drm_render_minor"])
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("INVALID_DRM_EVIDENCE", res["evidence"])
+
+    def test_reproduction_F_gpu0_with_device_name_only(self):
+        # GPU0 with deviceName only => incomplete enumeration => UNAVAILABLE
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test Incomplete GPU
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertFalse(devices.enumeration_reliable)
+        self.assertEqual(devices.unreliable_reason, "INCOMPLETE_VULKAN_ENUMERATION")
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertNotEqual(res["status"], "NOT_FOUND")
+        self.assertIn("INCOMPLETE_VULKAN_ENUMERATION", res["evidence"])
+
+    def test_reproduction_G_malformed_pci_structure_with_matching_validated_drm(self):
+        # Malformed PCI structure + matching validated DRM => UNAVAILABLE => fallback forbidden
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["pci_state"], gpu_rt.EvidenceState.INVALID)
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("INVALID_OR_CONFLICTING_PCI_EVIDENCE", res["evidence"])
+
+    def test_reproduction_H_pci_structure_genuinely_absent_with_validated_drm_match(self):
+        # PCI structure genuinely absent + validated DRM match => RESOLVED via validated fallback
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["pci_state"], gpu_rt.EvidenceState.ABSENT)
+        valid_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(valid_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertIn("validated_t8_1a_drm_fallback_match", res["evidence"])
+
+    def test_reproduction_I_pci_absent_with_render_node_valid_false(self):
+        # PCI absent + render_node_valid=False => UNAVAILABLE => NOT NOT_FOUND
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        unvalidated_gpu = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": False,
+        }
+        res = gpu_rt.resolve_vulkan_device_for_gpu(unvalidated_gpu, vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertNotEqual(res["status"], "NOT_FOUND")
+        self.assertIn("LOCAL_DRM_IDENTITY_UNAVAILABLE", res["evidence"])
+
+        res_pci = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res_pci["status"], "UNAVAILABLE")
+        self.assertNotEqual(res_pci["status"], "NOT_FOUND")
+        self.assertIn("LOCAL_DRM_IDENTITY_UNAVAILABLE", res_pci["evidence"])
+
+    def test_reproduction_J_leading_single_quote_before_uuid(self):
+        # Leading single quote before otherwise valid UUID => INVALID UUID
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = '8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["uuid_state"], gpu_rt.EvidenceState.INVALID)
+        self.assertIsNone(devices[0]["device_uuid"])
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("missing_device_uuid", res["evidence"])
+
+    def test_reproduction_K_uuid_with_unmatched_double_quote(self):
+        # UUID with unmatched double quote => INVALID UUID
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Test GPU
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = "8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        self.assertEqual(devices[0]["uuid_state"], gpu_rt.EvidenceState.INVALID)
+        self.assertIsNone(devices[0]["device_uuid"])
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "UNAVAILABLE")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("missing_device_uuid", res["evidence"])
+
+    def test_reproduction_L_multiple_trustworthy_matching_candidates(self):
+        # Multiple trustworthy matching candidates => AMBIGUOUS
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Candidate A
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 11111111-1111-1111-1111-111111111111
+
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Candidate B
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 22222222-2222-2222-2222-222222222222
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "AMBIGUOUS")
+        self.assertIn("multiple_vulkan_devices_matching_pci", res["evidence"])
+        self.assertIsNone(res["vulkan_device_uuid"])
+
+    def test_reproduction_M_trustworthy_enumeration_with_zero_match(self):
+        # Trustworthy enumeration + zero match => NOT_FOUND
+        text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text)
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:07:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "NOT_FOUND")
+        self.assertEqual(res["pci_address"], "0000:07:00.0")
+        self.assertIsNone(res["vulkan_device_uuid"])
+        self.assertIn("no_matching_vulkan_physical_device", res["evidence"])
+
+
 class TestRealPhysicalHostPassiveObservation(unittest.TestCase):
     def test_real_physical_host_passive_observation(self):
         sys_root = pathlib.Path("/sys")
@@ -582,6 +1490,189 @@ class TestRealPhysicalHostPassiveObservation(unittest.TestCase):
         effective = gpu_rt.resolve_effective_candidate(gpus)
         self.assertIsNotNone(effective)
         self.assertEqual(effective["pci_address"], "0000:03:00.0")
+
+    def test_real_physical_host_arc_vulkan_resolution(self):
+        if not shutil.which("vulkaninfo"):
+            self.skipTest("vulkaninfo binary not found on host")
+        if not pathlib.Path("/sys/bus/pci/devices/0000:03:00.0").is_dir():
+            self.skipTest("Host does not contain Arc A310 testbench device")
+
+        status, devices = gpu_rt.query_vulkan_devices()
+        if status != "AVAILABLE" or not devices:
+            self.skipTest("Vulkan physical device enumeration unavailable in this environment")
+
+        if "0000:03:00.0" not in [d.get("pci_address") for d in devices]:
+            self.skipTest("Arc A310 physical device not accessible in Vulkan enumeration")
+
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["pci_address"], "0000:03:00.0")
+        self.assertEqual(res["vulkan_device_name"], "Intel(R) Arc(tm) A310 Graphics (DG2)")
+        self.assertEqual(res["vulkan_device_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(res["drm_render_major"], 226)
+        self.assertEqual(res["drm_render_minor"], 129)
+        self.assertIn("pci_bus_info_match", res["evidence"])
+
+        arc_record = {
+            "pci_address": "0000:03:00.0",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+        }
+        res_corroborated = gpu_rt.resolve_vulkan_device_for_gpu(arc_record, vulkan_devices=devices)
+        self.assertEqual(res_corroborated["status"], "RESOLVED")
+        self.assertIn("drm_render_node_corroborated", res_corroborated["evidence"])
+
+    def test_real_physical_host_hd530_vulkan_resolution(self):
+        if not shutil.which("vulkaninfo"):
+            self.skipTest("vulkaninfo binary not found on host")
+        if not pathlib.Path("/sys/bus/pci/devices/0000:00:02.0").is_dir():
+            self.skipTest("Host does not contain HD530 testbench device")
+
+        status, devices = gpu_rt.query_vulkan_devices()
+        if status != "AVAILABLE" or not devices:
+            self.skipTest("Vulkan physical device enumeration unavailable in this environment")
+
+        if "0000:00:02.0" not in [d.get("pci_address") for d in devices]:
+            self.skipTest("HD530 physical device not accessible in Vulkan enumeration")
+
+        res = gpu_rt.resolve_vulkan_device_for_pci("0000:00:02.0", vulkan_devices=devices)
+        self.assertEqual(res["status"], "RESOLVED")
+        self.assertEqual(res["pci_address"], "0000:00:02.0")
+        self.assertEqual(res["vulkan_device_name"], "Intel(R) HD Graphics 530 (SKL GT2)")
+        self.assertEqual(res["vulkan_device_uuid"], "86801219-0600-0000-0002-000000000000")
+        self.assertEqual(res["drm_render_major"], 226)
+        self.assertEqual(res["drm_render_minor"], 128)
+        self.assertIn("pci_bus_info_match", res["evidence"])
+
+        hd530_record = {
+            "pci_address": "0000:00:02.0",
+            "render_node": "/dev/dri/renderD128",
+            "render_node_valid": True,
+        }
+        res_corroborated = gpu_rt.resolve_vulkan_device_for_gpu(hd530_record, vulkan_devices=devices)
+        self.assertEqual(res_corroborated["status"], "RESOLVED")
+        self.assertIn("drm_render_node_corroborated", res_corroborated["evidence"])
+
+    def test_real_physical_host_llvmpipe_excluded(self):
+        if not shutil.which("vulkaninfo"):
+            self.skipTest("vulkaninfo binary not found on host")
+        status, devices = gpu_rt.query_vulkan_devices()
+        if status != "AVAILABLE" or not devices:
+            self.skipTest("Vulkan query unavailable in this environment")
+
+        llvm_devices = [d for d in devices if d.get("device_name") and "llvmpipe" in d["device_name"]]
+        if not llvm_devices:
+            self.skipTest("No llvmpipe software device present in Vulkan enumeration")
+        for d in llvm_devices:
+            self.assertEqual(d.get("device_type"), "PHYSICAL_DEVICE_TYPE_CPU")
+            self.assertIsNone(d.get("pci_address"))
+
+    def test_real_physical_host_mpv_uuid_acceptance(self):
+        if not shutil.which("mpv"):
+            self.skipTest("mpv binary not found")
+        if not shutil.which("vulkaninfo"):
+            self.skipTest("vulkaninfo binary not found")
+
+        wayland_display = os.environ.get("WAYLAND_DISPLAY")
+        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if not wayland_display:
+            uid = os.getuid()
+            cand_xdg = xdg_runtime_dir or f"/run/user/{uid}"
+            if (pathlib.Path(cand_xdg) / "wayland-0").exists():
+                wayland_display = "wayland-0"
+                xdg_runtime_dir = cand_xdg
+
+        if not wayland_display or not xdg_runtime_dir:
+            self.skipTest("WAYLAND_DISPLAY or XDG_RUNTIME_DIR not available in environment")
+
+        sock_path = pathlib.Path(xdg_runtime_dir) / wayland_display
+        if not sock_path.exists():
+            self.skipTest(f"Wayland socket {sock_path} does not exist")
+
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(str(sock_path))
+            sock.close()
+        except Exception as exc:
+            self.skipTest(f"Wayland socket {sock_path} not accessible: {exc}")
+
+        status, devices = gpu_rt.query_vulkan_devices()
+        if status != "AVAILABLE" or not devices or not getattr(devices, "enumeration_reliable", True):
+            self.skipTest("Vulkan physical device enumeration unavailable in this environment")
+
+        arc_res = gpu_rt.resolve_vulkan_device_for_pci("0000:03:00.0", vulkan_devices=devices)
+        if arc_res["status"] != "RESOLVED" or not arc_res.get("vulkan_device_uuid"):
+            self.skipTest("Arc A310 testbench device not resolved in Vulkan enumeration")
+        arc_uuid = arc_res["vulkan_device_uuid"]
+
+        env = os.environ.copy()
+        env["WAYLAND_DISPLAY"] = wayland_display
+        env["XDG_RUNTIME_DIR"] = xdg_runtime_dir
+
+        probe_cmd = [
+            "mpv",
+            "--no-config",
+            "--vo=gpu-next",
+            "--gpu-api=vulkan",
+            f"--vulkan-device={arc_uuid}",
+            "--msg-level=gpu_next=trace,vo=trace,libplacebo=trace",
+            "--ao=null",
+            "--frames=1",
+            "avdevice://lavfi:color=c=black:s=64x64:d=0.04",
+        ]
+        try:
+            probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=12, env=env)
+        except Exception as e:
+            self.skipTest(f"MPV execution failed: {e}")
+
+        if probe.returncode != 0:
+            combined = probe.stdout + probe.stderr
+            if any(err in combined for err in [
+                "Failed initializing any suitable GPU context",
+                "couldn't open the Wayland display",
+                "couldn't open the X11 display",
+                "Cannot open display",
+                "Failed to connect to wayland",
+                "wl_display_connect",
+            ]):
+                self.skipTest(f"Display/Wayland context inaccessible for MPV Vulkan init: {combined.strip().splitlines()[-1] if combined.strip() else 'context failed'}")
+            self.fail(f"mpv failed with unexpected error: {probe.stderr}")
+
+        self.assertEqual(probe.returncode, 0)
+        self.assertIn("Intel(R) Arc(tm) A310 Graphics", probe.stdout + probe.stderr)
+
+        hd_res = gpu_rt.resolve_vulkan_device_for_pci("0000:00:02.0", vulkan_devices=devices)
+        if hd_res["status"] == "RESOLVED" and hd_res.get("vulkan_device_uuid"):
+            hd_uuid = hd_res["vulkan_device_uuid"]
+            hd_cmd = [
+                "mpv",
+                "--no-config",
+                "--vo=gpu-next",
+                "--gpu-api=vulkan",
+                f"--vulkan-device={hd_uuid}",
+                "--msg-level=gpu_next=trace,vo=trace,libplacebo=trace",
+                "--ao=null",
+                "--frames=1",
+                "avdevice://lavfi:color=c=black:s=64x64:d=0.04",
+            ]
+            hd_proc = subprocess.run(hd_cmd, capture_output=True, text=True, timeout=12, env=env)
+            self.assertEqual(hd_proc.returncode, 0)
+            self.assertIn("Intel(R) HD Graphics 530", hd_proc.stdout + hd_proc.stderr)
+
+        bad_cmd = [
+            "mpv",
+            "--no-config",
+            "--vo=gpu-next",
+            "--gpu-api=vulkan",
+            "--vulkan-device=invalid-uuid",
+            "--ao=null",
+            "--frames=1",
+            "avdevice://lavfi:color=c=black:s=64x64:d=0.04",
+        ]
+        bad_proc = subprocess.run(bad_cmd, capture_output=True, text=True, timeout=12, env=env)
+        combined_bad = bad_proc.stdout + bad_proc.stderr
+        self.assertEqual(bad_proc.returncode, 1)
+        self.assertIn("No device with name 'invalid-uuid'", combined_bad)
 
 
 if __name__ == "__main__":
