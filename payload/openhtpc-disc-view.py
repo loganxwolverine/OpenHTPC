@@ -254,10 +254,19 @@ def render(home,install,state,metadata,target):
  is_committed=(status=="PASS")
  media_type=optical_model.canonical_state(state); media=optical_model.presentation(state)
  media_prof,_presentation_authority=presentation_profile(home,install,state)
+ capability_snapshot=optical_model.protected_capability(home)
+ core_path=install/"openhtpc-core.py"
+ if core_path.is_file():
+  core=load(core_path,"disc_view_p2_core")
+  policy=core.resolve_protected_optical_policy(home,install,state,capability_snapshot)
+ else:
+  policy={"owned":False,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
  if status=="AMBIGUOUS":
   title=safe_text(state.get("disc_title") or state.get("volume_label") or metadata.get("query"),media["media_label"])
  else:
   title=safe_text(metadata.get("title") or state.get("tmdb_title") or state.get("disc_title") or state.get("volume_label") or metadata.get("query"),media["media_label"])
+ if policy.get("unplayable") and not is_committed and not state.get("tmdb_title") and status!="AMBIGUOUS":
+  title=policy.get("title") or title
  # Poster: (90,185) 430×645; frame outline. Never show uncommitted candidate poster.
  poster_path=committed_poster(metadata)
  poster=poster_image(poster_path,(430,645),font_path,(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache"),media["poster_label"])
@@ -289,15 +298,18 @@ def render(home,install,state,metadata,target):
  if tagline: d.text((585,y),tagline,font=font(26),fill="#ffba69"); y+=54
  overview=safe_text(metadata.get("overview")) if is_committed else ""
  has_token=(home/".config/openhtpc/secrets/tmdb-token").is_file()
- playback_note=("La lecture locale reste disponible." if state.get("playable") is True else "La lecture de ce disque n’est pas disponible.")
+ playback_note=("La lecture locale reste disponible." if state.get("playable") is True else "La lecture de ce disque n'est pas disponible.")
  if media_type=="BLURAY_FAMILY":
   d.text((585,y),"BLU-RAY / UHD DÉTECTÉ",font=font(24),fill="#22c7ff"); y+=34
   d.text((585,y),"Type exact non déterminé",font=font(22),fill="#dceaf5"); y+=48
- if overview:
-  section="SYNOPSIS"
- elif status=="AMBIGUOUS":
+ if status=="AMBIGUOUS":
   section="PLUSIEURS FILMS CORRESPONDENT"
   overview="Plusieurs films correspondent à ce titre. Choisissez votre version avec ▲ ▼ et confirmez avec Entrée :"
+ elif policy.get("unplayable"):
+  section=policy.get("section") or "BLU-RAY PROTÉGÉ"
+  overview=policy.get("message") or ""
+ elif overview:
+  section="SYNOPSIS"
  elif status in {"PENDING","STARTED"}:
   section="RECHERCHE TMDb"
   overview="Recherche des métadonnées TMDb en cours… "+playback_note
@@ -312,8 +324,8 @@ def render(home,install,state,metadata,target):
   overview="Aucun résultat trouvé sur TMDb pour ce titre. "+playback_note
  else:
   section="ENRICHIR CETTE FICHE"
-  overview=("Connectez OPENHTPC à TMDb pour récupérer automatiquement l’affiche, le synopsis, l’année, les genres et les principaux acteurs. TMDb est facultatif. "+playback_note if not has_token else
-            "La fiche optique est prête. L’enrichissement TMDb reste facultatif. "+playback_note)
+  overview=("Connectez OPENHTPC à TMDb pour récupérer automatiquement l'affiche, le synopsis, l'année, les genres et les principaux acteurs. TMDb est facultatif. "+playback_note if not has_token else
+            "La fiche optique est prête. L'enrichissement TMDb reste facultatif. "+playback_note)
  d.text((585,y),section,font=font(24),fill="#22c7ff"); y+=36
  if status=="AMBIGUOUS":
   d.text((585,y),overview,font=font(20),fill="#dceaf5"); y+=32

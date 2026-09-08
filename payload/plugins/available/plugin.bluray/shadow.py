@@ -90,6 +90,35 @@ def ui_contribution(presentation:dict[str,Any],decision:dict[str,Any])->dict[str
          "badge_key":presentation.get("badge_key","NONE"),"enabled":enabled,"disabled_reason":"NONE" if enabled else decision.get("playback_reason","MEDIA_NOT_PLAYABLE"),
          "action_intent":"PLAY_CURRENT_OPTICAL_MEDIA" if enabled else "NONE"}
 
+def protection_policy(optical:dict[str,Any],snapshot:dict[str,Any]|None=None)->dict[str,Any]:
+ optical=optical if isinstance(optical,dict) else {};canonical=optical.get("canonical_state")
+ if not canonical:canonical={"DVD":"DVD_VIDEO","BLURAY":"BLURAY_VIDEO","UHD":"UHD_BLURAY_VIDEO","EMPTY":"DRIVE_PRESENT_NO_MEDIA","NO_DRIVE":"NO_OPTICAL_DRIVE","UNKNOWN_DISC":"UNKNOWN_OPTICAL_MEDIA"}.get(optical.get("state"),"DETECTION_INDETERMINATE")
+ if canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+  return {"owned":False,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+ snapshot=snapshot if isinstance(snapshot,dict) else {}
+ decision=playback_decision(optical,snapshot)
+ if decision.get("playback_action")=="ENABLED":
+  return {"owned":True,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+ protection=optical.get("protection","UNKNOWN")
+ if protection!="PROTECTED":
+  return {"owned":True,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+ lb_info=optical.get("libbluray_disc_info") if isinstance(optical.get("libbluray_disc_info"),dict) else {}
+ aacs_proven=bool(lb_info.get("aacs_detected"))
+ support=snapshot.get("status","NOT_AVAILABLE")
+ if aacs_proven and support=="NOT_CONFIGURED":
+  case="AACS_NOT_CONFIGURED"
+  message="Ce Blu-ray utilise une protection AACS. La base de clés AACS nécessaire à la lecture n'est pas configurée."
+ elif aacs_proven and support=="NOT_AVAILABLE":
+  case="AACS_NOT_AVAILABLE"
+  message="Ce Blu-ray utilise une protection AACS. Les bibliothèques nécessaires au déchiffrement AACS ne sont pas disponibles."
+ else:
+  case="PROTECTED_GENERIC"
+  message="Ce Blu-ray est protégé et OPENHTPC ne peut pas actuellement en autoriser la lecture."
+ title="UHD Blu-ray protégé" if canonical=="UHD_BLURAY_VIDEO" else "Blu-ray protégé"
+ return {"owned":True,"unplayable":True,"case":case,"title":title,"section":"BLU-RAY PROTÉGÉ","message":message}
+
+protected_optical_policy=protection_policy
+
 def classify_probe_facts(facts:dict[str,Any])->dict[str,Any]:
  if not facts["bluray_detected"]:
   return {"owned":False,"canonical_state":"UNKNOWN_OPTICAL_MEDIA","legacy_state":"UNKNOWN_DISC","media_family":"UNKNOWN","exact_type":"UNKNOWN","uhd_status":"NOT_APPLICABLE",

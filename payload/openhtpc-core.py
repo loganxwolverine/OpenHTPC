@@ -332,6 +332,67 @@ def optical_presentation_descriptor(home:pathlib.Path,install:pathlib.Path,regis
     plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PRESENTATION_BROKEN"})
     return "PLUGIN_UNAVAILABLE",core_optical_presentation_descriptor({})
 
+def core_protected_optical_policy(optical:dict[str,Any]|None,snapshot:dict[str,Any]|None=None)->dict[str,Any]:
+    optical=optical if isinstance(optical,dict) else {};canonical=_canonical_optical_state(optical)
+    if canonical not in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
+        return {"owned":False,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+    decision=core_protected_optical_playback_decision(optical,snapshot)
+    if decision.get("playback_action")=="ENABLED":
+        return {"owned":True,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+    protection=optical.get("protection","UNKNOWN")
+    if protection!="PROTECTED":
+        return {"owned":True,"unplayable":False,"case":"NONE","title":"","section":"","message":""}
+    lb_info=optical.get("libbluray_disc_info") if isinstance(optical.get("libbluray_disc_info"),dict) else {}
+    aacs_proven=bool(lb_info.get("aacs_detected"))
+    snapshot=snapshot if isinstance(snapshot,dict) else {}
+    support=snapshot.get("status","NOT_AVAILABLE")
+    if aacs_proven and support=="NOT_CONFIGURED":
+        case="AACS_NOT_CONFIGURED"
+        message="Ce Blu-ray utilise une protection AACS. La base de clés AACS nécessaire à la lecture n'est pas configurée."
+    elif aacs_proven and support=="NOT_AVAILABLE":
+        case="AACS_NOT_AVAILABLE"
+        message="Ce Blu-ray utilise une protection AACS. Les bibliothèques nécessaires au déchiffrement AACS ne sont pas disponibles."
+    else:
+        case="PROTECTED_GENERIC"
+        message="Ce Blu-ray est protégé et OPENHTPC ne peut pas actuellement en autoriser la lecture."
+    title="UHD Blu-ray protégé" if canonical=="UHD_BLURAY_VIDEO" else "Blu-ray protégé"
+    return {"owned":True,"unplayable":True,"case":case,"title":title,"section":"BLU-RAY PROTÉGÉ","message":message}
+
+def _valid_protected_optical_policy(value:Any)->bool:
+    fields={"owned","unplayable","case","title","section","message"}
+    if not isinstance(value,dict) or set(value)!=fields:return False
+    if not isinstance(value.get("owned"),bool) or not isinstance(value.get("unplayable"),bool):return False
+    if value.get("case") not in {"NONE","AACS_NOT_CONFIGURED","AACS_NOT_AVAILABLE","PROTECTED_GENERIC"}:return False
+    if not isinstance(value.get("title"),str) or not isinstance(value.get("section"),str) or not isinstance(value.get("message"),str):return False
+    if not value["owned"]:return value==core_protected_optical_policy(None,None)
+    if value["unplayable"]:
+        return value["case"]!="NONE" and bool(value["title"]) and bool(value["section"]) and bool(value["message"])
+    return value["case"]=="NONE" and value["title"]=="" and value["section"]=="" and value["message"]==""
+
+def protected_optical_policy(home:pathlib.Path,install:pathlib.Path,registry:dict[str,Any],
+                             optical:dict[str,Any]|None,snapshot:dict[str,Any]|None=None)->tuple[str,dict[str,Any]]:
+    fallback=core_protected_optical_policy(optical,snapshot)
+    plugin=next((item for item in registry.get("plugins",[]) if item.get("id")=="plugin.bluray"),None)
+    if not plugin or plugin.get("state")!="AVAILABLE":return "PLUGIN_UNAVAILABLE",fallback
+    loaded=plugin_registry(install).load_entrypoint(home,install,"plugin.bluray")
+    entrypoint=getattr(loaded.get("module"),"protection_policy",getattr(loaded.get("module"),"protected_optical_policy",None))
+    try:value=entrypoint(optical or {},snapshot or {}) if loaded.get("state")=="AVAILABLE" and callable(entrypoint) else None
+    except (Exception,SystemExit):value=None
+    if _valid_protected_optical_policy(value) and value==fallback:return "PLUGIN_P2",value
+    plugin["state"]="BROKEN";registry.setdefault("errors",[]).append({"id":"plugin.bluray","state":"BROKEN","reason":"PLUGIN_PROTECTION_POLICY_BROKEN"})
+    return "PLUGIN_UNAVAILABLE",fallback
+
+def resolve_protected_optical_policy(home:pathlib.Path|None,install:pathlib.Path,
+                                     optical:dict[str,Any]|None,snapshot:dict[str,Any]|None=None)->dict[str,Any]:
+    fallback=core_protected_optical_policy(optical,snapshot)
+    if not home:return fallback
+    try:
+        registry=plugin_status(home,install)
+        _auth,policy=protected_optical_policy(home,install,registry,optical,snapshot)
+        return policy
+    except Exception:
+        return fallback
+
 def core_protected_optical_doctor_rows(inputs:dict[str,Any])->list[dict[str,Any]]:
     """Temporary Core fallback for the media-specific Doctor presentation."""
     protected=inputs.get("protected") if isinstance(inputs.get("protected"),dict) else {}

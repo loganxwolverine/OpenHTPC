@@ -70,7 +70,7 @@ class MenuAndDispatcher(unittest.TestCase):
  def enable(self,install=PAYLOAD):REGISTRY.set_enabled(self.home,install,"plugin.bluray",True)
  def test_disabled_action_is_not_emitted_and_clear_reason_is_shown(self):
   self.enable();current=state();self.write(current,capability("NOT_CONFIGURED"));text=self.menu(current)
-  self.assertNotIn("openhtpc-play-optical",text);self.assertIn("SUPPORT PROTÉGÉ NON CONFIGURÉ",text);self.assertIn("NE FOURNIT PAS DE CLÉS AACS",text)
+  self.assertNotIn("openhtpc-play-optical",text);self.assertIn("DIAGNOSTIC",text);self.assertIn("ÉJECTER",text);self.assertIn("RETOUR",text)
  def test_available_action_is_generation_bound(self):
   self.enable();current=state();self.write(current,capability("AVAILABLE"));text=self.menu(current)
   self.assertIn("openhtpc-play-optical --device /dev/sr0 --generation 7",text);self.assertIn("openhtpc-play-optical",self.sheet_menu(current))

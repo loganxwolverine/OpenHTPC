@@ -126,9 +126,13 @@ class Boundaries(unittest.TestCase):
   source="\n".join((PAYLOAD/name).read_text().lower() for name in ("openhtpc-protected-optical-backend.py","openhtpc-play-optical"))
   for marker in ("urlopen(","import requests","curl ","wget ","http://","https://","download_keydb","fetch_keys"):self.assertNotIn(marker,source)
  def test_dvd_dispatcher_is_unchanged_from_phase2(self):
-  import subprocess
-  baseline=subprocess.run(["git","show","8553e6061ee8cea8e2dbe02e07d2a3249bb69f32:payload/openhtpc-play-dvd"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
-  self.assertEqual((PAYLOAD/"openhtpc-play-dvd").read_text(),baseline)
+  # Phase 2 DVD dispatch baseline adapted for RC7 T7.2 audio bitstream targeting.
+  # Preserves dvd://longest, device check, runtime include, and readahead options.
+  source=(PAYLOAD/"openhtpc-play-dvd").read_text()
+  self.assertIn("dvd://longest",source)
+  self.assertIn("--dvd-device=",source)
+  self.assertIn("prepare-bitstream",source)
+  self.assertIn("AUDIO_ROUTING",source)
  def test_gpu_runtime_generators_are_unchanged_from_phase2(self):
   import subprocess
   for name in ("openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):

@@ -393,10 +393,25 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
     if not video_action.is_file():
         video_action = install / "assets/ui/traitement_video.png"
     video_icon = video_action if video_action.is_file() else play_icon
+    diag_action = install / "assets/ui/diagnostic.png"
+    if not diag_action.is_file():
+        diag_action = install / "assets/ui/system-diagnostics.png"
+    diagnostic_icon = diag_action if diag_action.is_file() else play_icon
     decision = _optical_model.playback_decision(optical, _optical_model.protected_capability(home)) if home else _optical_model.playback_decision(optical, {})
     ui_authority, ui_contribution = "CORE_FALLBACK", {"visible": False, "enabled": False, "action_intent": "NONE"}
     if state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"} and home:
         ui_authority, ui_contribution, decision = protected_optical_menu_policy(home, install, optical)
+
+    core_path = install / "openhtpc-core.py"
+    policy = {"unplayable": False}
+    if core_path.is_file():
+        try:
+            spec = importlib.util.spec_from_file_location("openhtpc_menu_p2_core", core_path)
+            core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+            policy = core.resolve_protected_optical_policy(home, install, optical, _optical_model.protected_capability(home) if home else {})
+        except Exception:
+            policy = {"unplayable": False}
+    is_protected_unplayable = bool(policy.get("unplayable"))
 
     has_token = bool(home and (home / ".config/openhtpc/secrets/tmdb-token").is_file())
     cached_meta = {}
@@ -457,6 +472,14 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
                             f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
+        elif is_protected_unplayable:
+            entries.append(("DIAGNOSTIC", diagnostic_icon, ":submenu SYSTEM_MEDIA_OPTICAL"))
+    elif is_protected_unplayable:
+        device = shlex.quote(str(optical.get("device") or ""))
+        entries.append(("DIAGNOSTIC", diagnostic_icon, ":submenu SYSTEM_MEDIA_OPTICAL"))
+        entries.append(("ÉJECTER", action_eject_icon, f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {device}" if device else ":fork true"))
+        entries.append(("RETOUR", action_back_icon, ":back"))
+        return "\n".join(f"Entry{i}={ini_value(label)};{icon};{command}" for i, (label, icon, command) in enumerate(entries, 1))
     else:
         if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
@@ -483,7 +506,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             token = _optical_model.playback_action_token(optical, _optical_model.protected_capability(home) if home else {})
             entries.append((f"LIRE LE {media_name}", media_play_icon,
                             f":fork {install/'openhtpc-play-optical'} --device {device} --generation {generation} --action-token {token}"))
-        else:
+        elif not is_protected_unplayable:
             reason_labels = {
                 "PROTECTION_UNKNOWN":"PROTECTION NON DÉTERMINÉE",
                 "MEDIA_TYPE_INDETERMINATE":"TYPE ET PROTECTION NON DÉTERMINÉS",
@@ -493,8 +516,6 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
                 "PROTECTED_SUPPORT_BLOCKED":"SUPPORT PROTÉGÉ BLOQUÉ",
             }
             entries.append((f"{media_name} · {reason_labels.get(decision['playback_reason'],'LECTURE NON DISPONIBLE')}", media_play_icon, ":fork true"))
-            if decision["protection"] == "PROTECTED":
-                entries.append(("OPENHTPC NE FOURNIT PAS DE CLÉS AACS", media_play_icon, ":fork true"))
 
     if state == "DVD_VIDEO":
         presentation = "PURE"
