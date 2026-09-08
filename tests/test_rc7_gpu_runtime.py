@@ -2444,5 +2444,306 @@ VkPhysicalDeviceVulkan11Properties:
             self.assertIsNone(res["decode_policy"]["hwdec"])
             self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
 
+    def test_22_negative_hwdec_forbidden_when_physical_decode_gpu_not_proven(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_22", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel(R) Arc(tm) A310 Graphics (DG2)",
+            "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+
+            profile_data = {
+                "schema": 1,
+                "gpu_topology": {
+                    "processing_gpu": {
+                        "vendor": "intel",
+                        "model": "Intel Corporation DG2 [Arc A310]",
+                        "device_id": "56a6",
+                        "vaapi_decode": {"h264": True, "hevc": True, "mpeg2": True},
+                    }
+                }
+            }
+            (config_dir / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+
+            probe_vc1 = {
+                "streams": [
+                    {"codec_type": "video", "codec_name": "vc1", "width": 1920, "height": 1080},
+                    {"codec_type": "audio", "codec_name": "dts", "channels": 6},
+                ]
+            }
+
+            res = pol.resolve(home, None, "local", probe=probe_vc1, gpu_binding=bound_decision)
+            self.assertEqual(res["decode_policy"]["status"], "OBSERVED")
+            self.assertEqual(res["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(res["decode_policy"]["media_codec"], "vc1")
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+            self.assertEqual(res["decode_policy"]["effective_hwdec"], "vaapi")
+            self.assertNotIn("--hwdec=no", res["mpv_args"])
+            self.assertIn("--vulkan-device=8680a656-0500-0000-0300-000000000000", res["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res["mpv_args"]))
+            self.assertIn("INTEL_DG2_NO_HARDWARE_VC1", res["decode_policy"].get("diagnostic_limits", []))
+
+    def test_23_adaptive_hwdec_mpeg2_vaapi_hardware_decode_when_supported(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_23", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel(R) Arc(tm) A310 Graphics (DG2)",
+            "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+
+            profile_data = {
+                "schema": 1,
+                "gpu_topology": {
+                    "processing_gpu": {
+                        "vendor": "intel",
+                        "model": "Intel Corporation DG2 [Arc A310]",
+                        "device_id": "56a6",
+                        "vaapi_decode": {"h264": True, "hevc": True, "mpeg2": True},
+                    }
+                }
+            }
+            (config_dir / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+
+            probe_mpeg2 = {
+                "streams": [
+                    {"codec_type": "video", "codec_name": "mpeg2video", "width": 720, "height": 576},
+                    {"codec_type": "audio", "codec_name": "ac3", "channels": 2},
+                ]
+            }
+
+            # Local MPEG-2
+            res_local = pol.resolve(home, None, "local", probe=probe_mpeg2, gpu_binding=bound_decision)
+            self.assertEqual(res_local["decode_policy"]["media_codec"], "mpeg2video")
+            self.assertEqual(res_local["decode_policy"]["effective_hwdec"], "vaapi")
+            self.assertIn("--hwdec-codecs=h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video", res_local["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res_local["mpv_args"]))
+
+            # DVD
+            res_dvd = pol.resolve(home, None, "dvd", gpu_binding=bound_decision)
+            self.assertEqual(res_dvd["decode_policy"]["media_codec"], "mpeg2video")
+            self.assertEqual(res_dvd["decode_policy"]["effective_hwdec"], "vaapi")
+            self.assertIn("--hwdec-codecs=h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video", res_dvd["mpv_args"])
+
+    def test_24_adaptive_hwdec_bluray_positive_enablement_without_codec_exclusion(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_24", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel(R) Arc(tm) A310 Graphics (DG2)",
+            "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+
+            profile_data = {
+                "schema": 1,
+                "gpu_topology": {
+                    "processing_gpu": {
+                        "vendor": "intel",
+                        "model": "Intel Corporation DG2 [Arc A310]",
+                        "device_id": "56a6",
+                        "vaapi_decode": {"h264": True, "hevc": True, "mpeg2": True},
+                    }
+                }
+            }
+            (config_dir / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+
+            res_bd = pol.resolve(home, None, "bluray", gpu_binding=bound_decision)
+            self.assertEqual(res_bd["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(res_bd["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+            self.assertIn("--hwdec-codecs=h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video", res_bd["mpv_args"])
+            bd_codecs = next(a.split("=", 1)[1] for a in res_bd["mpv_args"] if a.startswith("--hwdec-codecs="))
+            self.assertIn("vc1", bd_codecs.split(","))
+            self.assertIn("mpeg2video", bd_codecs.split(","))
+
+    def test_25_adaptive_hwdec_preserves_nvidia_nvdec(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_25", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        nvidia_binding = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:01:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:01:00.0-render",
+            "vulkan_uuid": "10de2503-0000-0000-0000-000000000000",
+            "vulkan_device_name": "NVIDIA GeForce RTX 3050",
+            "mpv_args": ["--vulkan-device=10de2503-0000-0000-0000-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=nvdec\nhwdec-codecs=h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video\n", encoding="utf-8")
+
+            profile_data = {
+                "schema": 1,
+                "gpu_topology": {
+                    "processing_gpu": {
+                        "vendor": "nvidia",
+                        "model": "NVIDIA GeForce RTX 3050",
+                        "device_id": "2503",
+                        "nvdec_decode": {"h264": True, "hevc": True, "mpeg2": True, "vc1": True},
+                    }
+                }
+            }
+            (config_dir / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+
+            probe_vc1 = {"streams": [{"codec_type": "video", "codec_name": "vc1"}]}
+            res = pol.resolve(home, None, "local", probe=probe_vc1, gpu_binding=nvidia_binding)
+            self.assertEqual(res["decode_policy"]["hwdec"], "nvdec")
+            self.assertEqual(res["decode_policy"]["effective_hwdec"], "nvdec")
+            self.assertNotIn("--hwdec=no", res["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res["mpv_args"]))
+
+    def test_26_adaptive_hwdec_positive_enablement_when_passport_lacks_codec(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_26", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        amd_binding = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:0a:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:0a:00.0-render",
+            "vulkan_uuid": "100273ff-0000-0000-0000-000000000000",
+            "vulkan_device_name": "AMD Radeon RX 6600",
+            "mpv_args": ["--vulkan-device=100273ff-0000-0000-0000-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+
+            profile_data = {
+                "schema": 1,
+                "gpu_topology": {
+                    "processing_gpu": {
+                        "vendor": "amd",
+                        "model": "AMD Radeon RX 6600",
+                        "device_id": "73ff",
+                        "vaapi_decode": {"h264": True, "hevc": True, "mpeg2": False, "vc1": True},
+                    }
+                }
+            }
+            (config_dir / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+
+            probe_mpeg2 = {"streams": [{"codec_type": "video", "codec_name": "mpeg2video"}]}
+            res = pol.resolve(home, None, "local", probe=probe_mpeg2, gpu_binding=amd_binding)
+            self.assertEqual(res["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(res["decode_policy"]["effective_hwdec"], "vaapi")
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+            self.assertNotIn("--hwdec=no", res["mpv_args"])
+            self.assertIn("--hwdec-codecs=h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx,mpeg2video", res["mpv_args"])
+            self.assertIn("PASSPORT_NO_HARDWARE_MPEG2", res["decode_policy"].get("diagnostic_limits", []))
+
+    def test_27_adaptive_hwdec_preserves_custom_hwdec_codecs_from_runtime_config(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_27", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel(R) Arc(tm) A310 Graphics (DG2)",
+            "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\nhwdec-codecs=h264,hevc\n", encoding="utf-8")
+
+            res_dvd = pol.resolve(home, None, "dvd", gpu_binding=bound_decision)
+            self.assertEqual(res_dvd["decode_policy"]["media_codec"], "mpeg2video")
+            self.assertEqual(res_dvd["decode_policy"]["effective_hwdec"], "vaapi")
+            # Custom pure.conf codecs (h264,hevc) are preserved and augmented with mpeg2video
+            self.assertIn("--hwdec-codecs=h264,hevc,mpeg2video", res_dvd["mpv_args"])
+
+    def test_28_adaptive_hwdec_respects_all_codecs_wildcard(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_28", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel(R) Arc(tm) A310 Graphics (DG2)",
+            "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            config_dir = home / ".config/openhtpc"
+            rt_dir = config_dir / "runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (config_dir / "user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\nhwdec-codecs=all\n", encoding="utf-8")
+
+            res_dvd = pol.resolve(home, None, "dvd", gpu_binding=bound_decision)
+            self.assertEqual(res_dvd["decode_policy"]["media_codec"], "mpeg2video")
+            self.assertEqual(res_dvd["decode_policy"]["effective_hwdec"], "vaapi")
+            # When pure.conf has hwdec-codecs=all, mpeg2video is already covered; no redundant arg
+            self.assertFalse(any(a.startswith("--hwdec-codecs=") for a in res_dvd["mpv_args"]))
+
+
 if __name__ == "__main__":
     unittest.main()

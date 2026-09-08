@@ -35,6 +35,7 @@ VALID = {
     "subtitle_policy": {"AUTO", "OFF", "FR_FORCED", "FR_FULL"},
 }
 FR_LANGS = {"fr", "fra", "fre"}
+MPV_DEFAULT_HWDEC_CODEC_WHITELIST = "h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx"
 
 
 def config_path(home: pathlib.Path) -> pathlib.Path:
@@ -770,6 +771,7 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
 
     hwdec = None
     hwdec_status = "UNAVAILABLE"
+    hwdec_codecs = None
     pure_conf_path = home / ".config/openhtpc/runtime/mpv/pure.conf"
     if not pure_conf_path.is_file():
         try:
@@ -791,17 +793,96 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
                     if val:
                         hwdec = val
                         hwdec_status = "OBSERVED"
+                elif line.startswith("hwdec-codecs=") and not line.startswith("#"):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        hwdec_codecs = val
         except OSError:
             pass
+
+    profile_data = None
+    try:
+        prof_path = home / ".config/openhtpc/profile.json"
+        if prof_path.is_file():
+            profile_data = json.loads(prof_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError):
+        pass
+
+    processing_gpu = {}
+    if isinstance(profile_data, dict):
+        processing_gpu = profile_data.get("gpu_topology", {}).get("processing_gpu", {})
+        if not processing_gpu and isinstance(profile_data.get("gpu_selection", {}).get("gpu"), dict):
+            processing_gpu = profile_data["gpu_selection"]["gpu"]
+
+    vaapi_decode = processing_gpu.get("vaapi_decode", {}) if isinstance(processing_gpu, dict) else {}
+    nvdec_decode = processing_gpu.get("nvdec_decode", {}) if isinstance(processing_gpu, dict) else {}
+    gpu_model = str(processing_gpu.get("model", "")).casefold()
+    gpu_vendor = str(processing_gpu.get("vendor", "")).casefold()
+    gpu_device_id = str(processing_gpu.get("device_id", "")).casefold()
+    vulkan_name = str((gpu_binding or {}).get("vulkan_device_name", "")).casefold()
+
+    media_codec = None
+    if kind == "dvd":
+        media_codec = "mpeg2video"
+    elif kind == "local":
+        video_streams = _typed_streams(probe or {}, "video")
+        if video_streams and isinstance(video_streams[0], dict):
+            media_codec = str(video_streams[0].get("codec_name", "")).casefold() or None
+
+    mpv_decode_args: list[str] = []
+    physical_gpu_binding = "NOT_PROVEN"
+    effective_hwdec = hwdec
+
+    # Diagnostic capability assessment (non-authoritative for negative decisions when physical binding is NOT_PROVEN)
+    is_intel_dg2 = bool(
+        "dg2" in gpu_model
+        or "arc" in gpu_model
+        or "dg2" in vulkan_name
+        or "arc" in vulkan_name
+        or gpu_device_id.startswith("56")
+    )
+    diagnostic_limits: list[str] = []
+    if hwdec == "vaapi" and is_intel_dg2:
+        diagnostic_limits.append("INTEL_DG2_NO_HARDWARE_VC1")
+    elif (hwdec == "vaapi" and vaapi_decode.get("vc1") is False) or (hwdec == "nvdec" and nvdec_decode.get("vc1") is False):
+        diagnostic_limits.append("PASSPORT_NO_HARDWARE_VC1")
+    if (hwdec == "vaapi" and vaapi_decode.get("mpeg2") is False) or (hwdec == "nvdec" and nvdec_decode.get("mpeg2") is False):
+        diagnostic_limits.append("PASSPORT_NO_HARDWARE_MPEG2")
+
+    # NEGATIVE HWDEC POLICY — FROZEN RULE:
+    # A per-GPU negative decoding decision such as:
+    # --hwdec=no, codec exclusion, forced software decoding
+    # requires PROVEN physical decode-GPU identity. RENDER GPU identity is insufficient.
+    # If physical_gpu_binding == "NOT_PROVEN", then GPU-specific capability information
+    # may be diagnostic, but MUST NOT be used to disable hardware decoding.
+    # Hardware Passport codec capabilities are not runtime authority unless identity and freshness
+    # have independently been proven.
+    # Positive MPV capability enablement is permitted when MPV provides safe software fallback.
+    if hwdec in {"vaapi", "nvdec"}:
+        needs_mpeg2 = (
+            kind == "dvd"
+            or kind == "bluray"
+            or media_codec in {"mpeg2video", "mpegvideo", "mpeg1video"}
+        )
+        if needs_mpeg2:
+            existing_codecs = {c.strip() for c in hwdec_codecs.split(",")} if hwdec_codecs else set()
+            if "mpeg2video" not in existing_codecs and "all" not in existing_codecs:
+                base_codecs = hwdec_codecs if hwdec_codecs else MPV_DEFAULT_HWDEC_CODEC_WHITELIST
+                mpv_decode_args.append(f"--hwdec-codecs={base_codecs},mpeg2video")
 
     decode_policy = {
         "status": hwdec_status,
         "hwdec": hwdec,
-        "physical_gpu_binding": "NOT_PROVEN",
+        "physical_gpu_binding": physical_gpu_binding,
     }
+    if media_codec is not None:
+        decode_policy["media_codec"] = media_codec
+        decode_policy["effective_hwdec"] = effective_hwdec
+    if diagnostic_limits:
+        decode_policy["diagnostic_limits"] = diagnostic_limits
 
-    mpv_gpu_args = list(gpu_binding.get("mpv_args", []))
-    mpv_args = [*mpv_gpu_args, *audio["mpv_args"], *audio_output["mpv_args"], *mpv_device_args, *subtitle["mpv_args"]]
+    mpv_gpu_args = list((gpu_binding or {}).get("mpv_args", []))
+    mpv_args = [*mpv_gpu_args, *mpv_decode_args, *audio["mpv_args"], *audio_output["mpv_args"], *mpv_device_args, *subtitle["mpv_args"]]
     return {
         "presentation": presentation,
         "audio": audio,
