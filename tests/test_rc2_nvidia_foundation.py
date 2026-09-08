@@ -95,7 +95,6 @@ class Rc2QualifiedGpuRuntimeCharacterization(unittest.TestCase):
         "vo=gpu-next\n"
         "gpu-api=vulkan\n"
         "hwdec=vaapi\n"
-        "vaapi-device=/dev/dri/renderD128\n"
     )
 
     def test_intel_single_gpu_runtime_is_exactly_preserved(self):

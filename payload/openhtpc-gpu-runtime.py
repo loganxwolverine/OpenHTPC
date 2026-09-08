@@ -1638,6 +1638,177 @@ def build_gpu_runtime_summary(
     return summary
 
 
+def resolve_playback_gpu_binding(
+    sys_root: pathlib.Path = pathlib.Path("/sys"),
+    dev_root: pathlib.Path = pathlib.Path("/dev"),
+    passport_path: pathlib.Path | None = None,
+    stat_provider: StatProvider | None = None,
+    vulkan_devices: list[dict[str, Any]] | VulkanDeviceList | None = None,
+    vulkan_runner: VulkanRunner | None = None,
+    detected_gpus: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Resolve dynamic GPU binding for media playback (T8.1B2).
+
+    Coherently aligns:
+    1. Display GPU (T8.1A)
+    2. Persistent VA-API Render Device (T8.1A)
+    3. Vulkan Device UUID (T8.1B1)
+
+    Fail-safe contract (Section D, E, M):
+    Explicit binding is allowed ONLY if ALL are true:
+    1. T8.1A display resolution == RESOLVED
+    2. effective_candidate exists
+    3. candidate AVAILABLE == true
+    4. persistent_render_path is validated and present
+    5. T8.1B1 Vulkan result == RESOLVED
+    6. Vulkan UUID belongs to the SAME validated GPU identity
+
+    Then:
+    status: RENDER_BOUND
+    drm_render_path: validated persistent DRM path
+    vulkan_uuid: opaque Vulkan UUID
+    mpv_args: [--vulkan-device=...]
+
+    Otherwise:
+    status: AUTO_FALLBACK
+    drm_render_path: None
+    vulkan_uuid: None
+    mpv_args: []
+    reason: deterministic failure code
+    """
+    if detected_gpus is None:
+        detected_gpus = discover_gpus(sys_root=sys_root, dev_root=dev_root, stat_provider=stat_provider)
+
+    display_gpu, display_status = resolve_display_gpu(detected_gpus)
+    effective_candidate = resolve_effective_candidate(detected_gpus)
+
+    # 1. Display resolution check
+    if display_status != "RESOLVED":
+        return {
+            "status": "AUTO_FALLBACK",
+            "pci_address": None,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": None,
+            "reason": "DISPLAY_AMBIGUOUS" if display_status == "AMBIGUOUS" else "DISPLAY_NOT_FOUND",
+            "evidence": [f"display_status={display_status}"],
+            "mpv_args": [],
+        }
+
+    # 2. Availability / Effective candidate check
+    if not effective_candidate or not is_gpu_available(effective_candidate):
+        pci_addr = (display_gpu or {}).get("pci_address")
+        return {
+            "status": "AUTO_FALLBACK",
+            "pci_address": pci_addr,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": None,
+            "reason": "GPU_UNAVAILABLE",
+            "evidence": [f"gpu_available=False", f"pci={pci_addr}"],
+            "mpv_args": [],
+        }
+
+    # 3. Persistent render path check
+    pci_addr = effective_candidate.get("pci_address")
+    persistent_render = effective_candidate.get("persistent_render_path")
+    if not persistent_render:
+        return {
+            "status": "AUTO_FALLBACK",
+            "pci_address": pci_addr,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": None,
+            "reason": "PERSISTENT_RENDER_PATH_MISSING",
+            "evidence": [f"persistent_render_path=None", f"pci={pci_addr}"],
+            "mpv_args": [],
+        }
+
+    if detected_gpus is None and stat_provider is None and dev_root == pathlib.Path("/dev"):
+        try:
+            if not pathlib.Path(persistent_render).exists():
+                return {
+                    "status": "AUTO_FALLBACK",
+                    "pci_address": pci_addr,
+                    "drm_render_path": None,
+                    "vulkan_uuid": None,
+                    "vulkan_device_name": None,
+                    "reason": "PERSISTENT_RENDER_PATH_MISSING",
+                    "evidence": [f"path_missing={persistent_render}", f"pci={pci_addr}"],
+                    "mpv_args": [],
+                }
+        except OSError:
+            return {
+                "status": "AUTO_FALLBACK",
+                "pci_address": pci_addr,
+                "drm_render_path": None,
+                "vulkan_uuid": None,
+                "vulkan_device_name": None,
+                "reason": "PERSISTENT_RENDER_PATH_MISSING",
+                "evidence": [f"stat_error={persistent_render}", f"pci={pci_addr}"],
+                "mpv_args": [],
+            }
+
+    # 4. Resolve Vulkan device for this GPU
+    vulkan_res = resolve_vulkan_device_for_gpu(
+        gpu=effective_candidate,
+        vulkan_devices=vulkan_devices,
+        runner=vulkan_runner,
+    )
+
+    vulkan_status = vulkan_res.get("status")
+    if vulkan_status != "RESOLVED":
+        reason = f"VULKAN_{vulkan_status}"
+        evidence = list(vulkan_res.get("evidence", []))
+        if any("conflict" in ev.lower() for ev in evidence):
+            reason = "PCI_DRM_CONFLICT"
+        return {
+            "status": "AUTO_FALLBACK",
+            "pci_address": pci_addr,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": vulkan_res.get("vulkan_device_name"),
+            "reason": reason,
+            "evidence": evidence,
+            "mpv_args": [],
+        }
+
+    # 5. Vulkan UUID belongs to the same validated GPU identity
+    vulkan_pci = vulkan_res.get("pci_address")
+    vulkan_uuid = vulkan_res.get("vulkan_device_uuid")
+    if not vulkan_uuid or normalize_pci_address(vulkan_pci) != normalize_pci_address(pci_addr):
+        return {
+            "status": "AUTO_FALLBACK",
+            "pci_address": pci_addr,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": vulkan_res.get("vulkan_device_name"),
+            "reason": "PCI_DRM_CONFLICT",
+            "evidence": [f"pci_mismatch: gpu={pci_addr} vs vulkan={vulkan_pci}"],
+            "mpv_args": [],
+        }
+
+    # Coherently RENDER_BOUND!
+    evidence = [
+        f"DISPLAY_PCI={pci_addr}",
+        f"DRM_RENDER_PATH={persistent_render}",
+        f"VULKAN_UUID={vulkan_uuid}",
+        *vulkan_res.get("evidence", []),
+    ]
+    return {
+        "status": "RENDER_BOUND",
+        "pci_address": pci_addr,
+        "drm_render_path": persistent_render,
+        "vulkan_uuid": vulkan_uuid,
+        "vulkan_device_name": vulkan_res.get("vulkan_device_name"),
+        "reason": "COHERENT_RENDER_ALIGNED",
+        "evidence": evidence,
+        "mpv_args": [
+            f"--vulkan-device={vulkan_uuid}",
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="OPENHTPC Runtime GPU Resolver")
     parser.add_argument("--json", action="store_true", help="Output summary in JSON format")
@@ -1660,7 +1831,33 @@ def main() -> int:
         default=None,
         help="Resolve Vulkan physical device for specific PCI address",
     )
+    parser.add_argument(
+        "--playback-binding",
+        action="store_true",
+        help="Resolve dynamic MPV GPU binding (T8.1B2)",
+    )
     args = parser.parse_args()
+
+    if args.playback_binding:
+        binding = resolve_playback_gpu_binding(
+            sys_root=args.sys_root,
+            dev_root=args.dev_root,
+            passport_path=args.passport if args.passport.exists() else None,
+        )
+        if args.json:
+            print(json.dumps(binding, indent=2, ensure_ascii=False))
+            return 0
+        if binding["status"] == "RENDER_BOUND":
+            print("GPU_RENDER_BINDING=BOUND")
+            print(f"PCI={binding['pci_address']}")
+            print(f"DRM_RENDER_PATH={binding['drm_render_path']}")
+            print(f"VULKAN_UUID={binding['vulkan_uuid']}")
+            if binding.get("vulkan_device_name"):
+                print(f"VULKAN_DEVICE_NAME={binding['vulkan_device_name']}")
+        else:
+            print(f"GPU_RENDER_BINDING={binding['status']}")
+            print(f"REASON={binding['reason']}")
+        return 0
 
     summary = build_gpu_runtime_summary(
         sys_root=args.sys_root,

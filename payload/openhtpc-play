@@ -290,9 +290,12 @@ def main(argv: list[str] | None = None) -> int:
     attempt_path = pathlib.Path(attempt.name); attempt.close()
     command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--force-window=immediate", "--border=no", "--terminal=no", *policy_args, "--osd-playing-msg-duration=5000", "--osd-align-x=left", "--osd-align-y=top", "--osd-margin-x=48", "--osd-margin-y=48", "--osd-font-size=32", f"--osd-playing-msg={osd}", f"--log-file={attempt_path}", "--", str(media)]
     cwd = os.getcwd()
-    common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime=decision["presentation"]["resolved"].casefold(), mpv=mpv, argv_count=len(command), cwd_type="independent")
+    gpu_binding = decision.get("gpu_render_binding") or decision.get("gpu_binding") or {}
+    common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime=decision["presentation"]["resolved"].casefold(), mpv=mpv, argv_count=len(command), cwd_type="independent", gpu_render_binding=gpu_binding.get("status", "AUTO_FALLBACK"))
     update_action_state(home,path_resolved=True,path_absolute=True,file_exists=True,extension=media.suffix.casefold(),runtime="pure",process_started=True,error_class="NONE")
     runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=True,exists=True,extension=media.suffix.casefold())
+    if gpu_binding:
+        runtime_event(home,install,"GPU_RENDER_BINDING",status=gpu_binding.get("status"),pci_address=gpu_binding.get("pci_address"),drm_render_path=gpu_binding.get("drm_render_path"),vulkan_uuid=gpu_binding.get("vulkan_uuid"),reason=gpu_binding.get("reason"))
     audio_output = decision.get("audio_output", {"requested":"PCM","source_codec":"UNKNOWN","resolved":"PCM","reason":"policy_fallback","audio_spdif":"none"})
     requested_mode = audio_output.get("requested", "PCM")
     audio_target = decision.get("audio_target") or {}
@@ -363,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         "target_effective": audio_target.get("effective", "SYSTEM"),
         "target_fallback": audio_target.get("fallback", False),
     } if pw_diag else {}
-    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, **pw_fields})
+    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, "gpu_render_binding_details": gpu_binding, "gpu_binding_details": gpu_binding, **pw_fields})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)
     update_action_state(home,media_opened=opened,exit_code=rc,elapsed=elapsed,error_class=error_class)
     runtime_event(home,install,"PLAYBACK_PROCESS_EXITED",exit_code=rc,elapsed=elapsed,error_class=error_class)

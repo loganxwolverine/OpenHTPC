@@ -137,6 +137,11 @@ class Boundaries(unittest.TestCase):
   import subprocess
   for name in ("openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):
    baseline=subprocess.run(["git","show",f"8553e6061ee8cea8e2dbe02e07d2a3249bb69f32:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
-   self.assertEqual((PAYLOAD/name).read_text(),baseline)
+   current=(PAYLOAD/name).read_text()
+   if name == "openhtpc-runtime-generator.py":
+    expected=baseline.replace('        if decode_api == "vaapi":\n            backend_content += f"vaapi-device={processing[\'render_node\']}\\n"\n', '')
+    self.assertEqual(current, expected)
+   else:
+    self.assertEqual(current, baseline)
 
 if __name__=="__main__":unittest.main()

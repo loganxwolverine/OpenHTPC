@@ -166,6 +166,16 @@ if [[ -n "$pw_diag_json" && "$pw_diag_json" != "{}" && -x $INSTALL/openhtpc-runt
         --field "attempted=$pw_attempted" --field "sink_id=$pw_sink_id"
 fi
 
+gpu_status="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("status","AUTO_FALLBACK"))' "$policy_json" 2>/dev/null || printf AUTO_FALLBACK)"
+gpu_pci="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("pci_address",""))' "$policy_json" 2>/dev/null || true)"
+gpu_drm="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("drm_render_path",""))' "$policy_json" 2>/dev/null || true)"
+gpu_vulkan="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("vulkan_uuid",""))' "$policy_json" 2>/dev/null || true)"
+gpu_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("reason",""))' "$policy_json" 2>/dev/null || true)"
+[[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event GPU_RENDER_BINDING \
+    --field "status=$gpu_status" --field "pci_address=$gpu_pci" \
+    --field "drm_render_path=$gpu_drm" --field "vulkan_uuid=$gpu_vulkan" \
+    --field "reason=$gpu_reason"
+
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
 "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
@@ -187,7 +197,7 @@ if [[ -n $audio_observed_json && -x $INSTALL/openhtpc-runtime.py ]]; then
         --field "passthrough=$observed_passthrough" --field "ao=$observed_ao" --field "audio_device=$observed_device"
 fi
 [[ ! -x $INSTALL/openhtpc-system-action ]] || "$INSTALL/openhtpc-system-action" audio >/dev/null 2>&1 || true
-printf '%s kind=dvd exit_code=%s\n' "$(date --iso-8601=seconds)" "$rc" >>"$log"
+printf '%s kind=dvd exit_code=%s gpu_render_binding=%q gpu_binding=%q\n' "$(date --iso-8601=seconds)" "$rc" "$gpu_status" "$gpu_status" >>"$log"
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_PROCESS_EXITED
 [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event PLAYBACK_END
 if [[ $rc -ne 0 ]] && command -v kdialog >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then

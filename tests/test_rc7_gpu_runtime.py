@@ -1675,5 +1675,774 @@ class TestRealPhysicalHostPassiveObservation(unittest.TestCase):
         self.assertIn("No device with name 'invalid-uuid'", combined_bad)
 
 
+class TestDynamicPlaybackGPUBinding(unittest.TestCase):
+    """Hermetic tests for dynamic MPV GPU binding (T8.1B2).
+
+    Covers all 14 scenarios from Section L.
+    """
+
+    def setUp(self):
+        self.valid_arc_gpu = {
+            "pci_address": "0000:03:00.0",
+            "driver": "i915",
+            "card_node": "/dev/dri/card1",
+            "render_node": "/dev/dri/renderD129",
+            "render_node_valid": True,
+            "persistent_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "connected_connectors": ["HDMI-A-1"],
+            "enabled_connectors": ["HDMI-A-1"],
+            "active_display": True,
+            "device_type": "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
+        }
+        self.valid_vulkan_text = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 129
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+
+    def test_01_unique_active_gpu_all_evidence_valid_binds(self):
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["pci_address"], "0000:03:00.0")
+        self.assertEqual(binding["drm_render_path"], "/dev/dri/by-path/pci-0000:03:00.0-render")
+        self.assertEqual(binding["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(
+            binding["mpv_args"],
+            [
+                "--vulkan-device=8680a656-0500-0000-0300-000000000000",
+            ],
+        )
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+    def test_02_display_ambiguous_auto_fallback(self):
+        gpu1 = dict(self.valid_arc_gpu, pci_address="0000:03:00.0", active_display=True)
+        gpu2 = dict(self.valid_arc_gpu, pci_address="0000:00:02.0", active_display=True, connected_connectors=["DP-1"], enabled_connectors=["DP-1"])
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[gpu1, gpu2],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "DISPLAY_AMBIGUOUS")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_03_no_active_display_auto_fallback(self):
+        gpu1 = dict(self.valid_arc_gpu, active_display=False, enabled_connectors=[])
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[gpu1],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "DISPLAY_NOT_FOUND")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_04_gpu_unavailable_auto_fallback(self):
+        gpu1 = dict(self.valid_arc_gpu, render_node_valid=False)
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[gpu1],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "GPU_UNAVAILABLE")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_05_persistent_render_path_missing_auto_fallback(self):
+        gpu1 = dict(self.valid_arc_gpu, persistent_render_path=None)
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[gpu1],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "PERSISTENT_RENDER_PATH_MISSING")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_06_vulkan_not_found_auto_fallback(self):
+        other_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) HD Graphics 530 (SKL GT2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 0
+\tpciDevice = 2
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 128
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 86801219-0600-0000-0002-000000000000
+"""
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(other_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "VULKAN_NOT_FOUND")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_07_vulkan_unavailable_auto_fallback(self):
+        incomplete_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Incomplete GPU
+"""
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(incomplete_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "VULKAN_UNAVAILABLE")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_08_vulkan_ambiguous_auto_fallback(self):
+        ambiguous_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000001
+"""
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(ambiguous_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "VULKAN_AMBIGUOUS")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_09_pci_drm_identity_conflict_auto_fallback(self):
+        conflict_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 128
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(conflict_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "AUTO_FALLBACK")
+        self.assertEqual(binding["reason"], "PCI_DRM_CONFLICT")
+        self.assertEqual(binding["mpv_args"], [])
+        self.assertIsNone(binding["drm_render_path"])
+        self.assertIsNone(binding["vulkan_uuid"])
+
+    def test_10_render_node_card_index_changes_persistent_pci_path_used(self):
+        gpu_changed_index = dict(
+            self.valid_arc_gpu,
+            render_node="/dev/dri/renderD135",
+            persistent_render_path="/dev/dri/by-path/pci-0000:03:00.0-render",
+        )
+        vulkan_135 = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceDrmPropertiesEXT:
+\thasRender = true
+\trenderMajor = 226
+\trenderMinor = 135
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(vulkan_135)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[gpu_changed_index],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["drm_render_path"], "/dev/dri/by-path/pci-0000:03:00.0-render")
+        self.assertNotIn("renderD135", binding["drm_render_path"])
+        self.assertEqual(binding["mpv_args"], ["--vulkan-device=8680a656-0500-0000-0300-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+    def test_11_vulkan_enumeration_order_reversed_same_uuid(self):
+        text_a = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) HD Graphics 530 (SKL GT2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 0
+\tpciDevice = 2
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 86801219-0600-0000-0002-000000000000
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+"""
+        text_b = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) HD Graphics 530 (SKL GT2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 0
+\tpciDevice = 2
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 86801219-0600-0000-0002-000000000000
+"""
+        devices_a = gpu_rt.parse_vulkaninfo_text(text_a)
+        devices_b = gpu_rt.parse_vulkaninfo_text(text_b)
+        binding_a = gpu_rt.resolve_playback_gpu_binding(detected_gpus=[self.valid_arc_gpu], vulkan_devices=devices_a)
+        binding_b = gpu_rt.resolve_playback_gpu_binding(detected_gpus=[self.valid_arc_gpu], vulkan_devices=devices_b)
+        self.assertEqual(binding_a["status"], "RENDER_BOUND")
+        self.assertEqual(binding_b["status"], "RENDER_BOUND")
+        self.assertEqual(binding_a["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(binding_b["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(binding_a["mpv_args"], ["--vulkan-device=8680a656-0500-0000-0300-000000000000"])
+        self.assertEqual(binding_b["mpv_args"], ["--vulkan-device=8680a656-0500-0000-0300-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding_a["mpv_args"]))
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding_b["mpv_args"]))
+
+    def test_12_two_identical_gpu_names_pci_identity_determines_mapping(self):
+        text_two_arcs = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 3
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0300-000000000000
+GPU1:
+VkPhysicalDeviceProperties:
+\tdeviceName = Intel(R) Arc(tm) A310 Graphics (DG2)
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 4
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 8680a656-0500-0000-0400-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(text_two_arcs)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["pci_address"], "0000:03:00.0")
+        self.assertEqual(binding["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(binding["mpv_args"], ["--vulkan-device=8680a656-0500-0000-0300-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+    def test_13_no_stale_render_nodes_emitted_by_generator(self):
+        generator_path = PAYLOAD / "openhtpc-runtime-generator.py"
+        spec = importlib.util.spec_from_file_location("generator_test_13", generator_path)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            profile_path = base / "profile.json"
+            pure_path = base / "pure.conf"
+            ref_path = base / "reference.conf"
+            options_path = base / "options.txt"
+            values_path = base / "values.txt"
+            version_path = base / "version.json"
+
+            passport = {
+                "schema": 1,
+                "generator": {"name": "OPENHTPC Builder", "version": "1.2.0"},
+                "gpu_topology": {
+                    "display_gpu": {"pci_slot": "0000:03:00.0", "render_node": "/dev/dri/renderD129"},
+                    "processing_gpu": {"pci_slot": "0000:03:00.0", "render_node": "/dev/dri/renderD129"},
+                    "offload_required": False,
+                },
+                "video_backend": {"status": "observed", "decode_api": "vaapi", "render_api": "vulkan"},
+                "runtime": {"status": "pending"},
+                "runtime_profiles": {"profiles": {}},
+            }
+            profile_path.write_text(json.dumps(passport), encoding="utf-8")
+            options = (
+                "vo", "gpu-api", "hwdec", "vaapi-device", "include", "scale", "dscale",
+                "cscale", "dither", "dither-depth", "scaler-resizes-only",
+                "correct-downscaling", "linear-downscaling", "sigmoid-upscaling",
+                "target-colorspace-hint", "gamut-mapping-mode",
+            )
+            reference = {
+                "scale": "spline36", "dscale": "mitchell", "cscale": "spline36",
+                "dither": "fruit", "dither-depth": "auto", "target-colorspace-hint": "auto",
+                "gamut-mapping-mode": "auto",
+            }
+            options_path.write_text("".join(f" --{name} String {reference.get(name, 'available')}\n" for name in options), encoding="utf-8")
+            values_path.write_text("gpu-next vulkan vaapi\n", encoding="utf-8")
+            version_path.write_text(json.dumps({"version": "1.2.0", "build_id": "test"}), encoding="utf-8")
+
+            gen.generate(profile_path, pure_path, ref_path, options_path, values_path, version_path)
+
+            pure_content = pure_path.read_text(encoding="utf-8")
+            ref_content = ref_path.read_text(encoding="utf-8")
+
+            self.assertIn("vo=gpu-next", pure_content)
+            self.assertIn("gpu-api=vulkan", pure_content)
+            self.assertIn("hwdec=vaapi", pure_content)
+            self.assertNotIn("renderD128", pure_content)
+            self.assertNotIn("renderD129", pure_content)
+            self.assertNotIn("vaapi-device", pure_content)
+
+            self.assertNotIn("renderD128", ref_content)
+            self.assertNotIn("renderD129", ref_content)
+            self.assertNotIn("vaapi-device", ref_content)
+
+    def test_14_all_three_playback_paths_receive_same_binding_semantics(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_14", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        bound_decision = {
+            "status": "RENDER_BOUND",
+            "pci_address": "0000:03:00.0",
+            "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+            "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+            "vulkan_device_name": "Intel Arc A310",
+            "reason": "COHERENT_RENDER_ALIGNED",
+            "evidence": [],
+            "mpv_args": [
+                "--vulkan-device=8680a656-0500-0000-0300-000000000000",
+            ],
+        }
+        fallback_decision = {
+            "status": "AUTO_FALLBACK",
+            "pci_address": None,
+            "drm_render_path": None,
+            "vulkan_uuid": None,
+            "vulkan_device_name": None,
+            "reason": "GPU_UNAVAILABLE",
+            "evidence": [],
+            "mpv_args": [],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            (home / ".config/openhtpc").mkdir(parents=True)
+            (home / ".config/openhtpc/user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+            rt_dir = home / ".config/openhtpc/runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+
+            # Local path
+            local_bound = pol.resolve(home, None, "local", gpu_binding=bound_decision)
+            self.assertIn("--vulkan-device=8680a656-0500-0000-0300-000000000000", local_bound["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in local_bound["mpv_args"]))
+            self.assertEqual(local_bound["gpu_render_binding"]["status"], "RENDER_BOUND")
+            self.assertEqual(local_bound["decode_policy"]["status"], "OBSERVED")
+            self.assertEqual(local_bound["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(local_bound["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+
+            local_fallback = pol.resolve(home, None, "local", gpu_binding=fallback_decision)
+            self.assertFalse(any(a.startswith(("--vaapi-device=", "--vulkan-device=")) for a in local_fallback["mpv_args"]))
+            self.assertEqual(local_fallback["gpu_render_binding"]["status"], "AUTO_FALLBACK")
+
+            # DVD path
+            dvd_bound = pol.resolve(home, None, "dvd", gpu_binding=bound_decision)
+            self.assertIn("--vulkan-device=8680a656-0500-0000-0300-000000000000", dvd_bound["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in dvd_bound["mpv_args"]))
+            self.assertEqual(dvd_bound["gpu_render_binding"]["status"], "RENDER_BOUND")
+
+            dvd_fallback = pol.resolve(home, None, "dvd", gpu_binding=fallback_decision)
+            self.assertFalse(any(a.startswith(("--vaapi-device=", "--vulkan-device=")) for a in dvd_fallback["mpv_args"]))
+
+            # Blu-ray path (via effective_policy_args)
+            optical_backend_path = PAYLOAD / "openhtpc-protected-optical-backend.py"
+            spec_opt = importlib.util.spec_from_file_location("opt_backend_14", optical_backend_path)
+            opt_mod = importlib.util.module_from_spec(spec_opt)
+            spec_opt.loader.exec_module(opt_mod)
+
+            bluray_bound_decision = pol.resolve(home, None, "bluray", gpu_binding=bound_decision)
+            bluray_bound_args = opt_mod.effective_policy_args(bluray_bound_decision)
+            self.assertIn("--vulkan-device=8680a656-0500-0000-0300-000000000000", bluray_bound_args)
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in bluray_bound_args))
+
+            bluray_fallback_decision = pol.resolve(home, None, "bluray", gpu_binding=fallback_decision)
+            bluray_fallback_args = opt_mod.effective_policy_args(bluray_fallback_decision)
+            self.assertFalse(any(a.startswith(("--vaapi-device=", "--vulkan-device=")) for a in bluray_fallback_args))
+
+    def test_15_live_salon_host_synthetic_playback_binding(self):
+        if not pathlib.Path("/dev/dri/by-path/pci-0000:03:00.0-render").exists():
+            self.skipTest("Host does not contain Arc persistent render path")
+        binding = gpu_rt.resolve_playback_gpu_binding()
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["pci_address"], "0000:03:00.0")
+        self.assertEqual(binding["drm_render_path"], "/dev/dri/by-path/pci-0000:03:00.0-render")
+        self.assertEqual(binding["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+        self.assertEqual(
+            binding["mpv_args"],
+            [
+                "--vulkan-device=8680a656-0500-0000-0300-000000000000",
+            ],
+        )
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+        wayland_display = os.environ.get("WAYLAND_DISPLAY") or "wayland-0"
+        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/1000"
+        env = os.environ.copy()
+        env["WAYLAND_DISPLAY"] = wayland_display
+        env["XDG_RUNTIME_DIR"] = xdg_runtime_dir
+
+        probe_cmd = [
+            "mpv",
+            "--no-config",
+            "--vo=gpu-next",
+            "--gpu-api=vulkan",
+            "--hwdec=vaapi",
+            *binding["mpv_args"],
+            "--msg-level=all=v",
+            "--ao=null",
+            "--frames=1",
+            "avdevice://lavfi:color=c=black:s=64x64:d=0.04",
+        ]
+        try:
+            probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=12, env=env)
+        except Exception as e:
+            self.skipTest(f"MPV execution failed: {e}")
+
+        if probe.returncode != 0:
+            combined = probe.stdout + probe.stderr
+            if any(err in combined for err in [
+                "Failed initializing any suitable GPU context",
+                "couldn't open the Wayland display",
+                "couldn't open the X11 display",
+                "Cannot open display",
+                "Failed to connect to wayland",
+                "wl_display_connect",
+            ]):
+                self.skipTest("Display/Wayland context inaccessible")
+            self.fail(f"mpv failed with unexpected error: {probe.stderr}")
+
+        self.assertEqual(probe.returncode, 0)
+        combined_out = probe.stdout + probe.stderr
+        self.assertIn("Intel(R) Arc(tm) A310 Graphics", combined_out)
+        self.assertIn("Setting option 'vulkan-device' = '8680a656-0500-0000-0300-000000000000'", combined_out)
+        self.assertNotIn("Setting option 'vaapi-device'", combined_out)
+
+    def test_16_openhtpc_gpu_runtime_module_managed_and_installable(self):
+        script_path = PAYLOAD / "openhtpc-gpu-runtime.py"
+        self.assertTrue(script_path.is_file(), "payload/openhtpc-gpu-runtime.py must exist")
+
+        installer_text = (PAYLOAD / "install-openhtpc-fedora.sh").read_text(encoding="utf-8")
+        self.assertIn("openhtpc-gpu-runtime.py", installer_text, "openhtpc-gpu-runtime.py must be in installer")
+
+        managed_files = (PAYLOAD / "managed-files.txt").read_text(encoding="utf-8").splitlines()
+        self.assertIn("openhtpc-gpu-runtime.py", managed_files, "openhtpc-gpu-runtime.py must be in managed-files.txt")
+
+    def test_17_nvidia_runtime_render_binding_preserves_nvdec_no_vaapi(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_17", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        nvidia_gpu = {
+            "pci_address": "0000:01:00.0",
+            "driver": "nvidia",
+            "card_node": "/dev/dri/card0",
+            "render_node": "/dev/dri/renderD128",
+            "render_node_valid": True,
+            "persistent_render_path": "/dev/dri/by-path/pci-0000:01:00.0-render",
+            "connected_connectors": ["HDMI-A-1"],
+            "enabled_connectors": ["HDMI-A-1"],
+            "active_display": True,
+            "device_type": "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
+        }
+        nvidia_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = NVIDIA GeForce RTX 3060
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 1
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 10de2503-0000-0000-0000-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(nvidia_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[nvidia_gpu],
+            vulkan_devices=devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["pci_address"], "0000:01:00.0")
+        self.assertEqual(binding["vulkan_uuid"], "10de2503-0000-0000-0000-000000000000")
+        self.assertEqual(binding["mpv_args"], ["--vulkan-device=10de2503-0000-0000-0000-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            rt_dir = home / ".config/openhtpc/runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=nvdec\n", encoding="utf-8")
+            (home / ".config/openhtpc/user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+
+            res = pol.resolve(home, None, "local", gpu_binding=binding)
+            self.assertIn("--vulkan-device=10de2503-0000-0000-0000-000000000000", res["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res["mpv_args"]))
+            self.assertEqual(res["decode_policy"]["hwdec"], "nvdec")
+            self.assertEqual(res["decode_policy"]["status"], "OBSERVED")
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+
+    def test_18_amd_runtime_render_binding_emits_vulkan_no_vaapi(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_18", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        amd_gpu = {
+            "pci_address": "0000:0a:00.0",
+            "driver": "amdgpu",
+            "card_node": "/dev/dri/card0",
+            "render_node": "/dev/dri/renderD128",
+            "render_node_valid": True,
+            "persistent_render_path": "/dev/dri/by-path/pci-0000:0a:00.0-render",
+            "connected_connectors": ["DisplayPort-0"],
+            "enabled_connectors": ["DisplayPort-0"],
+            "active_display": True,
+            "device_type": "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU",
+        }
+        amd_vulkan = """
+GPU0:
+VkPhysicalDeviceProperties:
+\tdeviceName = AMD Radeon RX 6600
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+VkPhysicalDevicePCIBusInfoPropertiesEXT:
+\tpciDomain = 0
+\tpciBus = 10
+\tpciDevice = 0
+\tpciFunction = 0
+VkPhysicalDeviceVulkan11Properties:
+\tdeviceUUID = 100273ff-0000-0000-0000-000000000000
+"""
+        devices = gpu_rt.parse_vulkaninfo_text(amd_vulkan)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[amd_gpu],
+            vulkan_devices=devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["pci_address"], "0000:0a:00.0")
+        self.assertEqual(binding["vulkan_uuid"], "100273ff-0000-0000-0000-000000000000")
+        self.assertEqual(binding["mpv_args"], ["--vulkan-device=100273ff-0000-0000-0000-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            rt_dir = home / ".config/openhtpc/runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+            (home / ".config/openhtpc/user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+
+            res = pol.resolve(home, None, "local", gpu_binding=binding)
+            self.assertIn("--vulkan-device=100273ff-0000-0000-0000-000000000000", res["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res["mpv_args"]))
+            self.assertEqual(res["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(res["decode_policy"]["status"], "OBSERVED")
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+
+    def test_19_intel_runtime_render_binding_emits_vulkan_no_vaapi(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_19", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        vulkan_devices = gpu_rt.parse_vulkaninfo_text(self.valid_vulkan_text)
+        binding = gpu_rt.resolve_playback_gpu_binding(
+            detected_gpus=[self.valid_arc_gpu],
+            vulkan_devices=vulkan_devices,
+        )
+        self.assertEqual(binding["status"], "RENDER_BOUND")
+        self.assertEqual(binding["mpv_args"], ["--vulkan-device=8680a656-0500-0000-0300-000000000000"])
+        self.assertFalse(any(a.startswith("--vaapi-device=") for a in binding["mpv_args"]))
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            rt_dir = home / ".config/openhtpc/runtime/mpv"
+            rt_dir.mkdir(parents=True)
+            (rt_dir / "pure.conf").write_text("vo=gpu-next\ngpu-api=vulkan\nhwdec=vaapi\n", encoding="utf-8")
+            (home / ".config/openhtpc/user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+
+            res = pol.resolve(home, None, "local", gpu_binding=binding)
+            self.assertIn("--vulkan-device=8680a656-0500-0000-0300-000000000000", res["mpv_args"])
+            self.assertFalse(any(a.startswith("--vaapi-device=") for a in res["mpv_args"]))
+            self.assertEqual(res["decode_policy"]["hwdec"], "vaapi")
+            self.assertEqual(res["decode_policy"]["status"], "OBSERVED")
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+
+    def test_20_sequential_playback_replaces_diagnostic_state(self):
+        play_path = PAYLOAD / "openhtpc-play"
+        loader = importlib.machinery.SourceFileLoader("play_test_20", str(play_path))
+        spec = importlib.util.spec_from_loader("play_test_20", loader)
+        play_mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(play_mod)
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            media = home / "media.mkv"
+            source = home / "source"
+            diag_file = home / ".local/state/openhtpc/playback-last-private.json"
+
+            # Run Playback A (RENDER_BOUND)
+            bound_binding = {
+                "status": "RENDER_BOUND",
+                "pci_address": "0000:03:00.0",
+                "drm_render_path": "/dev/dri/by-path/pci-0000:03:00.0-render",
+                "vulkan_uuid": "8680a656-0500-0000-0300-000000000000",
+                "vulkan_device_name": "Intel Arc A310",
+                "reason": "COHERENT_RENDER_ALIGNED",
+                "evidence": ["test_bound"],
+                "mpv_args": ["--vulkan-device=8680a656-0500-0000-0300-000000000000"],
+            }
+            play_mod.private_state(home, media, source, {
+                "kind": "local",
+                "gpu_render_binding_details": bound_binding,
+                "gpu_binding_details": bound_binding,
+            })
+
+            data_a = json.loads(diag_file.read_text(encoding="utf-8"))
+            self.assertEqual(data_a["gpu_render_binding_details"]["status"], "RENDER_BOUND")
+            self.assertEqual(data_a["gpu_render_binding_details"]["vulkan_uuid"], "8680a656-0500-0000-0300-000000000000")
+            self.assertEqual(data_a["gpu_render_binding_details"]["drm_render_path"], "/dev/dri/by-path/pci-0000:03:00.0-render")
+
+            # Run Playback B (AUTO_FALLBACK)
+            fallback_binding = {
+                "status": "AUTO_FALLBACK",
+                "pci_address": None,
+                "drm_render_path": None,
+                "vulkan_uuid": None,
+                "vulkan_device_name": None,
+                "reason": "GPU_UNAVAILABLE",
+                "evidence": ["test_fallback"],
+                "mpv_args": [],
+            }
+            play_mod.private_state(home, media, source, {
+                "kind": "local",
+                "gpu_render_binding_details": fallback_binding,
+                "gpu_binding_details": fallback_binding,
+            })
+
+            data_b = json.loads(diag_file.read_text(encoding="utf-8"))
+            self.assertEqual(data_b["gpu_render_binding_details"]["status"], "AUTO_FALLBACK")
+            self.assertIsNone(data_b["gpu_render_binding_details"]["vulkan_uuid"])
+            self.assertIsNone(data_b["gpu_render_binding_details"]["drm_render_path"])
+            raw_b = diag_file.read_text(encoding="utf-8")
+            self.assertNotIn("8680a656-0500-0000-0300-000000000000", raw_b)
+            self.assertNotIn("0000:03:00.0", raw_b)
+
+    def test_21_decode_policy_unavailable_when_runtime_config_missing(self):
+        policy_path = PAYLOAD / "openhtpc-playback-policy.py"
+        spec = importlib.util.spec_from_file_location("policy_test_21", policy_path)
+        pol = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pol)
+
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            (home / ".config/openhtpc").mkdir(parents=True)
+            (home / ".config/openhtpc/user-config.json").write_text(json.dumps({"presentation_mode": "PURE"}), encoding="utf-8")
+
+            res = pol.resolve(home, None, "local")
+            self.assertEqual(res["decode_policy"]["status"], "UNAVAILABLE")
+            self.assertIsNone(res["decode_policy"]["hwdec"])
+            self.assertEqual(res["decode_policy"]["physical_gpu_binding"], "NOT_PROVEN")
+
 if __name__ == "__main__":
     unittest.main()

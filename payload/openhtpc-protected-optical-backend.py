@@ -90,6 +90,8 @@ def atomic_diagnostic(home:pathlib.Path,command:list[str],request:dict[str,Any],
     target_info = decision.get("audio_target") or {}
     data={"schema":1,"argv":command,"device":request.get("device"),"generation":request.get("generation"),
           "requested_audio_mode":(decision.get("audio_output") or {}).get("requested","PCM"),
+          "gpu_render_binding":decision.get("gpu_render_binding") or decision.get("gpu_binding") or {},
+          "gpu_binding":decision.get("gpu_render_binding") or decision.get("gpu_binding") or {},
           "target_configured":target_info.get("configured","SYSTEM"),
           "target_configured_label":target_info.get("configured_label","SYSTEM"),
           "target_available":target_info.get("available",True),
@@ -152,6 +154,27 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",
              "--cache=yes","--demuxer-readahead-secs=12.0","--demuxer-max-bytes=268435456","--demuxer-max-back-bytes=67108864",
              f"--log-file={attempt}",*policy_args,f"--bluray-device={request['device']}","--","bd://"]
+    gpu_binding = decision.get("gpu_render_binding") or decision.get("gpu_binding") or {}
+    if gpu_binding:
+        runtime_helper = home / ".local/lib/openhtpc/openhtpc-runtime.py"
+        if not runtime_helper.is_file():
+            runtime_helper = pathlib.Path(__file__).with_name("openhtpc-runtime.py")
+        if runtime_helper.is_file():
+            try:
+                subprocess.run(
+                    [
+                        str(runtime_helper), "log", "--component", "playback", "--event", "GPU_RENDER_BINDING",
+                        "--field", f"status={gpu_binding.get('status')}",
+                        "--field", f"pci_address={gpu_binding.get('pci_address') or ''}",
+                        "--field", f"drm_render_path={gpu_binding.get('drm_render_path') or ''}",
+                        "--field", f"vulkan_uuid={gpu_binding.get('vulkan_uuid') or ''}",
+                        "--field", f"reason={gpu_binding.get('reason') or ''}",
+                    ],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=2, check=False,
+                )
+            except Exception:
+                pass
     started=clock()
     try:
         completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())

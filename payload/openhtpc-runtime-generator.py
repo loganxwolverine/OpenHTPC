@@ -112,8 +112,6 @@ def generate(profile_path: pathlib.Path, pure_path: pathlib.Path,
             backend_content += (
                 f"hwdec-codecs={MPV_DEFAULT_HWDEC_CODEC_WHITELIST},mpeg2video\n"
             )
-        if decode_api == "vaapi":
-            backend_content += f"vaapi-device={processing['render_node']}\n"
         pure_content = (
             provenance + "# OPENHTPC Build 4 — profil PURE isolé\n"
             "# Générée depuis profile.json ; ne pas copier dans ~/.config/mpv/mpv.conf\n"

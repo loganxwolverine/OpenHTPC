@@ -71,7 +71,7 @@ class Dev14UpdateRuntimeRegeneration(unittest.TestCase):
     def test_02_current_mpv_policy_and_hardware_path_are_materialized(self):
         self.generate(); pure = (self.runtime / "pure.conf").read_text()
         self.assertIn("vo=gpu-next", pure); self.assertIn("gpu-api=vulkan", pure)
-        self.assertIn("hwdec=vaapi", pure); self.assertIn("vaapi-device=/dev/dri/renderD128", pure)
+        self.assertIn("hwdec=vaapi", pure); self.assertNotIn("vaapi-device", pure)
 
     def test_03_stale_runtime_policy_cannot_survive(self):
         result = self.generate()
@@ -207,6 +207,18 @@ raise SystemExit(0)
         self.assertIn("refresh canonique des capacités a échoué", installer)
         self.assertIn("La régénération du runtime courant a échoué", installer)
         self.assertNotIn('"$INSTALLED_BUILDER" --regenerate-runtime || true', installer)
+
+    def test_15_upgrade_removes_existing_static_vaapi_device(self):
+        (self.runtime / "pure.conf").write_text("hwdec=vaapi\nvaapi-device=/dev/dri/renderD129\n", encoding="utf-8")
+        (self.runtime / "reference.conf").write_text("vaapi-device=/dev/dri/renderD129\n", encoding="utf-8")
+        self.generate()
+        pure = (self.runtime / "pure.conf").read_text(encoding="utf-8")
+        ref = (self.runtime / "reference.conf").read_text(encoding="utf-8")
+        self.assertNotIn("vaapi-device", pure)
+        self.assertNotIn("renderD129", pure)
+        self.assertNotIn("renderD128", pure)
+        self.assertNotIn("vaapi-device", ref)
+        self.assertNotIn("renderD129", ref)
 
 
 if __name__ == "__main__":

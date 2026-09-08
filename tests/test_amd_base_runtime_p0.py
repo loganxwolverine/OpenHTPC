@@ -71,7 +71,7 @@ class AmdBaseRuntimeP0(unittest.TestCase):
         self.assertEqual(result["runtime_profiles"]["available"], ["PURE", "REFERENCE"])
         self.assertEqual(result["runtime_profiles"]["profiles"]["PURE"]["validation_status"], "validation_pending")
         self.assertIn("hwdec=vaapi", pure)
-        self.assertIn("vaapi-device=/dev/dri/renderD-test", pure)
+        self.assertNotIn("vaapi-device", pure)
 
     def test_amd_without_hardware_vulkan_is_blocked(self):
         result, pure, failure = execute(profile("amd", vulkan=False))

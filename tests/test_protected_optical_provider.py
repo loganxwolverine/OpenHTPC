@@ -172,7 +172,7 @@ class ProtectedOpticalDoctor(unittest.TestCase):
 class RuntimeNonRegression(unittest.TestCase):
     def test_intel_amd_nvidia_runtime_sources_match_rc2(self):
         expected = {
-            "openhtpc-runtime-generator.py":"23fd987072b622ef1c37b211a134eb867f0c20626e1ed54685d95853096bf285",
+            "openhtpc-runtime-generator.py":"f40d24200b1a716c1d053d5403969ae1230f52e5a22c3cadb24edc233ddbe8c2",
             "openhtpc-gpu-policy.py":"3dda5810fede4b25e414029dceeb214d0a27b016575cbecbae20f960ca96407b",
             "openhtpc-builder.sh":"076576b513d3578d5961ca9aa5f8b6d1b2076daca10d72814ec16118858a70b8",
         }

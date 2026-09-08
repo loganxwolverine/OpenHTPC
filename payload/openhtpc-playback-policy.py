@@ -64,6 +64,29 @@ def _load_audio_module():
     return None
 
 
+def _load_gpu_runtime_module():
+    try:
+        import openhtpc_gpu_runtime
+        return openhtpc_gpu_runtime
+    except ImportError:
+        pass
+    for loc in (
+        pathlib.Path(__file__).resolve().parent / "openhtpc-gpu-runtime.py",
+        pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", "")) / "openhtpc-gpu-runtime.py",
+        pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-gpu-runtime.py",
+    ):
+        if loc.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_gpu_runtime", loc)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+            except Exception:
+                pass
+    return None
+
+
 def read_audio_output_target(home: pathlib.Path) -> dict:
     try:
         data = json.loads(config_path(home).read_text(encoding="utf-8"))
@@ -640,7 +663,8 @@ def probe_media(path: pathlib.Path, ffprobe: str | None = None) -> dict | None:
 
 
 def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "local", probe: dict | None = None,
-            optical_state: dict | None = None, *, audio_outputs: list[dict] | None = None) -> dict:
+            optical_state: dict | None = None, *, audio_outputs: list[dict] | None = None,
+            gpu_binding: dict[str, Any] | None = None) -> dict:
     prefs = read_preferences(home)
     if probe is None and media is not None: probe = probe_media(media)
     requested = prefs["presentation_mode"]
@@ -658,6 +682,35 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
     audio_output = choose_audio_output(prefs["audio_output_mode"], effective_audio_track)
     subtitle = (choose_dvd_subtitle(prefs["subtitle_policy"], optical_state)
                 if kind == "dvd" else choose_subtitle(prefs["subtitle_policy"], probe))
+
+    # Dynamic GPU binding resolution (RC7 T8.1B2)
+    if gpu_binding is None:
+        gpu_mod = _load_gpu_runtime_module()
+        if gpu_mod and hasattr(gpu_mod, "resolve_playback_gpu_binding"):
+            try:
+                gpu_binding = gpu_mod.resolve_playback_gpu_binding()
+            except Exception:
+                gpu_binding = {
+                    "status": "AUTO_FALLBACK",
+                    "pci_address": None,
+                    "drm_render_path": None,
+                    "vulkan_uuid": None,
+                    "vulkan_device_name": None,
+                    "reason": "RESOLVER_EXCEPTION",
+                    "evidence": [],
+                    "mpv_args": [],
+                }
+        else:
+            gpu_binding = {
+                "status": "AUTO_FALLBACK",
+                "pci_address": None,
+                "drm_render_path": None,
+                "vulkan_uuid": None,
+                "vulkan_device_name": None,
+                "reason": "RESOLVER_UNAVAILABLE",
+                "evidence": [],
+                "mpv_args": [],
+            }
 
     # Audio output target resolution (RC7 T7.2)
     target_config = read_audio_output_target(home)
@@ -715,9 +768,52 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
         "descriptor": effective_target,
     }
 
-    mpv_args = [*audio["mpv_args"], *audio_output["mpv_args"], *mpv_device_args, *subtitle["mpv_args"]]
-    return {"presentation": presentation, "audio": audio, "audio_output": audio_output, "subtitle": subtitle,
-            "audio_target": audio_target_diag, "mpv_args": mpv_args, "kind": kind}
+    hwdec = None
+    hwdec_status = "UNAVAILABLE"
+    pure_conf_path = home / ".config/openhtpc/runtime/mpv/pure.conf"
+    if not pure_conf_path.is_file():
+        try:
+            profile_path = home / ".config/openhtpc/profile.json"
+            if profile_path.is_file():
+                prof = json.loads(profile_path.read_text(encoding="utf-8"))
+                cand = prof.get("runtime_profiles", {}).get("profiles", {}).get("PURE", {}).get("config_path")
+                if cand and pathlib.Path(cand).is_file():
+                    pure_conf_path = pathlib.Path(cand)
+        except (OSError, ValueError, KeyError):
+            pass
+
+    if pure_conf_path.is_file():
+        try:
+            for conf_line in pure_conf_path.read_text(encoding="utf-8").splitlines():
+                line = conf_line.strip()
+                if line.startswith("hwdec=") and not line.startswith("#"):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        hwdec = val
+                        hwdec_status = "OBSERVED"
+        except OSError:
+            pass
+
+    decode_policy = {
+        "status": hwdec_status,
+        "hwdec": hwdec,
+        "physical_gpu_binding": "NOT_PROVEN",
+    }
+
+    mpv_gpu_args = list(gpu_binding.get("mpv_args", []))
+    mpv_args = [*mpv_gpu_args, *audio["mpv_args"], *audio_output["mpv_args"], *mpv_device_args, *subtitle["mpv_args"]]
+    return {
+        "presentation": presentation,
+        "audio": audio,
+        "audio_output": audio_output,
+        "subtitle": subtitle,
+        "audio_target": audio_target_diag,
+        "gpu_binding": gpu_binding,
+        "gpu_render_binding": gpu_binding,
+        "decode_policy": decode_policy,
+        "mpv_args": mpv_args,
+        "kind": kind,
+    }
 
 
 def osd_text(decision: dict) -> str:
