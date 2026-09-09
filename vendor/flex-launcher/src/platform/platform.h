@@ -1,3 +1,5 @@
+#include <sys/types.h>
+
 #ifdef _WIN32
 #define FILE_MODE_WRITE "wt"
 #else
@@ -10,6 +12,7 @@ bool directory_exists(const char *path);
 void get_region(char *buffer);
 void scan_slideshow_directory(Slideshow *slideshow, const char *directory);
 bool start_process(char *cmd, bool application, bool replace_launcher);
+pid_t start_process_tracked(char *cmd);
 bool run_process_sync(char *cmd);
 void scmd_shutdown(void);
 void scmd_restart(void);

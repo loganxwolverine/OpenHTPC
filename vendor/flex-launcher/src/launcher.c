@@ -13,12 +13,16 @@
 #include <launcher_config.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <errno.h>
 #include "image.h"
 #include "util.h"
 #include "debug.h"
 #include "clock.h"
 #include "platform/platform.h"
 
+static void pre_launch(void);
+static void post_launch(void);
 static void init_sdl(void);
 static void init_sdl_image(void);
 static void create_window(void);
@@ -653,6 +657,9 @@ static void draw_home_card(const SDL_Rect *icon_rect, bool selected)
 // A function to handle key presses from keyboard
 static void handle_keypress(SDL_Keysym *key)
 {
+    if (!tracked_is_interaction_allowed())
+        return;
+
     if (config.debug)
         log_debug("Key %s (#%X) detected", SDL_GetKeyName(key->sym), key->sym);
 
@@ -2177,6 +2184,12 @@ static void draw_screen()
 // A function to execute the user's command
 static void execute_command(const char *command)
 {
+    if (command == NULL)
+        return;
+
+    if (!tracked_guard_command(command))
+        return;
+
     // Copy command into separate buffer
     char *cmd = strdup(command);
 
@@ -2193,6 +2206,41 @@ static void execute_command(const char *command)
             char *fork_command = strtok(NULL, "");
             if (fork_command != NULL)
                 start_process(fork_command, false, false);
+        }
+        else if (!strcmp(special_command, SCMD_TRACKED)) {
+            char *tracked_command = strtok(NULL, "");
+            if (tracked_command == NULL || strlen(tracked_command) == 0) {
+                log_error("No command specified for :tracked");
+                free(cmd);
+                return;
+            }
+            while (*tracked_command == ' ')
+                tracked_command++;
+            if (*tracked_command == '\0') {
+                log_error("Empty command specified for :tracked");
+                free(cmd);
+                return;
+            }
+            if (!tracked_can_launch()) {
+                log_debug("Tracked process already running (pid %d), rejecting launch", tracked_get_pid());
+                free(cmd);
+                return;
+            }
+            pid_t pid = start_process_tracked(tracked_command);
+            if (pid > 0) {
+                tracked_start(pid);
+                state.application_running = true;
+                state.application_launching = false;
+                pre_launch();
+                if (config.on_launch == ON_LAUNCH_BLANK) {
+                    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF);
+                    SDL_RenderClear(renderer);
+                    SDL_RenderPresent(renderer);
+                }
+                log_debug("Started tracked application with pid %d", pid);
+            } else {
+                log_error("Failed to start tracked process: %s", tracked_command);
+            }
         }
         else if (!strcmp(special_command, SCMD_APPLY_BACK)) {
             char *settings_command = strtok(NULL, "");
@@ -2372,6 +2420,9 @@ static void disconnect_gamepad(int id, bool disconnect, bool remove)
 // A function to poll the connected gamepad for commands
 static void poll_gamepad()
 {
+    if (!tracked_guard_controller())
+        return;
+
     int value_multiplier = 1; // Handles positive or negative axis safely for malformed mappings
     bool pressed;
     for (GamepadControl *i = gamepad_controls; i != NULL; i = i->next) {
@@ -2409,11 +2460,11 @@ static void poll_gamepad()
         if (i->repeat == 1) {
             log_debug("Gamepad %s detected", i->label);
             ticks.last_input = ticks.main;
-            execute_command(i->cmd);
+            tracked_handle_controller_action(i->cmd, execute_command);
         }
         else if (i->repeat == delay_period) {
             ticks.last_input = ticks.main;
-            execute_command(i->cmd);
+            tracked_handle_controller_action(i->cmd, execute_command);
             i->repeat -= repeat_period;
         }
     }
@@ -2550,7 +2601,7 @@ static void update_clock(bool block)
     }
 }
 
-static inline void pre_launch()
+static void pre_launch()
 {
     SDL_SetWindowAlwaysOnTop(window, SDL_FALSE);
     if (gamepads != NULL)
@@ -2563,7 +2614,7 @@ static inline void pre_launch()
 #endif
 }
 
-static inline void post_launch()
+static void post_launch()
 {
     SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
     SDL_RaiseWindow(window);
@@ -2773,11 +2824,15 @@ int main(int argc, char *argv[])
                     break;
 
                 case SDL_KEYDOWN:
+                    if (!tracked_is_interaction_allowed())
+                        break;
                     ticks.last_input = ticks.main;
                     handle_keypress(&event.key.keysym);
                     break;
                 
                 case SDL_MOUSEBUTTONDOWN:
+                    if (!tracked_is_interaction_allowed())
+                        break;
                     if (config.mouse_select && event.button.button == SDL_BUTTON_LEFT) {
                         ticks.last_input = ticks.main;
                         execute_command(current_entry->cmd);
@@ -2804,7 +2859,7 @@ int main(int argc, char *argv[])
                     if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                         log_debug("Lost keyboard focus");
                         state.has_focus = false;
-                        if (state.application_launching) {
+                        if (state.application_launching && tracked_can_restore_on_focus()) {
                             log_debug("Application detected");
                             state.application_launching = false;
                             state.application_running = true;
@@ -2834,7 +2889,13 @@ int main(int argc, char *argv[])
         }
 
         // Update application state
-        if (state.application_running && state.has_focus) {
+        if (tracked_is_active()) {
+            TrackedLifecycleStatus status = tracked_update(post_launch);
+            if (status == TRACKED_STATUS_FINISHED) {
+                state.application_running = false;
+            }
+        }
+        else if (state.application_running && state.has_focus) {
             state.application_running = false;
             post_launch();
             log_debug("Application finished");
@@ -2854,7 +2915,7 @@ int main(int argc, char *argv[])
             if (config.clock_enabled)
                 update_clock(false);
         }
-        if (state.application_launching &&
+        if (state.application_launching && tracked_can_restore_on_timeout() &&
         ticks.main - ticks.application_launched > config.application_timeout) {
             state.application_launching = false;
             if (config.on_launch == ON_LAUNCH_BLANK)

@@ -193,6 +193,68 @@ bool start_process(char *cmd, bool application, bool replace_launcher)
     return true;
 }
 
+/* Start a command asynchronously while retaining and returning the exact child
+ * process ID so Flex can track its lifecycle and reap only this specific child. */
+pid_t start_process_tracked(char *cmd)
+{
+    if (cmd == NULL)
+        return -1;
+
+    char *exec = NULL;
+    char *tmp = strdup(cmd);
+    char *file = strtok(tmp, DELIMITER_ACTION);
+    if (file != NULL && ends_with(file, EXT_DESKTOP)) {
+        Desktop desktop;
+        desktop.exec = NULL;
+
+        const char* const action = strtok(NULL, DELIMITER_ACTION);
+        if (action == NULL)
+            copy_string(desktop.section, DESKTOP_SECTION_HEADER, sizeof(desktop.section));
+        else
+            snprintf(desktop.section, sizeof(desktop.section), DESKTOP_SECTION_HEADER_ACTION, action);
+
+        int error = ini_parse(file, desktop_handler, &desktop);
+        if (error < 0) {
+            log_error("Desktop file '%s' not found", file);
+            free(tmp);
+            return -1;
+        }
+        if (desktop.exec == NULL) {
+            log_debug("No Exec line found in desktop file '%s'", cmd);
+            free(tmp);
+            return -1;
+        }
+        exec = desktop.exec;
+        strip_field_codes(exec);
+        cmd = exec;
+    }
+    free(tmp);
+
+    pid_t child_pid = fork();
+    switch (child_pid) {
+        case -1:
+            log_error("Could not fork tracked application process: %s", strerror(errno));
+            free(exec);
+            return -1;
+
+        case 0:
+            setpgid(0, 0);
+            const char *sh_file = "/bin/sh";
+            const char *sh_args[] = {
+                "sh",
+                "-c",
+                cmd,
+                NULL
+            };
+            execvp(sh_file, (char * const *) sh_args);
+            _exit(127);
+
+        default:
+            free(exec);
+            return child_pid;
+    }
+}
+
 /* Run a short settings command to completion without replacing or restarting
  * Flex.  This is used only for atomic preference-save-and-return actions. */
 bool run_process_sync(char *cmd)

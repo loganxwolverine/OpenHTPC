@@ -53,7 +53,7 @@ def write_menu(home,install,data):
   authority,contribution=protected_ui_policy(home,install,state)
   if authority=="PLUGIN_P2" and contribution.get("enabled") and contribution.get("action_intent")=="PLAY_CURRENT_OPTICAL_MEDIA":
    token=optical_model.playback_action_token(state,optical_model.protected_capability(home))
-   entries.append(("LIRE · "+data["title"],f"{install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)} --action-token {token}"))
+   entries.append(("LIRE · "+data["title"],f":tracked {install/'openhtpc-play-optical'} --device {shlex.quote(str(state.get('device') or ''))} --generation {int(state.get('generation',0) or 0)} --action-token {token}"))
   elif state.get("protection","UNKNOWN")=="PROTECTED":
    dev=shlex.quote(str(state.get("device") or ""))
    if dev: entries.append(("ÉJECTER",f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {dev}"))

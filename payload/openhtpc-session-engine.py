@@ -505,7 +505,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             device = shlex.quote(str(optical.get("device") or "")); generation = int(optical.get("generation", 0) or 0)
             token = _optical_model.playback_action_token(optical, _optical_model.protected_capability(home) if home else {})
             entries.append((f"LIRE LE {media_name}", media_play_icon,
-                            f":fork {install/'openhtpc-play-optical'} --device {device} --generation {generation} --action-token {token}"))
+                            f":tracked {install/'openhtpc-play-optical'} --device {device} --generation {generation} --action-token {token}"))
         elif not is_protected_unplayable:
             reason_labels = {
                 "PROTECTION_UNKNOWN":"PROTECTION NON DÉTERMINÉE",

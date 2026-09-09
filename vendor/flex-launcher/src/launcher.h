@@ -1,3 +1,6 @@
+#include <sys/types.h>
+#include "lifecycle.h"
+
 // Color masking bit logic
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 #define RMASK 0xff000000
@@ -43,6 +46,7 @@
 #define SCMD_SELECT ":select"
 #define SCMD_SUBMENU ":submenu"
 #define SCMD_FORK ":fork"
+#define SCMD_TRACKED ":tracked"
 #define SCMD_APPLY_BACK ":applyback"
 #define SCMD_REPLACE ":replace"
 #define SCMD_EXIT ":exit"
