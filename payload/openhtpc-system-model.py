@@ -105,10 +105,7 @@ def _display_summary(mode: dict | None, active: dict | None = None) -> str:
     hz = mode.get("refresh_hz")
     parts = [f"{w} × {h}"]
     if isinstance(hz, (int, float)):
-        if abs(hz - round(hz)) < 0.05:
-            parts.append(f"{int(round(hz))} Hz")
-        else:
-            parts.append(f"{hz:.2f} Hz")
+        parts.append(f"{hz:.3f} Hz")
     if isinstance(active, dict):
         hdr_mode = active.get("current_hdr_mode", {})
         hdr_status = hdr_mode.get("status") if isinstance(hdr_mode, dict) else hdr_mode
@@ -200,6 +197,18 @@ def _load_gpu_runtime(install: pathlib.Path | None = None):
     return None
 
 
+def _current_display(home, install, sys_root):
+    """Use the canonical passive display collector, never the saved Passport."""
+    try:
+        path = install / "openhtpc-capabilities.py"
+        spec = importlib.util.spec_from_file_location("openhtpc_display_capabilities", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.collect_display(home, install, sys_root=sys_root)
+    except (OSError, ImportError, AttributeError, ValueError, TypeError):
+        return {}
+
+
 def build(
     home: pathlib.Path,
     install: pathlib.Path,
@@ -209,6 +218,7 @@ def build(
     display_resolution: tuple[dict[str, Any] | None, str] | None = None,
     gpu_binding: dict[str, Any] | None = None,
     pure_conf_text: str | None = None,
+    display_snapshot: dict | None = None,
     sys_root: pathlib.Path = pathlib.Path("/sys"),
     dev_root: pathlib.Path = pathlib.Path("/dev"),
 ) -> dict:
@@ -220,7 +230,7 @@ def build(
     available = bool(caps)
     hardware = caps.get("hardware", {})
     graphics = caps.get("graphics", {})
-    display = caps.get("display", {})
+    display = display_snapshot if display_snapshot is not None else _current_display(home, install, sys_root)
     decode = caps.get("video_decode", {})
     audio = caps.get("audio", {})
     media = caps.get("media", {})
@@ -328,24 +338,13 @@ def build(
 
     active = display.get("active_output") if isinstance(display.get("active_output"), dict) else {}
     mode = active.get("current_mode") if isinstance(active.get("current_mode"), dict) else {}
-    if not mode and isinstance(display.get("outputs"), list):
-        for out in display.get("outputs"):
-            if isinstance(out, dict) and out.get("active") and isinstance(out.get("current_mode"), dict):
-                active = out
-                mode = out.get("current_mode")
-                break
-    if not mode and isinstance(active.get("available_modes"), list) and active.get("available_modes"):
-        first_mode = active.get("available_modes")[0]
-        if isinstance(first_mode, dict) and first_mode.get("width") and first_mode.get("height"):
-            mode = first_mode
-
     display_summary_str = _display_summary(mode, active)
-    res_str = f"{mode.get('width')} × {mode.get('height')}" if mode.get("width") and mode.get("height") else "Indéterminée"
+    res_str = f"{mode.get('width')} × {mode.get('height')}" if mode.get("width") and mode.get("height") else "Non déterminée"
     if isinstance(mode.get("refresh_hz"), (int, float)):
         hz = mode.get("refresh_hz")
-        ref_str = f"{int(round(hz))} Hz" if abs(hz - round(hz)) < 0.05 else f"{hz:.2f} Hz"
+        ref_str = f"{hz:.3f} Hz"
     else:
-        ref_str = "Indéterminée"
+        ref_str = "Non déterminée"
 
     # 3. Observed decode backend from effective pure.conf (No Passport fallback)
     hwdec_val = None
@@ -448,11 +447,14 @@ def build(
         "resolution": res_str,
         "refresh": ref_str,
         "summary": display_summary_str,
-        "scale": f"{active.get('scale'):.2f}" if isinstance(active.get("scale"), (int, float)) else "Indéterminée",
-        "depth": f"{active.get('color_depth', {}).get('current_bits')} bits" if isinstance(active.get("color_depth"), dict) and active.get("color_depth", {}).get("current_bits") else "Indéterminée",
-        "hdr_current": state(active.get("current_hdr_mode", {})),
-        "hdr_capable": state(active.get("hdr_capable", {})),
-        "hdr_pipeline": state(display.get("hdr_pipeline_validated", {})),
+        "scale": f"{active.get('scale') * 100:g} %" if isinstance(active.get("scale"), (int, float)) else "Non déterminée",
+        "depth": "Non déterminée",
+        "hdr_current": {"ACTIVE": "Activé", "INACTIVE": "Désactivé"}.get(active.get("current_hdr_mode", {}).get("status"), "Non déterminé"),
+        "hdr_capable": {"SUPPORTED": "Oui", "UNSUPPORTED": "Non"}.get(active.get("hdr_capable", {}).get("status"), "Non déterminé"),
+        "hdr_pipeline": "Non déterminé",
+        "session": "Wayland (KWin)" if display.get("session_context", {}).get("type") == "wayland" else "Non déterminé",
+        "resolver": "Observation KDE / KScreen",
+        "auto_refresh": "Non déterminé",
         "codecs": codecs,
         "codecs_subtitle": codecs_subtitle,
     }

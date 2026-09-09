@@ -40,6 +40,9 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.home = pathlib.Path(self.temp_dir.name)
         self.install = PAYLOAD
+        display_patch = mock.patch.object(sys_model, "_current_display", return_value={})
+        display_patch.start()
+        self.addCleanup(display_patch.stop)
         # Never load a host GPU runtime from a model test. Public API mocks
         # remain independently configurable by each authority test.
         self.gpu_runtime = mock.Mock()

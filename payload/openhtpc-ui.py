@@ -444,9 +444,9 @@ def system_page_png(
             (960, 510, 890, 340),
             "ENVIRONNEMENT D'AFFICHAGE",
             [
-                ("Gestionnaire de session", "Wayland (KWin)", None),
-                ("Résolveur de capacités", "Phase A Canonical Resolver", None),
-                ("Modes de rafraîchissement", "Prise en charge automatique", None),
+                ("Gestionnaire de session", d.get("session", "Non déterminé"), None),
+                ("Résolveur de capacités", d.get("resolver", "Non déterminé"), None),
+                ("Modes de rafraîchissement", "Non déterminé", None),
             ],
         )
     elif page == "audio":

@@ -135,10 +135,21 @@ def resolve_graphical_context(proc_root: pathlib.Path = pathlib.Path("/proc"), u
     candidates=[]
     try:entries=[item for item in proc_root.iterdir() if item.name.isdigit()]
     except OSError:entries=[]
-    priority={"kwin_wayland":0,"plasmashell":1,"startplasma-wayland":2}
+    priority={"kwin_wayland":0,"plasmashell":1,"startplasma-wayland":2,"plasma-keyboard":3}
     for process in entries:
         context=_process_context(process,uid)
         if not context or context[0] not in priority:continue
+        if context[0] == "plasma-keyboard":
+            # KWin may hide its environment; its same-user input helper inherits
+            # the compositor socket. Verify that parentage instead of guessing one.
+            try:
+                if context[1] != ["/usr/bin/plasma-keyboard"]:continue
+                status=(process/"status").read_text()
+                parent=proc_root/next(line.split()[1] for line in status.splitlines() if line.startswith("PPid:"))
+                if (parent/"comm").read_text().strip() != "kwin_wayland":continue
+                parent_status=(parent/"status").read_text()
+                if int(next(line.split()[1] for line in parent_status.splitlines() if line.startswith("Uid:"))) != uid:continue
+            except (OSError,StopIteration,ValueError):continue
         candidates.append((priority[context[0]],-int(process.name),context[0],context[2]))
     if not candidates:return {"status":"UNAVAILABLE","evidence":"NONE","environment":{}}
     _,_,name,safe=sorted(candidates)[0]
@@ -293,10 +304,107 @@ def parse_kscreen(text: str) -> list[dict[str, Any]]:
         if scale: display["scale"] = float(scale.group(1))
         hdr = re.search(r"^\s*HDR:\s*(enabled|disabled)", block, re.I|re.M)
         if hdr: display["current_hdr_mode"] = fact("ACTIVE" if hdr.group(1).lower()=="enabled" else "INACTIVE",["KDE"])
-        depth = re.search(r"Color resolution:\s*[^\n]*\((\d+)\)[^\n]*range:\s*\[(\d+);\s*(\d+)\]",block,re.I)
-        if depth: display["color_depth"]={"current_bits":int(depth.group(1)),"minimum_bits":int(depth.group(2)),"maximum_bits":int(depth.group(3)),"evidence":["KDE"]}
         displays.append(display)
     return displays
+
+
+def parse_kscreen_json(text: str) -> list[dict[str, Any]]:
+    """Current compositor state only; mode lists and maxBpc are not current state."""
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict) or not isinstance(data.get("outputs"), list):
+        return []
+    outputs = []
+    for raw in data["outputs"]:
+        if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
+            continue
+        connected = raw.get("connected") is True
+        active = connected and raw.get("enabled") is True
+        item = {"connector": raw["name"], "active": active, "connected": connected,
+                "current_mode": None, "available_modes": [], "hdr_capable": fact("UNKNOWN"),
+                "current_hdr_mode": fact("UNKNOWN"), "color_depth": {"current_bits": None}}
+        modes = raw.get("modes") if isinstance(raw.get("modes"), list) else []
+        matches = [m for m in modes if isinstance(m, dict) and isinstance(raw.get("currentModeId"), str)
+                   and m.get("id") == raw["currentModeId"]]
+        if active and len(matches) == 1:
+            mode = matches[0]; size = mode.get("size", {})
+            if isinstance(size, dict) and all(type(size.get(k)) is int and size[k] > 0 for k in ("width", "height")):
+                rate = mode.get("refreshRate")
+                rate = rate if type(rate) in (int, float) and 0 < rate < 1000 else None
+                item["current_mode"] = {**size, "refresh_hz": rate, "evidence": ["KSCREEN_CURRENT_MODE"]}
+        if active:
+            scale = raw.get("scale")
+            if type(scale) in (int, float) and 0 < scale < 20:
+                item["scale"] = scale
+            if type(raw.get("hdr")) is bool:
+                item["current_hdr_mode"] = fact("ACTIVE" if raw["hdr"] else "INACTIVE", ["KSCREEN_HDR"])
+        outputs.append(item)
+    return outputs
+
+
+def edid_hdr_capability(data: bytes) -> dict[str, Any]:
+    """Positive CTA HDR EOTF evidence only. Absence is not proof of no HDR."""
+    unknown = fact("UNKNOWN")
+    if len(data) < 128 or data[:8] != b"\x00\xff\xff\xff\xff\xff\xff\x00":
+        return unknown
+    if len(data) != 128 * (1 + data[126]) or any(sum(data[i:i+128]) % 256 for i in range(0, len(data), 128)):
+        return unknown
+    hdr = False
+    for offset in range(128, len(data), 128):
+        ext = data[offset:offset+128]
+        if ext[0] != 2:
+            continue
+        end = ext[2]
+        if end == 0:
+            continue
+        if not 4 <= end <= 127:
+            return unknown
+        i = 4
+        while i < end:
+            tag, length = ext[i] >> 5, ext[i] & 31
+            if i + 1 + length > end:
+                return unknown
+            block = ext[i+1:i+1+length]
+            if tag == 7 and block and block[0] == 6:
+                if length < 3:
+                    return unknown
+                hdr = hdr or bool(block[1] & 0x0e)
+            i += 1 + length
+    return fact("SUPPORTED", ["ACTIVE_CONNECTOR_EDID"]) if hdr else unknown
+
+
+def collect_display(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_runner,
+                    sys_root: pathlib.Path = pathlib.Path("/sys"), proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict[str, Any]:
+    """Bounded read-only KScreen query. Never substitute EDID modes for current modes."""
+    context = resolve_graphical_context(proc_root, home=home, install=install)
+    outputs = []; diagnostics = {}
+    if context.get("status") == "RESOLVED":
+        env = context.get("environment", {})
+        argv = ["env", "-u", "DISPLAY", "-u", "WAYLAND_DISPLAY", "-u", "XDG_RUNTIME_DIR",
+                "-u", "DBUS_SESSION_BUS_ADDRESS", *(f"{k}={v}" for k,v in env.items()), "kscreen-doctor", "-j"]
+        result = run_probe("display", argv, diagnostics, runner, 6)
+        if result.get("status") == "OK":
+            outputs = parse_kscreen_json(result.get("stdout", ""))
+    enabled = [o for o in outputs if o["active"]]
+    active = enabled[0] if len(enabled) == 1 else None
+    if active:
+        # Connector names are scoped to DRM cards: ambiguity must not choose a card.
+        paths = [p for p in (sys_root / "class/drm").glob("card*-*")
+                 if p.name.split("-", 1)[-1] == active["connector"]]
+        if len(paths) == 1:
+            try:
+                if (paths[0]/"status").read_text().strip() == "connected":
+                    active["hdr_capable"] = edid_hdr_capability((paths[0]/"edid").read_bytes())
+                else:
+                    active = None
+            except OSError:
+                pass
+    return {"outputs": outputs, "active_output": active, "hdr_pipeline_validated": fact("UNKNOWN"),
+            "session_context": {"status": context.get("status"), "evidence": context.get("evidence"),
+                                "type": context.get("environment", {}).get("XDG_SESSION_TYPE")},
+            "probe_diagnostics": diagnostics}
 
 
 def fallback_displays(sys_root: pathlib.Path) -> list[dict[str, Any]]:
@@ -535,10 +643,9 @@ def generate(
                 "validated_playback": fact("VALIDATED" if val_any else "UNVALIDATED", ["OPENHTPC_RUNTIME_TEST"] if val_any else [], val_any),
             }
         devices_codec_matrix[pci_norm] = gpu_mat
-    graphical=resolve_graphical_context(proc_root,home=home,install=install)
-    graphical_argv=["env","-u","DISPLAY","-u","WAYLAND_DISPLAY","-u","XDG_RUNTIME_DIR","-u","DBUS_SESSION_BUS_ADDRESS",*(f"{key}={value}" for key,value in graphical.get("environment",{}).items()),"kscreen-doctor","-o"] if graphical.get("status")=="RESOLVED" else ["kscreen-doctor","-o"]
-    kscreen = run_probe("display", graphical_argv, diagnostics, runner, 6)
-    displays = parse_kscreen(kscreen.get("stdout", "")) if kscreen.get("status") == "OK" else fallback_displays(sys_root)
+    display_state = collect_display(home, install, runner, sys_root, proc_root)
+    displays = display_state["outputs"]
+    diagnostics.update(display_state.pop("probe_diagnostics"))
     for gpu in gpus: gpu["active"] = False if displays else None
     for output in displays:
         if not output.get("active"): continue
@@ -565,7 +672,7 @@ def generate(
         for item in detected.get("optical_drives",[]) if isinstance(detected.get("optical_drives"),list) else []:
             device=item.get("path") if isinstance(item,dict) else item
             if isinstance(device,str): optical_devices.append({"device":device,"detected":True,"dvd_readable":fact("UNKNOWN",["HARDWARE_PASSPORT"]),"bluray_drive_capability":fact("UNKNOWN"),"libredrive":fact("UNKNOWN")})
-    active_display=next((item for item in displays if item.get("active")),None)
+    active_display=display_state["active_output"]
     snapshot={"schema":SCHEMA,"probe_version":PROBE_VERSION,"generated_at":datetime.datetime.now(datetime.timezone.utc).isoformat(),
       "hardware_fingerprint":hardware_fingerprint,"runtime_fingerprint":runtime_fingerprint,
       "hardware":{"system":{"manufacturer":_read_safe(sys_root/"class/dmi/id/sys_vendor"),"model":_read_safe(sys_root/"class/dmi/id/product_name")},
@@ -574,7 +681,7 @@ def generate(
       "graphics":{"devices":gpus,"vulkan":{"loader":fact("AVAILABLE" if vulkan.get("status")=="OK" else "UNAVAILABLE" if vulkan.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["VULKAN"]),"devices":vulkan_devices},
                   "vaapi":{"status":fact("AVAILABLE" if va_observed else "UNAVAILABLE" if all(diagnostics.get(f"vaapi_{i}",{}).get("status")=="COMMAND_UNAVAILABLE" for i in range(max(1,len(raw_nodes)))) else "UNKNOWN",["VAAPI"] if va_observed else []),"drivers":sorted(set(va_drivers)),"render_nodes":raw_nodes},
                   "opengl":fact("UNKNOWN")},
-      "display":{"outputs":displays,"active_output":active_display,"configured":user.get("display") if isinstance(user.get("display"),dict) else {},"hdr_pipeline_validated":fact("UNVALIDATED"),"session_context":{"status":graphical.get("status"),"evidence":graphical.get("evidence")}},
+      "display":{**display_state,"configured":user.get("display") if isinstance(user.get("display"),dict) else {}},
       "video_decode":{"ffmpeg":{"status":fact("AVAILABLE" if ffmpeg.get("status")=="OK" else "UNAVAILABLE" if ffmpeg.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["FFMPEG"]),"version":(ffver.get("stdout","").splitlines() or [None])[0]},
                       "mpv":{"status":fact("AVAILABLE" if mpv.get("status")=="OK" else "UNAVAILABLE" if mpv.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["MPV"]),"version":(mpv.get("stdout","").splitlines() or [None])[0],"gpu_next":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"])},"codecs":codec_matrix,"devices":devices_codec_matrix},
       "audio":audio,
