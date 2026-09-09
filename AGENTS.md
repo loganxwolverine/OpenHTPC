@@ -358,6 +358,132 @@ policy output.
 Dispatchers must not independently rediscover GPUs.
 
 
+## Process lifecycle truth — frozen
+
+Window focus state is NOT process lifecycle truth.
+
+Specifically:
+
+FOCUS GAINED != PROCESS TERMINATED
+FOCUS LOST   != PROCESS STARTED
+
+A UI/application launcher must never infer process completion
+solely from:
+
+- focus regain
+- focus loss
+- presentation state
+- timeout expiry
+- window visibility
+
+when correctness requires real lifecycle ownership.
+
+
+## Tracked child ownership
+
+When OPENHTPC requires a guaranteed external playback lifecycle,
+the launcher must explicitly own and track the exact child
+process responsible for that lifecycle.
+
+Required model:
+
+launch owned child
+→ retain exact PID
+→ keep UI lifecycle guarded
+→ observe exact child termination
+→ reap exact child
+→ restore UI
+
+Do not use:
+
+- process-name matching
+- wait(NULL)
+- waitpid(-1, ...)
+- killall
+- pkill
+- focus heuristics
+- synthetic completion
+
+
+## Protected optical lifecycle
+
+Protected optical playback uses explicit tracked launch
+semantics.
+
+Current invariant:
+
+Flex
+→ tracked protected dispatcher
+→ protected backend
+→ synchronous MPV
+→ real MPV exit
+→ T8.5 runtime observation written
+→ dispatcher exits
+→ Flex reaps exact dispatcher PID
+→ Flex restores UI
+
+This ordering is mandatory.
+
+Flex must NOT restore before the owned dispatcher exits.
+
+T8.5 observation remains owned by playback backend/policy,
+not by Flex.
+
+
+## Tracked completion proof
+
+Normal tracked completion is proven only by:
+
+waitpid(owned_pid, ...) == owned_pid
+
+For tracked lifecycle:
+
+ECHILD is NOT normal completion.
+
+ECHILD means process-ownership/following evidence was lost.
+
+Current policy:
+FAIL CLOSED.
+
+On ECHILD:
+
+- do not call normal restoration
+- do not clear tracked ownership state
+- do not infer successful completion
+- keep conflicting interaction guarded
+- emit diagnostic without log flooding
+
+
+## Tracked interaction guard
+
+While tracked playback is active:
+
+- second playback launch must be rejected
+- conflicting optical/eject actions must be rejected
+- keyboard/mouse/controller command execution must respect the
+  same shared tracked-lifecycle guard
+
+Do not implement separate independent lifecycle policies for
+different input devices.
+
+
+## Single source of truth for lifecycle
+
+Tracked lifecycle decisions must have one production
+implementation.
+
+Current production authority:
+
+vendor/flex-launcher/src/lifecycle.c
+vendor/flex-launcher/src/lifecycle.h
+
+Flex production code and lifecycle tests must consume the same
+implementation.
+
+Tests must not reimplement or mirror the tracked lifecycle
+state machine.
+
+
 ## Playback runtime truth
 
 Keep these truths separate.
@@ -425,6 +551,26 @@ actual runtime evidence.
 
 Do not present the previous completed playback as current live
 playback truth.
+
+
+## T8.5 happens-before rule
+
+For protected optical normal completion:
+
+canonical T8.5 runtime mutation must happen BEFORE dispatcher
+termination.
+
+Dispatcher termination must happen BEFORE Flex restoration.
+
+Required ordering:
+
+T8.5 mutation
+<
+dispatcher exit
+<=
+Flex restoration
+
+Do not synthesize or reorder this lifecycle.
 
 
 ## Current-state ownership rule
@@ -568,6 +714,27 @@ If an existing assertion changes, explain which intentional
 architectural change invalidated the previous expectation.
 
 
+## Testability contract
+
+For critical process lifecycle behavior:
+
+tests must execute the actual production lifecycle
+implementation.
+
+Source-text/grep assertions alone are insufficient proof for:
+
+- child ownership
+- ECHILD
+- normal reap
+- focus guard
+- timeout guard
+- controller guard
+- double activation
+- restoration ordering
+
+Synthetic tests must remain hermetic.
+
+
 ## Failure behavior
 
 When hardware identity cannot be proven:
@@ -639,6 +806,19 @@ actively try to invalidate its own implementation against:
 - unrelated weakened historical assertion
 - stale diagnostic state
 - tranche contamination
+- focus interpreted as process completion
+- timeout interpreted as process completion
+- tracked child not actually owned
+- wrong PID reaped
+- waitpid(-1) / global reap
+- ECHILD treated as normal completion
+- ECHILD clears tracked state
+- duplicate restoration
+- controller bypasses tracked guard
+- second playback launched while tracked child active
+- UI restored before canonical playback state mutation
+- lifecycle test reimplements production logic
+- distributed Flex binary not built from lifecycle.c
 
 If one is reproduced:
 fix it BEFORE reporting.
