@@ -741,8 +741,13 @@ def build(
         spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_model", policy_path)
         policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
         result["playback_policy"] = policy.read_preferences(home)
+        if hasattr(policy, "read_playback_runtime"):
+            result["playback_runtime"] = policy.read_playback_runtime(home)
+        else:
+            result["playback_runtime"] = read_json(home / ".local/state/openhtpc/playback-runtime-last.json") or None
     except (OSError, AttributeError, ImportError):
         result["playback_policy"] = {"presentation_mode":"PURE","audio_language_policy":"AUTO","subtitle_policy":"AUTO"}
+        result["playback_runtime"] = read_json(home / ".local/state/openhtpc/playback-runtime-last.json") or None
     if available:
         result["vulkan"] = clean(graphics.get("vulkan", {}).get("loader", {}).get("status"), "N/A")
         result["vaapi"] = clean(graphics.get("vaapi", {}).get("status", {}).get("status"), "N/A")

@@ -272,6 +272,17 @@ def main(argv: list[str] | None = None) -> int:
         append_event(log, kind="local", source_id=expected_source or "unknown", media="<redacted>", media_path_type="absolute" if pathlib.Path(media_arg).is_absolute() else "relative", media_exists=False, process_started=False, error_class=error)
         update_action_state(home,path_resolved=False,path_absolute=False,file_exists=False,process_started=False,error_class=error)
         if dispatch_requested:runtime_event(home,install,"MEDIA_PATH_RESOLVED",absolute=False,exists=False,error_class=error)
+        try:
+            policy_path = install / "openhtpc-playback-policy.py"
+            if policy_path.is_file():
+                spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_runtime", policy_path)
+                p_mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(p_mod)
+                if hasattr(p_mod, "record_playback_dispatch") and hasattr(p_mod, "record_playback_failure"):
+                    disp = p_mod.record_playback_dispatch(home, {}, kind="local")
+                    if isinstance(disp, dict) and disp.get("dispatch_id"):
+                        p_mod.record_playback_failure(home, reason=error, kind="local", dispatch_id=disp.get("dispatch_id"))
+        except Exception:
+            pass
         notify("Le fichier média est indisponible ou n'appartient plus à une source configurée.")
         return return_to_ui(home, install)
 
@@ -318,6 +329,14 @@ def main(argv: list[str] | None = None) -> int:
         runtime_event(home,install,"AUDIO_ROUTING",configured=audio_target.get("configured","SYSTEM"),configured_label=audio_target.get("configured_label","SYSTEM"),available=audio_target.get("available",True),effective=audio_target.get("effective","SYSTEM"),audio_mode=audio_target.get("audio_mode",requested_mode),fallback=audio_target.get("fallback",False))
     if pw_diag is not None:
         runtime_event(home,install,"AUDIO_PIPEWIRE_PREPARATION",status=pw_diag.get("iec958_prepare_status"),reason=pw_diag.get("iec958_prepare_reason"),attempted=pw_diag.get("iec958_prepare_attempted"),sink_id=pw_diag.get("audio_sink_id"))
+    dispatch_id = None
+    if hasattr(policy, "record_playback_dispatch"):
+        try:
+            disp_rec = policy.record_playback_dispatch(home, decision, kind="local")
+            if isinstance(disp_rec, dict):
+                dispatch_id = disp_rec.get("dispatch_id")
+        except Exception:
+            pass
     runtime_event(home,install, "PLAYBACK_BEGIN")
     runtime_event(home,install,"PLAYBACK_DISPATCHED")
     append_event(log, **common, event="PROCESS_STARTED", process_started=True)
@@ -337,6 +356,21 @@ def main(argv: list[str] | None = None) -> int:
     diagnostics = sanitize_output(raw, home, media)
     observed_audio = policy.record_audio_observation(home, decision, raw)
     runtime_event(home,install,"AUDIO_POLICY_OBSERVED",requested=observed_audio["requested"],source_codec=observed_audio["source_codec"],resolved=observed_audio["resolved"],passthrough=observed_audio["passthrough"],ao=observed_audio["ao"],audio_device=observed_audio["audio_device"])
+    if hasattr(policy, "record_playback_observation"):
+        try:
+            observed_playback = policy.record_playback_observation(home, decision, raw, exit_code=rc, kind="local", dispatch_id=dispatch_id)
+            if observed_playback and observed_playback.get("status") != "STALE_DISPATCH_IGNORED":
+                runtime_event(
+                    home, install, "PLAYBACK_RUNTIME_OBSERVED",
+                    render_status=observed_playback.get("render", {}).get("status"),
+                    render_pci=observed_playback.get("render", {}).get("pci_address"),
+                    decode_status=observed_playback.get("decode", {}).get("status"),
+                    decode_backend=observed_playback.get("decode", {}).get("backend"),
+                    hardware_active=observed_playback.get("decode", {}).get("hardware_active"),
+                    fallback=observed_playback.get("decode", {}).get("fallback"),
+                )
+        except Exception:
+            pass
     audio_refresh = install / "openhtpc-system-action"
     if audio_refresh.is_file():
         try: subprocess.run([str(audio_refresh), "audio"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=False)

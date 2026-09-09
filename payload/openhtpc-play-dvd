@@ -4,15 +4,32 @@ readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
 readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
 readonly PROFILE="$HOME_DIR/.config/openhtpc/profile.json"
 readonly OPTICAL_STATE="$HOME_DIR/.local/state/openhtpc/optical-current.json"
+fail_and_return_ui(){
+    local reason="${1:-DISPATCH_REFUSED}"
+    python3 -c '
+import importlib.util,pathlib,sys
+try:
+    spec=importlib.util.spec_from_file_location("p",sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+    disp_id = sys.argv[4] if len(sys.argv)>4 and sys.argv[4] else None
+    if not disp_id and hasattr(m, "record_playback_dispatch"):
+        rec = m.record_playback_dispatch(pathlib.Path(sys.argv[2]), {}, kind="dvd")
+        if isinstance(rec, dict):
+            disp_id = rec.get("dispatch_id")
+    if disp_id and hasattr(m, "record_playback_failure"):
+        m.record_playback_failure(pathlib.Path(sys.argv[2]), reason=sys.argv[3], kind="dvd", dispatch_id=disp_id)
+except Exception:pass
+' "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$reason" "${dispatch_id:-}" 2>/dev/null || true
+    return_ui
+}
 return_ui(){ [[ ${OPENHTPC_FLEX_RETAINED:-0} == 1 ]] && exit 0; exec "$INSTALL/openhtpc-dvd-ui"; }
-[[ $# -eq 1 && $1 == /dev/* ]] || return_ui
+[[ $# -eq 1 && $1 == /dev/* ]] || fail_and_return_ui "DVD_ARGUMENT_INVALID"
 device=$1
-state="$(cat "$OPTICAL_STATE" 2>/dev/null)" || return_ui
+state="$(cat "$OPTICAL_STATE" 2>/dev/null)" || fail_and_return_ui "DVD_STATE_UNAVAILABLE"
 python3 - "$device" "$state" <<'PY'
 import json,sys
 s=json.loads(sys.argv[2]); raise SystemExit(0 if s.get("state")=="DVD" and s.get("device")==sys.argv[1] else 1)
 PY
-[[ $? -eq 0 ]] || return_ui
+[[ $? -eq 0 ]] || fail_and_return_ui "DVD_STATE_INVALID"
 runtime="$(python3 - "$PROFILE" <<'PY'
 import json,pathlib,sys
 try:
@@ -21,11 +38,11 @@ try:
  print(c)
 except Exception: raise SystemExit(1)
 PY
-)" || return_ui
+)" || fail_and_return_ui "DVD_RUNTIME_INVALID"
 mkdir -p "$HOME_DIR/.local/state/openhtpc"
 printf '{"schema":1,"kind":"disc_sheet","device":"%s"}\n' "$device" >"$HOME_DIR/.local/state/openhtpc/playback-context.json"
 chmod 0600 "$HOME_DIR/.local/state/openhtpc/playback-context.json"
-log="$HOME_DIR/.local/state/openhtpc/playback.log"; mpv_bin="$(command -v mpv 2>/dev/null)" || return_ui
+log="$HOME_DIR/.local/state/openhtpc/playback.log"; mpv_bin="$(command -v mpv 2>/dev/null)" || fail_and_return_ui "MPV_UNAVAILABLE"
 generation="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("generation",0))' "$state" 2>/dev/null || printf 0)"
 
 readahead_args=()
@@ -176,14 +193,28 @@ gpu_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu
     --field "drm_render_path=$gpu_drm" --field "vulkan_uuid=$gpu_vulkan" \
     --field "reason=$gpu_reason"
 
+dispatch_id="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" <<'PY' 2>/dev/null || true
+import importlib.util,json,pathlib,sys
+spec=importlib.util.spec_from_file_location("p",sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+if hasattr(m, "record_playback_dispatch"):
+    rec=m.record_playback_dispatch(pathlib.Path(sys.argv[2]),json.loads(sys.argv[3]),kind="dvd")
+    if isinstance(rec, dict):
+        print(rec.get("dispatch_id",""))
+PY
+)"
+
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
 "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
-audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" <<'PY'
+audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" "$rc" "${dispatch_id:-}" <<'PY'
 import importlib.util,json,pathlib,sys
 spec=importlib.util.spec_from_file_location("openhtpc_dvd_audio_observation",sys.argv[1]);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-decision=json.loads(sys.argv[3]);raw=pathlib.Path(sys.argv[4]).read_text(encoding="utf-8",errors="replace")
-print(json.dumps(module.record_audio_observation(pathlib.Path(sys.argv[2]),decision,raw),sort_keys=True))
+home=pathlib.Path(sys.argv[2]);decision=json.loads(sys.argv[3]);raw=pathlib.Path(sys.argv[4]).read_text(encoding="utf-8",errors="replace")
+rc=int(sys.argv[5]) if len(sys.argv)>5 and sys.argv[5].isdigit() else 0
+disp_id=sys.argv[6] if len(sys.argv)>6 and sys.argv[6] else None
+if hasattr(module, "record_playback_observation"):
+    module.record_playback_observation(home, decision, raw, exit_code=rc, kind="dvd", dispatch_id=disp_id)
+print(json.dumps(module.record_audio_observation(home,decision,raw),sort_keys=True))
 PY
 )"
 rm -f -- "$dvd_attempt"

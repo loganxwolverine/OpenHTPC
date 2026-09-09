@@ -127,17 +127,41 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
               pw_runner:Callable[...,Any]|None=None)->dict[str,Any]:
     """Ask MPV's normal libbluray integration to open a validated device."""
     media_type=request.get("media_type");protection=request.get("protection")
-    if media_type not in MEDIA_TYPES:return {"status":"UNSUPPORTED","process_started":False,"reason":"MEDIA_TYPE_UNSUPPORTED"}
-    if protection not in {"UNPROTECTED","PROTECTED"}:return {"status":"UNSUPPORTED","process_started":False,"reason":"PROTECTION_UNKNOWN"}
+    policy,decision=playback_policy(home)
+    def fail_playback(reason: str) -> None:
+        if policy is None or not hasattr(policy, "record_playback_failure"):
+            return
+        try:
+            disp_id = None
+            if hasattr(policy, "record_playback_dispatch"):
+                disp_rec = policy.record_playback_dispatch(home, decision, kind="bluray")
+                if isinstance(disp_rec, dict):
+                    disp_id = disp_rec.get("dispatch_id")
+            if disp_id:
+                policy.record_playback_failure(home, decision, kind="bluray", reason=reason, dispatch_id=disp_id)
+        except Exception:
+            pass
+
+    if media_type not in MEDIA_TYPES:
+        fail_playback("MEDIA_TYPE_UNSUPPORTED")
+        return {"status":"UNSUPPORTED","process_started":False,"reason":"MEDIA_TYPE_UNSUPPORTED"}
+    if protection not in {"UNPROTECTED","PROTECTED"}:
+        fail_playback("PROTECTION_UNKNOWN")
+        return {"status":"UNSUPPORTED","process_started":False,"reason":"PROTECTION_UNKNOWN"}
     if protection=="PROTECTED" and request.get("provider_status")!="AVAILABLE":
+        fail_playback("PROVIDER_NOT_READY")
         return {"status":"NOT_CONFIGURED","process_started":False,"reason":"PROVIDER_NOT_READY"}
     mpv=finder("mpv")
-    if not mpv:return {"status":"OPEN_FAILED","process_started":False,"reason":"MPV_UNAVAILABLE"}
+    if not mpv:
+        fail_playback("MPV_UNAVAILABLE")
+        return {"status":"OPEN_FAILED","process_started":False,"reason":"MPV_UNAVAILABLE"}
     try:runtime=runtime_config(home)
-    except ValueError as error:return {"status":"OPEN_FAILED","process_started":False,"reason":str(error)}
+    except ValueError as error:
+        fail_playback(str(error))
+        return {"status":"OPEN_FAILED","process_started":False,"reason":str(error)}
     state_root=home/".local/state/openhtpc";state_root.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix="optical-mpv.",suffix=".log",dir=state_root);os.close(fd);attempt=pathlib.Path(name)
-    policy,decision=playback_policy(home);policy_args=effective_policy_args(decision)
+    policy_args=effective_policy_args(decision)
     requested_mode=(decision.get("audio_output") or {}).get("requested","PCM")
     pw_diag=None
     try:
@@ -175,6 +199,14 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
                 )
             except Exception:
                 pass
+    dispatch_id = None
+    if policy is not None and hasattr(policy, "record_playback_dispatch"):
+        try:
+            disp_rec = policy.record_playback_dispatch(home, decision, kind="bluray")
+            if isinstance(disp_rec, dict):
+                dispatch_id = disp_rec.get("dispatch_id")
+        except Exception:
+            pass
     started=clock()
     try:
         completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
@@ -189,6 +221,11 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     if policy is not None:
         try:policy.record_audio_observation(home,decision,raw)
         except (OSError,AttributeError,TypeError,ValueError):pass
+        if hasattr(policy, "record_playback_observation"):
+            try:
+                policy.record_playback_observation(home, decision, raw, exit_code=exit_code, kind="bluray", dispatch_id=dispatch_id)
+            except Exception:
+                pass
     if not opened:reason="DISC_OPEN_REFUSED" if exit_code!=127 else reason
     elif elapsed<0.75:reason="MPV_EXITED_IMMEDIATELY"
     status="OPEN_SUCCESS" if opened and elapsed>=0.75 else "OPEN_FAILED"
