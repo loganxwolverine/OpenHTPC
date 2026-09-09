@@ -209,30 +209,48 @@ decode_policy:
     physical_gpu_binding = NOT_PROVEN
 
 
-## Effective MPV runtime
+## Render vs decode — frozen distinction
 
-Effective generated runtime directory:
+T8.1B2/T8.5 contract:
+
+Vulkan render GPU:
+may be explicitly selected and PROVEN.
+
+Decode backend:
+may be OBSERVED.
+
+Physical decode GPU:
+remains NOT_PROVEN unless independently established.
+
+Do not use render-GPU capability tables to make negative
+per-GPU decode decisions while decode-GPU identity is
+NOT_PROVEN.
+
+
+## Effective MPV runtime authority
+
+Effective MPV runtime directory:
 
 ~/.config/openhtpc/runtime/mpv/
 
-Important files:
+Relevant generated files:
 
 pure.conf
 reference.conf
 
-Do not read obsolete:
+Do NOT use obsolete:
 
 runtime/pure.conf
 
-OBSERVED means the value was actually read from the
-effective runtime configuration.
+A value is OBSERVED only when actually read from the effective
+runtime configuration.
 
-If the value cannot be read:
+If missing/unreadable:
 
 status = UNAVAILABLE
 value = null
 
-Never report a default or guess as OBSERVED.
+Never expose a guessed/default value as OBSERVED.
 
 
 ## Runtime GPU configuration
@@ -262,6 +280,59 @@ Never inject VAAPI semantics into an NVDEC path.
 Physical decode GPU remains NOT_PROVEN unless separately proven.
 
 
+## Physical decode GPU — frozen
+
+For the current MPV 0.41 direct VAAPI/NVDEC architecture:
+
+observing the decode backend does NOT prove the physical
+decoder PCI identity.
+
+Current contract:
+
+physical_gpu_binding = NOT_PROVEN
+physical_gpu_pci = null
+
+Never infer physical decode GPU from:
+
+- Vulkan render GPU
+- Vulkan UUID
+- Hardware Passport
+- GPU marketing name
+- codec capability table
+- VAAPI/NVDEC backend name
+- free-form log marker
+
+A future tranche may promote this only from an independently
+trustworthy runtime source.
+
+
+## Negative hwdec policy — frozen
+
+A per-GPU negative decoding decision such as:
+
+--hwdec=no
+codec exclusion
+forced software decoding
+
+requires PROVEN physical decode-GPU identity.
+
+RENDER GPU identity is insufficient.
+
+If:
+
+physical_gpu_binding = NOT_PROVEN
+
+GPU-specific capability information may be diagnostic,
+but MUST NOT be used to disable hardware decoding.
+
+Hardware Passport codec capabilities are not runtime decode
+authority unless identity AND freshness have independently
+been proven.
+
+Positive MPV capability enablement is permitted when MPV
+retains a safe software fallback.
+
+
 ## Audio — frozen T7
 
 GPU work must not regress:
@@ -285,6 +356,164 @@ Local files, DVD and protected Blu-ray dispatchers consume
 policy output.
 
 Dispatchers must not independently rediscover GPUs.
+
+
+## Playback runtime truth
+
+Keep these truths separate.
+
+RENDER GPU:
+PROVEN only from trustworthy MPV Vulkan runtime evidence
+associated with the bound Vulkan UUID.
+
+DECODE BACKEND:
+OBSERVED only from MPV decode runtime evidence.
+
+HARDWARE/SOFTWARE DECODE:
+OBSERVED only from chronological MPV decode transitions.
+
+PHYSICAL DECODE GPU:
+NOT_PROVEN unless independently proven.
+
+Never promote one semantic state into another merely because
+they are likely to refer to the same hardware.
+
+
+## MPV log authority
+
+For runtime playback observation:
+
+Render evidence is accepted only from:
+
+[vo/gpu-next/libplacebo]
+
+Decode evidence is accepted only from:
+
+[vd]
+
+Do not treat matching strings from:
+
+[ao]
+[cplayer]
+[other]
+or unrelated components
+
+as render/decode truth.
+
+Parsing must:
+
+- be chronological
+- associate evidence to the correct Vulkan device
+- fail closed on ambiguity
+- never combine evidence from different device blocks
+
+
+## Post-mortem playback semantics
+
+Current T8.5 observation is POST-MORTEM, not live telemetry.
+
+During playback:
+
+dispatch_status = DISPATCHED
+render.status = NOT_PROVEN
+decode.status = UNAVAILABLE
+
+After the matching MPV process completes:
+
+the observation may become PROVEN / OBSERVED according to
+actual runtime evidence.
+
+Do not present the previous completed playback as current live
+playback truth.
+
+
+## Current-state ownership rule
+
+Atomic rename protects file integrity.
+
+It does NOT make read/check/write ownership atomic.
+
+Any persisted current-session state shared by multiple
+processes must serialize the COMPLETE transaction:
+
+LOCK
+READ
+VALIDATE OWNER
+DECIDE
+WRITE / ATOMIC REPLACE
+UNLOCK
+
+The ownership comparison must occur while the same lock is held
+that protects the replacement.
+
+Never:
+
+READ
+CHECK OWNER
+UNLOCK / NO LOCK
+WRITE LATER
+
+based on a stale ownership decision.
+
+
+## Playback dispatch ID contract
+
+Every playback dispatch owns a unique opaque dispatch_id.
+
+All completion/failure mutations belonging to that playback
+must explicitly carry that dispatch_id.
+
+Missing / None / empty dispatch_id:
+
+MUST NOT mutate current playback state.
+
+Never infer or borrow dispatch_id from the currently persisted
+state.
+
+A stale completion/failure must never overwrite a newer
+dispatch.
+
+
+## Inter-process locking
+
+For playback-runtime current-state ownership:
+
+use an inter-process lock around the full transaction.
+
+Current implementation uses:
+
+fcntl.flock(..., LOCK_EX)
+
+on the dedicated runtime lock file.
+
+Lock release and file-descriptor cleanup must occur reliably
+even on exception.
+
+Atomic JSON replacement occurs while ownership lock remains
+held.
+
+
+## Persisted JSON is untrusted input
+
+Persistent runtime state must always be validated before use.
+
+Validate exact expected types BEFORE:
+
+- enum membership
+- hash/set lookup
+- semantic interpretation
+
+Do not assume a value is a string or hashable.
+
+Malformed, partial, wrong-schema, wrong-type or corrupt state
+must:
+
+- fail closed
+- never crash system-model
+- never become PROVEN / OBSERVED truth
+
+Handle Python bool/int distinction explicitly where the schema
+requires an exact bool or int.
 
 
 ## Deployment
@@ -385,21 +614,34 @@ Before reporting:
 
 ## Mandatory self-review
 
-Before returning a successful implementation, actively search
-for:
+Before reporting any future tranche as ready, Builder must
+actively try to invalidate its own implementation against:
 
 - wrong runtime path
 - repository/install mismatch
 - stale generated configuration
-- guessed value labelled OBSERVED
-- render/decode semantic confusion
+- guessed/default value reported as OBSERVED
+- render/decode identity conflation
+- negative hwdec decision without proven decoder identity
+- stale playback completion
+- stale playback failure
+- missing dispatch_id
+- borrowed session ownership
+- non-atomic read/check/write transaction
+- malformed persisted JSON
+- bool/int schema confusion
+- cross-device Vulkan association
+- generic log substring matching
+- stale decode fallback reason
+- free-form physical decode proof
 - Intel/AMD/NVIDIA backend regression
-- host-dependent synthetic test
-- unrelated weakened assertion
+- host-dependent synthetic tests
+- unrelated weakened historical assertion
 - stale diagnostic state
 - tranche contamination
 
-Fix discovered issues before reporting.
+If one is reproduced:
+fix it BEFORE reporting.
 
 
 ## Git
