@@ -205,6 +205,7 @@ def parse_vulkan(text: str) -> list[dict[str, Any]]:
 
 CODECS = {
     "mpeg2": ("mpeg2video", ("VAProfileMPEG2",)),
+    "vc1": ("vc1", ("VAProfileVC1Simple", "VAProfileVC1Main", "VAProfileVC1Advanced")),
     "h264_8bit": ("h264", ("VAProfileH264",)),
     "hevc_main": ("hevc", ("VAProfileHEVCMain ", "VAProfileHEVCMain:")),
     "hevc_main10": ("hevc", ("VAProfileHEVCMain10",)),
@@ -241,7 +242,7 @@ def parse_nvidia_smi(text: str) -> dict[str, dict[str, str]]:
 
 
 def nvdec_profiles(decoders: set[str]) -> dict[str, bool]:
-    return {
+    res = {
         "mpeg2": "mpeg2_cuvid" in decoders,
         "h264_8bit": "h264_cuvid" in decoders,
         "hevc_main": "hevc_cuvid" in decoders,
@@ -250,6 +251,9 @@ def nvdec_profiles(decoders: set[str]) -> dict[str, bool]:
         "vp9_10bit": "vp9_cuvid" in decoders,
         "av1_main": "av1_cuvid" in decoders,
     }
+    if "vc1_cuvid" in decoders:
+        res["vc1"] = True
+    return res
 
 
 def nvdec_backend(gpu: dict[str, Any], vulkan_devices: list[dict[str, Any]], smi_gpus: dict[str, dict[str, str]],
@@ -261,7 +265,7 @@ def nvdec_backend(gpu: dict[str, Any], vulkan_devices: list[dict[str, Any]], smi
     available = bool(gpu.get("vendor_id", "").lower() == "10de" and gpu.get("kernel_driver") == "nvidia"
                      and address in smi_gpus and vulkan_match and "nvdec" in mpv_hwdec_help.lower())
     return {"status":"SUPPORTED" if available else "UNSUPPORTED" if gpu.get("vendor_id", "").lower()=="10de" else "NOT_APPLICABLE",
-            "profiles":nvdec_profiles(decoders) if available else {key:False for key in CODECS},
+            "profiles":nvdec_profiles(decoders) if available else {key:False for key in nvdec_profiles(set())},
             "evidence":["NVIDIA_KERNEL_DRIVER","NVIDIA_SMI","MPV","FFMPEG","VULKAN"] if available else [],
             "validated":False}
 
@@ -372,6 +376,7 @@ def record_validates_class(record:dict[str,Any],key:str)->bool:
     codec=str(record.get("codec","")).lower();depth=record.get("bit_depth");profile=str(record.get("profile","")).lower().replace(" ","")
     if not record.get("successful"):return False
     if key=="mpeg2":return codec in {"mpeg2","mpeg2video"}
+    if key=="vc1":return codec in {"vc1","wmv3"}
     if key=="h264_8bit":return codec in {"h264","avc1"} and depth==8
     if key=="hevc_main":return codec in {"hevc","h265"} and depth==8 and "main10" not in profile
     if key=="hevc_main10":return codec in {"hevc","h265"} and depth==10 and (not profile or "main10" in profile)
@@ -381,7 +386,34 @@ def record_validates_class(record:dict[str,Any],key:str)->bool:
     return False
 
 
-def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_runner, sys_root: pathlib.Path = pathlib.Path("/sys"), proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict[str, Any]:
+def _load_gpu_runtime_validator(install: pathlib.Path | None = None):
+    candidates = []
+    if install:
+        candidates.append(install / "openhtpc-gpu-runtime.py")
+    candidates.append(pathlib.Path(__file__).with_name("openhtpc-gpu-runtime.py"))
+    candidates.append(pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-gpu-runtime.py")
+    for cand in candidates:
+        if cand and cand.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_gpu_runtime_cap", cand)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def generate(
+    home: pathlib.Path,
+    install: pathlib.Path,
+    runner: Runner = default_runner,
+    sys_root: pathlib.Path = pathlib.Path("/sys"),
+    proc_root: pathlib.Path = pathlib.Path("/proc"),
+    dev_root: pathlib.Path = pathlib.Path("/dev"),
+    stat_provider: Any = None,
+) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
     profile = read_json(home / ".config/openhtpc/profile.json")
     user = read_json(home / ".config/openhtpc/user-config.json")
@@ -402,20 +434,42 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
     passport_gpus = topology.get("gpus") if isinstance(topology.get("gpus"), list) else []
     if not gpus and passport_gpus:
         gpus = [{"pci_address": item.get("pci_address"), "vendor": item.get("vendor", "Unknown"), "model": item.get("model", "Unknown"),
-                 "device_id": item.get("device_id"), "kernel_driver": item.get("kernel_driver"), "drm_nodes": [item.get("drm_card")] if item.get("drm_card") else [],
-                 "render_nodes": [item.get("render_node")] if item.get("render_node") else [], "active": item.get("active"), "memory_type": "UNKNOWN"} for item in passport_gpus]
+                 "device_id": item.get("device_id"), "kernel_driver": item.get("kernel_driver"), "drm_nodes": [],
+                 "render_nodes": [], "active": False, "memory_type": "UNKNOWN"} for item in passport_gpus]
     vulkan = run_probe("vulkan", ["vulkaninfo", "--summary"], diagnostics, runner, 8)
     vulkan_devices = parse_vulkan(vulkan.get("stdout", ""))
-    render_nodes = [node for gpu in gpus for node in gpu.get("render_nodes", [])] or [str(path) for path in sorted(pathlib.Path("/dev/dri").glob("renderD*"))]
-    va_profiles: dict[str, bool] = {key: False for key in CODECS}; va_drivers=[]; va_observed=False
-    for index, node in enumerate(render_nodes or [""]):
+    gpu_rt = _load_gpu_runtime_validator(install)
+    dev_dri = dev_root / "dri"
+    raw_nodes = [str(p) for p in sorted(dev_dri.glob("renderD*"))] if dev_dri.is_dir() else []
+    for g in gpus:
+        for rn in g.get("render_nodes", []):
+            if rn not in raw_nodes:
+                raw_nodes.append(rn)
+    va_profiles: dict[str, bool] = {key: False for key in CODECS}; va_drivers = []; va_observed = False
+    per_gpu_va_profiles: dict[str, dict[str, bool]] = {}
+    nodes_to_probe = raw_nodes if raw_nodes else [""]
+    for index, node in enumerate(nodes_to_probe):
         argv = ["vainfo"] if not node else ["vainfo", "--display", "drm", "--device", node]
         va = run_probe(f"vaapi_{index}", argv, diagnostics, runner, 8)
         if va.get("status") == "OK":
-            va_observed=True; driver, support=parse_vaapi(va.get("stdout", "")+va.get("stderr", "")); va_drivers.extend([driver] if driver else [])
-            va_profiles={key:va_profiles[key] or support[key] for key in va_profiles}
-            gpu=next((item for item in gpus if node in item.get("render_nodes",[])),None)
-            if gpu is not None: gpu["video_decode"]={"backends":{"vaapi":{"status":"SUPPORTED","driver":driver,"profiles":support,"evidence":["VAAPI"]}}}
+            va_observed = True; driver, support = parse_vaapi(va.get("stdout", "") + va.get("stderr", "")); va_drivers.extend([driver] if driver else [])
+            va_profiles = {key: va_profiles[key] or support.get(key, False) for key in va_profiles}
+            matched_pci = None
+            if node and gpu_rt and hasattr(gpu_rt, "validate_render_node"):
+                node_path = pathlib.Path(node)
+                for gpu in gpus:
+                    pci_cand = normalize_pci_address(gpu.get("pci_address") or "")
+                    if pci_cand:
+                        try:
+                            if gpu_rt.validate_render_node(node_path, pci_cand, sys_root, stat_provider=stat_provider) is True:
+                                matched_pci = pci_cand
+                                gpu["render_nodes"] = [node]
+                                gpu["video_decode"] = {"backends": {"vaapi": {"status": "SUPPORTED", "driver": driver, "profiles": support, "evidence": ["VAAPI"]}}}
+                                break
+                        except Exception:
+                            pass
+            if matched_pci:
+                per_gpu_va_profiles[matched_pci] = support
     ffmpeg = run_probe("ffmpeg", ["ffmpeg", "-hide_banner", "-decoders"], diagnostics, runner, 8)
     decoders = parse_ffmpeg_decoders(ffmpeg.get("stdout", "") + ffmpeg.get("stderr", ""))
     ffver = run_probe("ffmpeg_version", ["ffmpeg", "-version"], diagnostics, runner)
@@ -443,6 +497,44 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
                            "hardware_decode":fact("SUPPORTED" if backends else "UNSUPPORTED" if va_observed or smi.get("status")=="OK" else "UNKNOWN",backends+["OPENHTPC_RUNTIME_TEST"] if hardware_validated else backends,hardware_validated),
                            "hardware_backends":backends,
                            "validated_playback":fact("VALIDATED" if validated else "UNVALIDATED",["OPENHTPC_RUNTIME_TEST"] if validated else [],validated)}
+    devices_codec_matrix: dict[str, dict[str, Any]] = {}
+    for gpu in gpus:
+        raw_addr = gpu.get("pci_address") or ""
+        pci_norm = normalize_pci_address(raw_addr)
+        if not pci_norm:
+            continue
+        gpu_va = per_gpu_va_profiles.get(pci_norm)
+        # Per-device publication requires the same exact DRM proof as VAAPI.
+        gpu_nv = gpu.get("video_decode", {}).get("backends", {}).get("nvdec", {}).get("profiles", {}) if gpu_va is not None else {}
+        gpu_mat: dict[str, Any] = {}
+        for key, (decoder, _) in CODECS.items():
+            b_list: list[str] = []
+            if gpu_va and gpu_va.get(key):
+                b_list.append("vaapi")
+            if gpu_nv and gpu_nv.get(key):
+                b_list.append("nvdec")
+            hw_val = any(
+                record_validates_class(item, key)
+                and item.get("hardware_decode_backend") in b_list
+                and item.get("hardware_fingerprint") == hardware_fingerprint
+                and item.get("runtime_fingerprint") == runtime_fingerprint
+                for item in history
+            )
+            val_any = any(record_validates_class(item, key) for item in history)
+            if gpu_va is not None:
+                hw_status = "SUPPORTED" if b_list else "UNSUPPORTED"
+            else:
+                hw_status = "UNKNOWN"
+            gpu_mat[key] = {
+                "codec": decoder,
+                "profile": key,
+                "bit_depth": 10 if "10" in key else 8,
+                "software_decode": fact("AVAILABLE" if decoder in decoders else "UNAVAILABLE" if ffmpeg.get("status") == "OK" else "UNKNOWN", ["FFMPEG"]),
+                "hardware_decode": fact(hw_status, b_list + ["OPENHTPC_RUNTIME_TEST"] if hw_val else b_list, hw_val),
+                "hardware_backends": b_list,
+                "validated_playback": fact("VALIDATED" if val_any else "UNVALIDATED", ["OPENHTPC_RUNTIME_TEST"] if val_any else [], val_any),
+            }
+        devices_codec_matrix[pci_norm] = gpu_mat
     graphical=resolve_graphical_context(proc_root,home=home,install=install)
     graphical_argv=["env","-u","DISPLAY","-u","WAYLAND_DISPLAY","-u","XDG_RUNTIME_DIR","-u","DBUS_SESSION_BUS_ADDRESS",*(f"{key}={value}" for key,value in graphical.get("environment",{}).items()),"kscreen-doctor","-o"] if graphical.get("status")=="RESOLVED" else ["kscreen-doctor","-o"]
     kscreen = run_probe("display", graphical_argv, diagnostics, runner, 6)
@@ -480,11 +572,11 @@ def generate(home: pathlib.Path, install: pathlib.Path, runner: Runner = default
                   "cpu":{"vendor":cpu_vendor_match.group(1).strip() if cpu_vendor_match else None,"model":cpu_model,"architecture":platform.machine(),"logical_cores":os.cpu_count(),"physical_cores":None},
                   "memory":{"total_bytes":mem_kib*1024 if mem_kib else None}},
       "graphics":{"devices":gpus,"vulkan":{"loader":fact("AVAILABLE" if vulkan.get("status")=="OK" else "UNAVAILABLE" if vulkan.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["VULKAN"]),"devices":vulkan_devices},
-                  "vaapi":{"status":fact("AVAILABLE" if va_observed else "UNAVAILABLE" if all(diagnostics.get(f"vaapi_{i}",{}).get("status")=="COMMAND_UNAVAILABLE" for i in range(max(1,len(render_nodes)))) else "UNKNOWN",["VAAPI"] if va_observed else []),"drivers":sorted(set(va_drivers)),"render_nodes":render_nodes},
+                  "vaapi":{"status":fact("AVAILABLE" if va_observed else "UNAVAILABLE" if all(diagnostics.get(f"vaapi_{i}",{}).get("status")=="COMMAND_UNAVAILABLE" for i in range(max(1,len(raw_nodes)))) else "UNKNOWN",["VAAPI"] if va_observed else []),"drivers":sorted(set(va_drivers)),"render_nodes":raw_nodes},
                   "opengl":fact("UNKNOWN")},
       "display":{"outputs":displays,"active_output":active_display,"configured":user.get("display") if isinstance(user.get("display"),dict) else {},"hdr_pipeline_validated":fact("UNVALIDATED"),"session_context":{"status":graphical.get("status"),"evidence":graphical.get("evidence")}},
       "video_decode":{"ffmpeg":{"status":fact("AVAILABLE" if ffmpeg.get("status")=="OK" else "UNAVAILABLE" if ffmpeg.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["FFMPEG"]),"version":(ffver.get("stdout","").splitlines() or [None])[0]},
-                      "mpv":{"status":fact("AVAILABLE" if mpv.get("status")=="OK" else "UNAVAILABLE" if mpv.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["MPV"]),"version":(mpv.get("stdout","").splitlines() or [None])[0],"gpu_next":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"])},"codecs":codec_matrix},
+                      "mpv":{"status":fact("AVAILABLE" if mpv.get("status")=="OK" else "UNAVAILABLE" if mpv.get("status")=="COMMAND_UNAVAILABLE" else "UNKNOWN",["MPV"]),"version":(mpv.get("stdout","").splitlines() or [None])[0],"gpu_next":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"])},"codecs":codec_matrix,"devices":devices_codec_matrix},
       "audio":audio,
       "optical":{"drives":optical_devices,"dvd":{"physical_support":fact("DETECTED" if optical_devices else "UNAVAILABLE",["HARDWARE_PASSPORT"] if optical_devices else []),"css_support":fact("AVAILABLE" if shutil.which("lsdvd") else "UNKNOWN",["OPENHTPC_RUNTIME"]),"validated_playback":fact("UNVALIDATED")},"protected_media":protected_optical_model(home),"bluray_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"]),"uhd_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"])},
       "media":{"configured_sources":len(sources),"accessible_sources":sum(item["accessible"] for item in sources),"sources":sources,"playback_backend":"mpv"},

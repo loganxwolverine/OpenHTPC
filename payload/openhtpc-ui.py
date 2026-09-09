@@ -293,7 +293,7 @@ def system_page_png(
                 value = value[:-2].rstrip() + "…"
         draw.text((xy(pos[0]), xy(pos[1])), value, font=font(n, bold), fill=color)
 
-    def card(box, title, rows, label_ratio=0.42):
+    def card(box, title, rows, label_ratio=0.42, step=None):
         x, y, w, h = box
         draw.rounded_rectangle(
             (xy(x), xy(y), xy(x + w), xy(y + h)),
@@ -304,11 +304,11 @@ def system_page_png(
         )
         txt((x + 28, y + 22), title, 24, "#22c7ff", True, w - 56)
         available = h - 76
-        step = max(54, min(80, available / max(1, len(rows))))
+        row_step = step if step is not None else max(54, min(80, available / max(1, len(rows))))
         val_offset = label_ratio + 0.02
         val_ratio = 1.0 - val_offset - 0.04
         for index, (label, value, status) in enumerate(rows):
-            yy = y + 74 + index * step
+            yy = y + 74 + index * row_step
             txt((x + 28, yy), label, 18, "#93a9c2", False, w * label_ratio)
             txt((x + w * val_offset, yy - 2), value, 22, status or "#f7fbff", False, w * val_ratio)
 
@@ -368,9 +368,11 @@ def system_page_png(
             [
                 ("Machine", o["machine"], None),
                 ("Configuration", f"{o['cpu']} • {o['ram']}", None),
-                ("Graphiques", f"{o['gpu']} • {o['graphics']}", None),
+                ("Graphiques", o.get("gpu"), None),
+                ("Accélération vidéo", o.get("video_accel") or o.get("graphics") or "Non déterminé", None),
                 ("Affichage", o["display"], None),
             ],
+            step=42,
         )
         card(
             (70, 480, 860, 360),
@@ -402,11 +404,13 @@ def system_page_png(
             width=max(2, xy(2)),
         )
         txt((x + 28, y + 22), "COMPATIBILITÉ ET VALIDATION DES CODECS VIDÉO", 24, "#22c7ff", True)
-        for pos, label in ((x + 480, "LOGICIEL"), (x + 780, "MATÉRIEL"), (x + 1120, "LECTURE VALIDÉE")):
-            txt((pos, y + 70), label, 18, "#93a9c2", True)
+        subtitle = model.get("codecs_subtitle") or model.get("display", {}).get("codecs_subtitle") or "GPU de rendu : Indéterminé"
+        txt((x + 28, y + 54), subtitle, 16, "#93a9c2", False)
+        for pos, label in ((x + 480, "LOGICIEL"), (x + 780, "CAPACITÉ GPU"), (x + 1120, "LECTURE VALIDÉE")):
+            txt((pos, y + 78), label, 18, "#93a9c2", True)
         codec_list = model.get("codecs") or model.get("display", {}).get("codecs", [])
         for index, item in enumerate(codec_list):
-            yy = y + 118 + index * 76
+            yy = y + 118 + index * 68
             txt((x + 28, yy), item["name"], 22, "#f7fbff", True, 420)
             txt((x + 480, yy), item["software"], 19, "#d8e5f1", False, 260)
             txt((x + 780, yy), item["hardware"], 19, "#d8e5f1", False, 300)
@@ -751,10 +755,12 @@ def system_page_png(
         x, y, w, h = 670, 170, 1180, 680
         draw.rounded_rectangle((xy(x), xy(y), xy(x + w), xy(y + h)), radius=xy(24), fill="#071426", outline="#168fbd", width=max(2, xy(2)))
         txt((x + 28, y + 24), "COMPATIBILITÉ VIDÉO", 24, "#22c7ff", True)
-        for pos, label in ((x + 440, "LOGICIEL"), (x + 675, "MATÉRIEL"), (x + 930, "LECTURE")):
-            txt((pos, y + 70), label, 17, "#93a9c2", True)
+        subtitle = model.get("codecs_subtitle") or model.get("display", {}).get("codecs_subtitle") or "GPU de rendu : Indéterminé"
+        txt((x + 28, y + 54), subtitle, 16, "#93a9c2", False, 400)
+        for pos, label in ((x + 440, "LOGICIEL"), (x + 675, "CAPACITÉ GPU"), (x + 930, "LECTURE")):
+            txt((pos, y + 78), label, 17, "#93a9c2", True)
         for index, item in enumerate(d.get("codecs", [])):
-            yy = y + 116 + index * 72
+            yy = y + 116 + index * 68
             txt((x + 28, yy), item["name"], 21, "#f7fbff", True, 370)
             txt((x + 440, yy), item["software"], 18, "#d8e5f1", False, 210)
             txt((x + 675, yy), item["hardware"], 18, "#d8e5f1", False, 230)
@@ -806,11 +812,16 @@ def system_page_png(
                 ("Version des sondes", t["probe"], None),
                 ("Instantané généré le", t["generated"], None),
                 ("Connecteur d'affichage", t["connector"], None),
+                ("GPU de rendu", t.get("render_gpu", "Indéterminé"), None),
+                ("Liaison Vulkan", t.get("vulkan_binding", "Non déterminé"), None),
+                ("Décodage configuré", t.get("configured_hwdec", "Non déterminé"), None),
+                ("GPU physique de décodage", "Non déterminé", None),
                 ("Pilote Vulkan", t["vulkan_driver"], None),
                 ("Pilote VA-API", t["vaapi_driver"], None),
                 ("Version MPV", t["mpv"], None),
                 ("Version FFmpeg", t["ffmpeg"], None),
             ],
+            step=43,
         )
 
     target.parent.mkdir(parents=True, exist_ok=True)

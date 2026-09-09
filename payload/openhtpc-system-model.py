@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Normalized SYSTÈME presenter; consumes canonical state and never probes hardware."""
 from __future__ import annotations
-import datetime, importlib, importlib.util, json, pathlib
+import datetime, importlib, importlib.util, json, pathlib, re
 
-CODEC_ORDER = ("mpeg2", "h264_8bit", "hevc_main", "hevc_main10", "vp9_profile0", "vp9_10bit", "av1_main")
+CODEC_ORDER = ("mpeg2", "vc1", "h264_8bit", "hevc_main", "hevc_main10", "vp9_profile0", "vp9_10bit", "av1_main")
 CODEC_NAMES = {
     "mpeg2": "MPEG-2",
+    "vc1": "VC-1",
     "h264_8bit": "H.264 / AVC",
     "hevc_main": "HEVC / H.265",
     "hevc_main10": "HEVC / H.265 10 bits",
@@ -128,6 +129,7 @@ def _matches(record, key):
     bits = record.get("bit_depth")
     return (
         (key == "mpeg2" and codec in {"mpeg2video", "mpeg2"})
+        or (key == "vc1" and codec in {"vc1", "wmv3"})
         or (key == "h264_8bit" and codec in {"h264", "avc"} and bits in {None, 8})
         or (key == "hevc_main" and codec in {"hevc", "h265"} and bits in {None, 8} and "10" not in profile)
         or (key == "hevc_main10" and codec in {"hevc", "h265"} and (bits == 10 or "10" in profile))
@@ -137,7 +139,79 @@ def _matches(record, key):
     )
 
 
-def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict) -> dict:
+def normalize_pci_address(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    match = re.fullmatch(r"(?:([0-9a-fA-F]{1,4}):)?([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\.([0-7])", raw)
+    if not match:
+        return None
+    domain_str, bus_str, dev_str, fn_str = match.groups()
+    try:
+        domain = int(domain_str, 16) if domain_str else 0
+        bus = int(bus_str, 16)
+        dev = int(dev_str, 16)
+        fn = int(fn_str, 16)
+    except ValueError:
+        return None
+    if not (0 <= domain <= 0xFFFF and 0 <= bus <= 0xFF and 0 <= dev <= 0x1F and 0 <= fn <= 7):
+        return None
+    return f"{domain:04x}:{bus:02x}:{dev:02x}.{fn:x}".lower()
+
+
+def clean_gpu_display_name(raw: Any) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        return "Indéterminé"
+    compact = re.sub(r"\s+", " ", raw).strip()
+    compact = re.sub(r"\s*\((?:R|tm|TM)\)\s*", " ", compact)
+    compact = re.sub(r"\s*\([^)]*(?:Corporation|Inc\.|Ltd\.)[^)]*\)\s*", " ", compact, flags=re.I)
+    compact = re.sub(r"^(?:Intel|Advanced Micro Devices|NVIDIA) Corporation\s+", lambda m: "Intel " if m.group(0).lower().startswith("intel") else "AMD " if m.group(0).lower().startswith("advanced") else "NVIDIA ", compact, flags=re.I)
+    m = re.search(r"\[([^]]+)\]", compact)
+    if m:
+        inner = m.group(1).strip()
+        if inner.upper() not in {"DG1", "DG2"}:
+            vendor = "Intel" if "intel" in compact.lower() else "AMD" if "amd" in compact.lower() else "NVIDIA" if "nvidia" in compact.lower() else ""
+            if vendor and not inner.lower().startswith(vendor.lower()):
+                return f"{vendor} {inner}"
+            return inner
+        compact = re.sub(r"\s*\[DG[12]\]", "", compact, flags=re.I)
+    compact = re.sub(r"\s*\(DG[12]\)", "", compact, flags=re.I)
+    compact = re.sub(r"\s+Graphics$", "", compact, flags=re.I)
+    compact = re.sub(r"\s+", " ", compact).strip()
+    return compact or raw.strip()
+
+
+def _load_gpu_runtime(install: pathlib.Path | None = None):
+    candidates = []
+    if install:
+        candidates.append(install / "openhtpc-gpu-runtime.py")
+    candidates.append(pathlib.Path(__file__).with_name("openhtpc-gpu-runtime.py"))
+    candidates.append(pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-gpu-runtime.py")
+    for cand in candidates:
+        if cand and cand.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_gpu_runtime_model", cand)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def build(
+    home: pathlib.Path,
+    install: pathlib.Path,
+    health: dict,
+    version: dict,
+    *,
+    display_resolution: tuple[dict[str, Any] | None, str] | None = None,
+    gpu_binding: dict[str, Any] | None = None,
+    pure_conf_text: str | None = None,
+    sys_root: pathlib.Path = pathlib.Path("/sys"),
+    dev_root: pathlib.Path = pathlib.Path("/dev"),
+) -> dict:
     caps = read_json(home / ".config/openhtpc/runtime/capabilities.json")
     profile = read_json(home / ".config/openhtpc/profile.json")
     detected = profile.get("detected", {}) if isinstance(profile.get("detected"), dict) else {}
@@ -158,10 +232,92 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     ram = memory.get("total_bytes")
     ram = f"{ram/1024**3:.1f} Gio" if isinstance(ram, (int, float)) else clean(detected.get("memory"), "Indéterminée")
 
+    gpu_mod = _load_gpu_runtime(install)
+
+    # 1. T8.1A Display Topology Authority
+    disp_gpu: dict[str, Any] | None = None
+    disp_status: str = "UNKNOWN"
+    if display_resolution is not None:
+        disp_gpu, disp_status = display_resolution
+    elif gpu_mod and hasattr(gpu_mod, "resolve_display_gpu") and hasattr(gpu_mod, "discover_gpus"):
+        try:
+            discovered = gpu_mod.discover_gpus(sys_root=sys_root, dev_root=dev_root)
+            disp_gpu, disp_status = gpu_mod.resolve_display_gpu(discovered)
+        except Exception:
+            disp_gpu, disp_status = None, "UNKNOWN"
+
+    runtime_display_proven = bool(disp_status == "RESOLVED" and disp_gpu and disp_gpu.get("pci_address"))
+    render_pci = normalize_pci_address(disp_gpu.get("pci_address")) if runtime_display_proven else None
+
+    # 2. Vulkan Binding Resolution (Separated from display truth)
+    binding = gpu_binding
+    if binding is None and gpu_mod and hasattr(gpu_mod, "resolve_playback_gpu_binding"):
+        try:
+            binding = gpu_mod.resolve_playback_gpu_binding(
+                sys_root=sys_root,
+                dev_root=dev_root,
+                passport_path=home / ".config/openhtpc/profile.json",
+            )
+        except Exception:
+            binding = None
+
+    vulkan_uuid = None
+    vulkan_device_name = None
+    vulkan_status = "UNAVAILABLE"
+    if isinstance(binding, dict):
+        vulkan_status = binding.get("status", "UNAVAILABLE")
+        if vulkan_status == "RENDER_BOUND":
+            vulkan_uuid = binding.get("vulkan_uuid")
+            vulkan_device_name = binding.get("vulkan_device_name")
+
+    matched_gpu_name = None
+    all_devices = graphics.get("devices", []) if isinstance(graphics.get("devices"), list) else []
+    if render_pci:
+        for item in all_devices:
+            if normalize_pci_address(item.get("pci_address")) == render_pci:
+                matched_gpu_name = item.get("model")
+                break
+        if not matched_gpu_name and isinstance(detected.get("gpu_details"), list):
+            for g_det in detected.get("gpu_details"):
+                if normalize_pci_address(g_det.get("pci_slot")) == render_pci:
+                    matched_gpu_name = g_det.get("model")
+                    break
+        if not matched_gpu_name and disp_gpu and (disp_gpu.get("model") or disp_gpu.get("name")):
+            matched_gpu_name = disp_gpu.get("model") or disp_gpu.get("name")
+        if not matched_gpu_name and vulkan_device_name:
+            matched_gpu_name = vulkan_device_name
+
+    if runtime_display_proven:
+        if matched_gpu_name:
+            display_gpu_label = clean_gpu_display_name(matched_gpu_name)
+        elif render_pci:
+            display_gpu_label = f"GPU ({render_pci})"
+        else:
+            display_gpu_label = "Indéterminé"
+    else:
+        # Runtime display unresolved -> Passport descriptive fallback
+        passport_gpu = topology.get("display_gpu") or topology.get("processing_gpu")
+        passport_model = None
+        if isinstance(passport_gpu, dict):
+            passport_model = passport_gpu.get("model") or passport_gpu.get("name")
+        if not passport_model and isinstance(detected.get("gpu_details"), list) and detected.get("gpu_details"):
+            passport_model = detected.get("gpu_details")[0].get("model")
+        if passport_model:
+            display_gpu_label = f"{clean_gpu_display_name(passport_model)} (Passeport)"
+        else:
+            display_gpu_label = "Indéterminé"
+
     gpus = []
-    for index, item in enumerate(graphics.get("devices", []) if isinstance(graphics.get("devices"), list) else []):
+    for index, item in enumerate(all_devices):
+        item_pci = normalize_pci_address(item.get("pci_address"))
+        if runtime_display_proven and render_pci and item_pci == render_pci:
+            role = "GPU actif"
+        elif runtime_display_proven:
+            role = "GPU secondaire"
+        else:
+            role = "GPU détecté" if index == 0 else "GPU secondaire"
         gpus.append({
-            "role": "GPU actif" if item.get("active") is True else "GPU secondaire" if item.get("active") is False else f"GPU {index+1}",
+            "role": role,
             "name": clean(item.get("model")),
             "driver": clean(item.get("kernel_driver")),
             "memory": "Partagée" if item.get("memory_type") == "shared" else "Dédiée" if item.get("memory_type") == "dedicated" else "Indéterminée",
@@ -191,6 +347,50 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
     else:
         ref_str = "Indéterminée"
 
+    # 3. Observed decode backend from effective pure.conf (No Passport fallback)
+    hwdec_val = None
+    hwdec_status = "UNAVAILABLE"
+    if pure_conf_text is not None:
+        for conf_line in pure_conf_text.splitlines():
+            line = conf_line.strip()
+            if line.startswith("hwdec=") and not line.startswith("#"):
+                hwdec_val = line.split("=", 1)[1].strip()
+                hwdec_status = "OBSERVED"
+                break
+    else:
+        pure_conf_path = home / ".config/openhtpc/runtime/mpv/pure.conf"
+        if pure_conf_path.is_file():
+            try:
+                for conf_line in pure_conf_path.read_text(encoding="utf-8").splitlines():
+                    line = conf_line.strip()
+                    if line.startswith("hwdec=") and not line.startswith("#"):
+                        hwdec_val = line.split("=", 1)[1].strip()
+                        hwdec_status = "OBSERVED"
+                        break
+            except OSError:
+                pass
+
+    if hwdec_status == "OBSERVED" and hwdec_val:
+        if hwdec_val == "vaapi":
+            hwdec_label = "VA-API"
+        elif hwdec_val == "nvdec":
+            hwdec_label = "NVDEC"
+        elif hwdec_val == "no":
+            hwdec_label = "Désactivé"
+        else:
+            hwdec_label = hwdec_val.upper()
+    else:
+        hwdec_label = "Non déterminé"
+
+    # 4. Per-render-GPU Codec Capabilities (Never fallback to global multi-GPU union, never fallback to Passport)
+    per_gpu_caps = None
+    if render_pci:
+        dev_map = decode.get("devices", {}) if isinstance(decode.get("devices"), dict) else {}
+        for k, v in dev_map.items():
+            if normalize_pci_address(k) == render_pci:
+                per_gpu_caps = v
+                break
+
     codecs = []
     matrix = decode.get("codecs", {}) if isinstance(decode.get("codecs"), dict) else {}
     records = caps.get("validation", {}).get("records", []) if isinstance(caps.get("validation"), dict) else []
@@ -202,15 +402,32 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
             wh = f"{detail.get('width')}×{detail.get('height')}" if detail.get("width") and detail.get("height") else ""
             bits = f"{detail.get('bit_depth')} bits" if detail.get("bit_depth") else ""
             fps = f"{detail.get('fps'):.2f} fps" if isinstance(detail.get("fps"), (int, float)) else ""
+            signature = " • ".join(v for v in (wh, bits, fps) if v)
+
+        if per_gpu_caps is not None:
+            gpu_item = per_gpu_caps.get(key, {})
+            hw_status = gpu_item.get("hardware_decode", {}).get("status")
+            if hw_status == "SUPPORTED":
+                hardware_str = "Signalée"
+            elif hw_status == "UNSUPPORTED":
+                hardware_str = "Non signalée"
+            else:
+                hardware_str = "Non déterminée"
+            backend_str = ", ".join(gpu_item.get("hardware_backends", [])).upper() or "Indéterminé"
+        else:
+            hardware_str = "Non déterminée"
+            backend_str = "Indéterminé"
+
         codecs.append({
             "key": key,
             "name": CODEC_NAMES[key],
             "software": state(item.get("software_decode", {})),
-            "hardware": state(item.get("hardware_decode", {})),
+            "hardware": hardware_str,
             "validated": state(item.get("validated_playback", {})),
-            "backend": ", ".join(item.get("hardware_backends", [])).upper() or "Indéterminé",
+            "backend": backend_str,
             "detail": signature,
         })
+    codecs_subtitle = f"GPU de rendu : {display_gpu_label}" if runtime_display_proven else "GPU de rendu : Indéterminé"
 
     sources = media.get("sources", []) if isinstance(media.get("sources"), list) else []
     raw_source_types = {clean(item.get("filesystem_type") or item.get("filesystem_class")) for item in sources if isinstance(item, dict)}
@@ -237,6 +454,7 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
         "hdr_capable": state(active.get("hdr_capable", {})),
         "hdr_pipeline": state(display.get("hdr_pipeline_validated", {})),
         "codecs": codecs,
+        "codecs_subtitle": codecs_subtitle,
     }
 
     user_config = read_json(home / ".config/openhtpc/user-config.json")
@@ -365,9 +583,11 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
             "machine": " ".join(v for v in (clean(system.get("manufacturer"), ""), clean(system.get("model"), "")) if v) or "Machine non identifiée",
             "cpu": clean(cpu.get("model")),
             "ram": ram,
-            "gpu": gpus[0]["name"] if gpus else "Indéterminé",
+            "gpu": display_gpu_label,
+            "render_pci": render_pci,
+            "video_accel": hwdec_label,
             "display": display_summary_str,
-            "graphics": "Vulkan • VA-API" if state(graphics.get("vulkan", {}).get("loader", {})) == "Disponible" and state(graphics.get("vaapi", {}).get("status", {})) == "Disponible" else "Capacités graphiques partielles",
+            "graphics": f"Vulkan • {hwdec_label}" if hwdec_label != "Non déterminé" else "Vulkan",
         },
         "codecs": codecs,
         "hardware": {
@@ -411,11 +631,15 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
             "schema": clean(caps.get("schema")),
             "probe": clean(caps.get("probe_version")),
             "generated": clean(generated),
-            "mpv": clean(decode.get("mpv", {}).get("version")),
-            "ffmpeg": clean(decode.get("ffmpeg", {}).get("version")),
             "connector": clean(active.get("connector")),
+            "render_gpu": f"{display_gpu_label} ({render_pci})" if (runtime_display_proven and render_pci) else display_gpu_label,
+            "vulkan_binding": "Liée" if (vulkan_status == "RENDER_BOUND" and vulkan_uuid) else "Indisponible" if binding is not None else "Non déterminée",
+            "configured_hwdec": hwdec_label,
+            "physical_decode_gpu": "Non déterminé",
             "vulkan_driver": ", ".join(clean(x.get("driver_name")) for x in graphics.get("vulkan", {}).get("devices", []) if isinstance(x, dict)) or "Indéterminé",
             "vaapi_driver": ", ".join(graphics.get("vaapi", {}).get("drivers", [])) or "Indéterminé",
+            "mpv": clean(decode.get("mpv", {}).get("version")),
+            "ffmpeg": clean(decode.get("ffmpeg", {}).get("version")),
         },
     }
     state_caps = health.get("capabilities", {}) if isinstance(health.get("capabilities"), dict) else {}
@@ -426,7 +650,8 @@ def build(home: pathlib.Path, install: pathlib.Path, health: dict, version: dict
         "model": clean(system.get("model")),
         "manufacturer": clean(system.get("manufacturer")),
         "cpu": clean(cpu.get("model")),
-        "gpu": clean((gpus[0]["name"] if gpus else None) or legacy_gpu.get("model") or detected.get("gpu"), "N/A"),
+        "gpu": display_gpu_label,
+        "codecs_subtitle": codecs_subtitle,
         "ram": ram,
         "audio_sink": clean(audio.get("default_sink") or ((detected.get("audio_devices") or [None])[0]), "N/A"),
         "optical": clean(((detected.get("optical_drives") or [None])[0]), "Non détecté"),
