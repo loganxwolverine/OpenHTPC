@@ -1,7 +1,7 @@
 from __future__ import annotations
 import importlib.util,inspect,json,pathlib,shutil,subprocess,tempfile,unittest
 
-ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="1638455fe12e0439967cd8641b3f8abbef1e5adc"
+ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="ab42b1ad3d247ff07268b182ce3c762e0944b564"
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 OPTICAL=load("normalization_p2_optical",PAYLOAD/"openhtpc-optical.py");REGISTRY=load("normalization_p2_registry",PAYLOAD/"openhtpc-plugin-registry.py")

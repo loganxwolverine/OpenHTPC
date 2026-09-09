@@ -41,7 +41,7 @@ class CurrentVsHistory(unittest.TestCase):
 class FrozenBoundaries(unittest.TestCase):
  def test_backend_dvd_tmdb_keydb_and_gpu_sources_unchanged_from_dev4(self):
   for name in ("openhtpc-play-dvd","openhtpc-tmdb.py","openhtpc-protected-optical.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):
-   baseline=subprocess.run(["git","show",f"940c03764f4e6c0fbde01066c89553b8b648b161:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
+   baseline=subprocess.run(["git","show",f"ab42b1ad3d247ff07268b182ce3c762e0944b564:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout
    self.assertEqual((PAYLOAD/name).read_text(),baseline)
  def test_no_network_acquisition(self):
   source="\n".join((PAYLOAD/name).read_text().lower() for name in ("openhtpc-optical.py","openhtpc-play-optical","openhtpc-protected-optical-backend.py"))

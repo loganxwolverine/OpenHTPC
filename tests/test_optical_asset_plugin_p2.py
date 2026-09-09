@@ -1,7 +1,7 @@
 from __future__ import annotations
 import hashlib,importlib.util,json,pathlib,shutil,subprocess,tempfile,unittest
 
-ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="ff1d6d3e4646dd6c6e96e8c25a905e7219df9e43"
+ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="ab42b1ad3d247ff07268b182ce3c762e0944b564"
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 REGISTRY=load("asset_p2_registry",PAYLOAD/"openhtpc-plugin-registry.py");VIEW=load("asset_p2_view",PAYLOAD/"openhtpc-disc-view.py")

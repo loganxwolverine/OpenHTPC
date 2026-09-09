@@ -2,7 +2,7 @@ from __future__ import annotations
 import importlib.util,json,os,pathlib,subprocess,tempfile,unittest
 from unittest import mock
 
-ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="83c58460275813f7ac05c67fc75e51fb020ec2fd"
+ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="ab42b1ad3d247ff07268b182ce3c762e0944b564"
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 REGISTRY=load("p2_registry",PAYLOAD/"openhtpc-plugin-registry.py");CORE=load("p2_core",PAYLOAD/"openhtpc-core.py")

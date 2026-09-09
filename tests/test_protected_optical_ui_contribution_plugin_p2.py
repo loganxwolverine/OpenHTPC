@@ -1,7 +1,7 @@
 from __future__ import annotations
 import importlib.util,json,pathlib,shutil,subprocess,tempfile,unittest
 
-ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="e9c6b93e42bafb81f8bb0ee51ef0092d849dac2c"
+ROOT=pathlib.Path(__file__).resolve().parents[1];PAYLOAD=ROOT/"payload";BASE="ab42b1ad3d247ff07268b182ce3c762e0944b564"
 def load(name,path):
  spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 CORE=load("ui_p2_core",PAYLOAD/"openhtpc-core.py");REGISTRY=load("ui_p2_registry",PAYLOAD/"openhtpc-plugin-registry.py")

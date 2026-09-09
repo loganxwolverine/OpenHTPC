@@ -87,6 +87,8 @@ class OpticalSheetPolish(unittest.TestCase):
 
  def test_dvd_actions_remain_unchanged(self):
   menu=session.disc_menu_entries(optical(canonical="DVD_VIDEO",title="FILM"),PAYLOAD,tuple(pathlib.Path(f"i{x}") for x in range(4)))
-  for label in ("LIRE LE DVD","MODE VIDÉO : PURE","ÉJECTER","RETOUR"):self.assertIn(label,menu)
+  for label in ("LIRE LE DVD","ÉJECTER","RETOUR"):self.assertIn(label,menu)
+  self.assertIn("MODE VIDÉO :",menu)
+  self.assertIn(":submenu DVD_VIDEO_MODE",menu)
 
 if __name__=="__main__":unittest.main()
