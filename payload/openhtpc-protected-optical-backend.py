@@ -209,7 +209,10 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
             pass
     started=clock()
     try:
-        completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
+        if policy is not None and hasattr(policy, "play_mpv"):
+            completed=policy.play_mpv(home,command,runner=runner,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
+        else:
+            completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
         exit_code=int(completed.returncode);reason="NONE"
     except OSError:
         exit_code=127;reason="MPV_NOT_STARTED"

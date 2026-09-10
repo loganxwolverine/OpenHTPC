@@ -446,7 +446,7 @@ def system_page_png(
             [
                 ("Gestionnaire de session", d.get("session", "Non déterminé"), None),
                 ("Résolveur de capacités", d.get("resolver", "Non déterminé"), None),
-                ("Modes de rafraîchissement", "Non déterminé", None),
+                ("Mode de rafraîchissement", d.get("auto_refresh") if d.get("auto_refresh") in ("Automatique", "Désactivé") else "Non déterminé", None),
             ],
         )
     elif page == "audio":

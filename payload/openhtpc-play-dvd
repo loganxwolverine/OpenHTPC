@@ -204,7 +204,9 @@ PY
 )"
 
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
-"$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
+refresh_runner=()
+[[ ! -f $INSTALL/openhtpc-refresh-match.py ]] || refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --)
+"${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
 audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" "$rc" "${dispatch_id:-}" <<'PY'
 import importlib.util,json,pathlib,sys

@@ -25,12 +25,14 @@ import time
 from typing import Any, Callable
 
 DEFAULTS = {
+    "refresh_matching": "OFF",
     "presentation_mode": "PURE",
     "audio_language_policy": "AUTO",
     "audio_output_mode": "PCM",
     "subtitle_policy": "AUTO",
 }
 VALID = {
+    "refresh_matching": {"AUTO", "OFF"},
     "presentation_mode": {"PURE", "CINEMA_AUTO"},
     "audio_language_policy": {"AUTO", "FR", "DEFAULT"},
     "audio_output_mode": {"PCM", "BITSTREAM"},
@@ -1161,6 +1163,17 @@ def choose_dvd_subtitle(policy: str, optical_state: dict | None) -> dict:
     # for dvd:// playback and resolves the usable track for the selected title.
     return {"requested": policy, "resolved": "MPV_FR_LANGUAGE", "track": french,
             "reason": "dvd_french_full_track", "mpv_args": ["--slang=fr,fra,fre"]}
+
+
+def play_mpv(home, command, *, media=None, runner=subprocess.run, refresh_dispatch_id=None, **kwargs):
+    """Shared T8.6 lifecycle; refresh helper failure never prevents MPV launch."""
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_refresh_match", pathlib.Path(__file__).with_name("openhtpc-refresh-match.py"))
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+    except (OSError, ImportError, AttributeError):
+        return runner(command, **kwargs)
+    return helper.run_playback(home, command, media=media, runner=runner, dispatch_id=refresh_dispatch_id, **kwargs)
 
 
 def probe_media(path: pathlib.Path, ffprobe: str | None = None) -> dict | None:

@@ -323,9 +323,19 @@ def parse_kscreen_json(text: str) -> list[dict[str, Any]]:
         connected = raw.get("connected") is True
         active = connected and raw.get("enabled") is True
         item = {"connector": raw["name"], "active": active, "connected": connected,
+                "output_id": raw.get("id"), "current_mode_id": raw.get("currentModeId"),
                 "current_mode": None, "available_modes": [], "hdr_capable": fact("UNKNOWN"),
                 "current_hdr_mode": fact("UNKNOWN"), "color_depth": {"current_bits": None}}
         modes = raw.get("modes") if isinstance(raw.get("modes"), list) else []
+        for candidate in modes:
+            if not isinstance(candidate, dict):
+                continue
+            size = candidate.get("size", {})
+            rate = candidate.get("refreshRate")
+            if (isinstance(size, dict) and all(type(size.get(k)) is int and size[k] > 0 for k in ("width", "height"))
+                    and isinstance(candidate.get("id"), str) and type(rate) in (int, float) and 0 < rate < 1000):
+                item["available_modes"].append({"id": candidate["id"], "width": size["width"],
+                                                "height": size["height"], "refresh_hz": rate})
         matches = [m for m in modes if isinstance(m, dict) and isinstance(raw.get("currentModeId"), str)
                    and m.get("id") == raw["currentModeId"]]
         if active and len(matches) == 1:
@@ -396,7 +406,11 @@ def collect_display(home: pathlib.Path, install: pathlib.Path, runner: Runner = 
         if len(paths) == 1:
             try:
                 if (paths[0]/"status").read_text().strip() == "connected":
-                    active["hdr_capable"] = edid_hdr_capability((paths[0]/"edid").read_bytes())
+                    edid = (paths[0]/"edid").read_bytes()
+                    active["hdr_capable"] = edid_hdr_capability(edid)
+                    if len(edid) >= 128 and edid[:8] == b"\x00\xff\xff\xff\xff\xff\xff\x00" and len(edid) == 128 * (1 + edid[126]) and not any(sum(edid[i:i+128]) % 256 for i in range(0, len(edid), 128)):
+                        import hashlib
+                        active["display_identity"] = hashlib.sha256(edid).hexdigest()
                 else:
                     active = None
             except OSError:

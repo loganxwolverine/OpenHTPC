@@ -59,6 +59,14 @@ CHECK_LABELS_FR = {
 }
 
 
+def _refresh_setting(home):
+    try:
+        data = json.loads((home / ".config/openhtpc/user-config.json").read_text())
+        return "AUTO" if isinstance(data, dict) and data.get("refresh_matching") == "AUTO" else "OFF"
+    except (OSError, ValueError):
+        return "OFF"
+
+
 def read_json(path: pathlib.Path) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -454,7 +462,7 @@ def build(
         "hdr_pipeline": "Non déterminé",
         "session": "Wayland (KWin)" if display.get("session_context", {}).get("type") == "wayland" else "Non déterminé",
         "resolver": "Observation KDE / KScreen",
-        "auto_refresh": "Non déterminé",
+        "auto_refresh": "Automatique" if _refresh_setting(home) == "AUTO" else "Désactivé",
         "codecs": codecs,
         "codecs_subtitle": codecs_subtitle,
     }

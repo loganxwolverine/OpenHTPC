@@ -343,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     runtime_event(home,install,"PLAYBACK_PROCESS_STARTED")
     started = time.monotonic()
     try:
-        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, env=os.environ.copy())
+        result = policy.play_mpv(home, command, media=media, refresh_dispatch_id=dispatch_id, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, env=os.environ.copy())
         rc = result.returncode
     except OSError:
         rc = 127
@@ -400,7 +400,16 @@ def main(argv: list[str] | None = None) -> int:
         "target_effective": audio_target.get("effective", "SYSTEM"),
         "target_fallback": audio_target.get("fallback", False),
     } if pw_diag else {}
-    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, "gpu_render_binding_details": gpu_binding, "gpu_binding_details": gpu_binding, **pw_fields})
+    presentation_diag = {}
+    telemetry_file = home / ".local/state/openhtpc/presentation-telemetry-last.json"
+    if telemetry_file.is_file():
+        try:
+            t_data = json.loads(telemetry_file.read_text(encoding="utf-8"))
+            if isinstance(t_data, dict) and t_data.get("dispatch_id") == dispatch_id:
+                presentation_diag["presentation_telemetry"] = t_data
+        except (OSError, json.JSONDecodeError):
+            pass
+    private_state(home, media, source, {**common, "timestamp": timestamp(), "process_started": True, "media_opened": opened, "exit_code": rc, "elapsed": elapsed, "error_class": error_class, "diagnostic_lines": diagnostics, "cwd": cwd, "gpu_render_binding_details": gpu_binding, "gpu_binding_details": gpu_binding, **pw_fields, **presentation_diag})
     if error_class=="NONE":record_capability_validation(home,install,media,raw)
     update_action_state(home,media_opened=opened,exit_code=rc,elapsed=elapsed,error_class=error_class)
     runtime_event(home,install,"PLAYBACK_PROCESS_EXITED",exit_code=rc,elapsed=elapsed,error_class=error_class)

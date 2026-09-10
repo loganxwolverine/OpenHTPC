@@ -1011,7 +1011,9 @@ Entry1=RETOUR;{local_icon};:back
 
 [SYSTEM_DISPLAY]
 BackgroundImage={system_pages['display']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=ADAPTATION DE FRÉQUENCE : AUTOMATIQUE;{local_icon};:applyback {install/'openhtpc-playback-setting'} refresh_matching AUTO
+Entry2=ADAPTATION DE FRÉQUENCE : DÉSACTIVÉE;{local_icon};:applyback {install/'openhtpc-playback-setting'} refresh_matching OFF
+Entry3=RETOUR;{local_icon};:back
 
 [SYSTEM_AUDIO]
 BackgroundImage={system_pages['audio']}

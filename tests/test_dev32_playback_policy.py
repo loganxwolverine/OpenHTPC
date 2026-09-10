@@ -56,7 +56,7 @@ class PlaybackPreferences(unittest.TestCase):
         policy.write_preference(self.home, "subtitle_policy", "FR_FORCED")
         data = json.loads(policy.config_path(self.home).read_text())
         self.assertEqual(data["local_media_sources"], ["/media"])
-        self.assertEqual(policy.read_preferences(self.home), {"presentation_mode":"CINEMA_AUTO","audio_language_policy":"FR","audio_output_mode":"PCM","subtitle_policy":"FR_FORCED"})
+        self.assertEqual(policy.read_preferences(self.home), {"refresh_matching":"OFF","presentation_mode":"CINEMA_AUTO","audio_language_policy":"FR","audio_output_mode":"PCM","subtitle_policy":"FR_FORCED"})
         self.assertEqual(json.loads((self.home/".config/openhtpc/video-profile.json").read_text())["active_profile"], "CINEMA_AUTO")
 
     def test_rc2_video_profile_migrates_without_write(self):

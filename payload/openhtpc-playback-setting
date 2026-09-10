@@ -215,7 +215,7 @@ def main() -> int:
         refresh_audio_mode_label(home, sys.argv[2])
     refresh = install / "openhtpc-system-action"
     if refresh.is_file():
-        subprocess.run([str(refresh), "audio" if sys.argv[1] == "audio_output_mode" else "playback"], check=False, timeout=15)
+        subprocess.run([str(refresh), "display" if sys.argv[1] == "refresh_matching" else "audio" if sys.argv[1] == "audio_output_mode" else "playback"], check=False, timeout=15)
     return 0
 
 

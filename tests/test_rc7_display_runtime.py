@@ -75,7 +75,7 @@ class DisplayRuntime(unittest.TestCase):
         self.assertEqual(d['hdr_capable'], 'Non déterminé')
         self.assertEqual(d['depth'], 'Non déterminée')
         self.assertEqual(d['hdr_pipeline'], 'Non déterminé')
-        self.assertEqual(d['auto_refresh'], 'Non déterminé')
+        self.assertEqual(d['auto_refresh'], 'Désactivé')
 
     def test_other_connector_hdr_not_merged(self):
         self.connector(hdr=False); self.connector('card1-HDMI-A-1', hdr=True)
@@ -146,10 +146,17 @@ class DisplayRuntime(unittest.TestCase):
         self.assertEqual(d['refresh'], '23.976 Hz')
         self.assertIn('23.976 Hz', d['summary'])
 
+    def test_refresh_policy_presented(self):
+        config = self.home / '.config/openhtpc/user-config.json'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        for choice, label in [('AUTO', 'Automatique'), ('OFF', 'Désactivé')]:
+            config.write_text(json.dumps({'refresh_matching': choice}))
+            self.assertEqual(self.present(self.collect())['display']['auto_refresh'], label)
+
     def test_auto_refresh_absent_empty_unknown_never_blank(self):
         from PIL import ImageDraw
         m = self.present(self.collect())
-        self.assertEqual(m['display']['auto_refresh'], 'Non déterminé')
+        self.assertEqual(m['display']['auto_refresh'], 'Désactivé')
         m['available'] = True
         for value in (None, '', '   ', 'UNKNOWN', 'NOT_PROVEN', 'Non déterminé'):
             with self.subTest(value=value):
@@ -160,7 +167,7 @@ class DisplayRuntime(unittest.TestCase):
                 with mock.patch.object(ImageDraw.ImageDraw, 'text', autospec=True) as draw:
                     ui.system_page_png(m, self.home/'refresh-proof.png', PAYLOAD/'flex/assets/fonts/OpenSans-Regular.ttf', 'display')
                 texts = [(c.args[1], c.args[2]) for c in draw.call_args_list]
-                label = next(pos for pos, text in texts if text == 'Modes de rafraîchissement')
+                label = next(pos for pos, text in texts if text == 'Mode de rafraîchissement')
                 values = [text for pos, text in texts if pos[0] > label[0] and abs(pos[1] - label[1]) <= 2]
                 self.assertEqual(values, ['Non déterminé'])
 

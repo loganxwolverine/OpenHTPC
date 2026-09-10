@@ -88,6 +88,7 @@ if [[ -x $OPTICAL_MONITOR && -z ${OPENHTPC_MONITOR_STARTED:-} ]]; then
     export OPENHTPC_MONITOR_STARTED=1
     [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event MONITOR_STARTED
 fi
+[[ ! -f $INSTALL_DIR/openhtpc-refresh-match.py ]] || python3 "$INSTALL_DIR/openhtpc-refresh-match.py" --recover
 [[ ! -x $SYSTEM_VIEW ]] || "$SYSTEM_VIEW" >/dev/null
 [[ -x $HOME_CONTROLLER ]] || die "Contrôleur HOME absent : $HOME_CONTROLLER"
 exec "$HOME_CONTROLLER" "$FLEX_CONFIG"
