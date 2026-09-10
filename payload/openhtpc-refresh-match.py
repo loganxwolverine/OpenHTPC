@@ -487,8 +487,24 @@ class TelemetryCollector:
         }
 
 
-def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_id=None, **kwargs):
+def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
     with matching(home, media, dispatch_id=dispatch_id) as tx:
+        switched = bool(tx and tx.record.get('switch_requested'))
+        if audio_prep is not None:
+            try:
+                audio_prep(settle_timeout=1.5 if switched else 0.0)
+            except TypeError:
+                try: audio_prep()
+                except Exception: pass
+            except Exception:
+                pass
+        elif decision is not None:
+            try:
+                policy_mod = load("openhtpc-playback-policy.py")
+                if hasattr(policy_mod, "prepare_audio_target_bitstream"):
+                    policy_mod.prepare_audio_target_bitstream(decision, runner=runner, settle_timeout=1.5 if switched else 0.0)
+            except Exception:
+                pass
         owner = tx.record['owner'] if tx else uuid.uuid4().hex
         sock_path = pathlib.Path(tempfile.gettempdir()) / f"openhtpc-mpv-{owner}.sock"
         if sock_path.exists():

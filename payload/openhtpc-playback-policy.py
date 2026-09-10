@@ -978,6 +978,7 @@ def prepare_pipewire_hdmi_bitstream(
     target_descriptor: dict[str, Any] | None = None,
     runner: Callable[..., Any] = subprocess.run,
     finder: Callable[[str], str | None] = shutil.which,
+    settle_timeout: float = 0.0,
 ) -> dict[str, Any]:
     """Inspect and prepare PipeWire HDMI sink for bitstream HD passthrough if required."""
     if isinstance(sink_target, dict):
@@ -986,17 +987,31 @@ def prepare_pipewire_hdmi_bitstream(
     if isinstance(sink_target, str) and sink_target.startswith("pipewire/"):
         sink_target = sink_target[len("pipewire/"):]
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    expect_hdmi = True
+    if target_descriptor and isinstance(target_descriptor, dict):
+        device_type = target_descriptor.get("device_type")
+        if device_type and device_type not in ("HDMI", "UNKNOWN"):
+            expect_hdmi = False
+
     sink = inspect_sink(sink_target, runner=runner)
+    if settle_timeout > 0 and requested_mode == "BITSTREAM":
+        deadline = time.monotonic() + settle_timeout
+        while time.monotonic() < deadline:
+            if sink and sink.get("id") is not None:
+                if not expect_hdmi or bool(sink.get("is_hdmi", False)):
+                    break
+            time.sleep(0.1)
+            sink = inspect_sink(sink_target, runner=runner)
+
     sink_id = sink.get("id")
     sink_name = sink.get("name")
     sink_desc = sink.get("description")
     sink_profile = sink.get("profile")
     sink_media_class = sink.get("media_class")
     is_hdmi = bool(sink.get("is_hdmi", False))
-    if target_descriptor and isinstance(target_descriptor, dict):
-        device_type = target_descriptor.get("device_type")
-        if device_type and device_type != "HDMI" and device_type != "UNKNOWN":
-            is_hdmi = False
+    if not expect_hdmi:
+        is_hdmi = False
     property_codecs = list(sink.get("codecs", []))
     req_codecs = list(REQUIRED_BITSTREAM_CODECS)
 
@@ -1085,6 +1100,12 @@ def prepare_pipewire_hdmi_bitstream(
         return base_diag
 
     codecs_after = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
+    if settle_timeout > 0 and not all(codec in codecs_after for codec in req_codecs):
+        for _ in range(3):
+            time.sleep(0.05)
+            codecs_after = get_effective_spa_codecs(sink_id, runner=runner, finder=finder)
+            if all(codec in codecs_after for codec in req_codecs):
+                break
     base_diag["iec958_codecs_after"] = codecs_after
     base_diag["iec958_prepare_attempted"] = True
     base_diag["iec958_prepare_method"] = "pw-cli"
@@ -1104,6 +1125,7 @@ def prepare_audio_target_bitstream(
     *,
     runner: Callable[..., Any] = subprocess.run,
     finder: Callable[[str], str | None] = shutil.which,
+    settle_timeout: float = 0.0,
 ) -> dict[str, Any]:
     """Prepare PipeWire HDMI bitstream according to resolved decision and audio target."""
     audio_output = decision.get("audio_output") or {}
@@ -1112,21 +1134,27 @@ def prepare_audio_target_bitstream(
     sink_target = audio_target.get("sink_target") or "@DEFAULT_AUDIO_SINK@"
     target_desc = audio_target.get("descriptor")
     try:
-        return prepare_pipewire_hdmi_bitstream(
+        diag = prepare_pipewire_hdmi_bitstream(
             requested_mode,
             sink_target=sink_target,
             target_descriptor=target_desc,
             runner=runner,
             finder=finder,
+            settle_timeout=settle_timeout,
         )
     except Exception:
-        return {
+        diag = {
             "audio_sink_id": None,
             "audio_sink_is_hdmi": False,
             "iec958_prepare_attempted": False,
             "iec958_prepare_status": "FAILED",
             "iec958_prepare_reason": "PREPARATION_EXCEPTION",
         }
+    if isinstance(audio_target, dict) and diag.get("audio_sink_name"):
+        if audio_target.get("configured") == "SYSTEM":
+            audio_target["effective_sink_name"] = diag.get("audio_sink_name")
+            audio_target["effective_sink_id"] = diag.get("audio_sink_id")
+    return diag
 
 
 def choose_subtitle(policy: str, probe: dict | None) -> dict:
@@ -1165,15 +1193,25 @@ def choose_dvd_subtitle(policy: str, optical_state: dict | None) -> dict:
             "reason": "dvd_french_full_track", "mpv_args": ["--slang=fr,fra,fre"]}
 
 
-def play_mpv(home, command, *, media=None, runner=subprocess.run, refresh_dispatch_id=None, **kwargs):
+def play_mpv(home, command, *, media=None, runner=subprocess.run, refresh_dispatch_id=None, decision=None, audio_prep=None, **kwargs):
     """Shared T8.6 lifecycle; refresh helper failure never prevents MPV launch."""
     try:
         spec = importlib.util.spec_from_file_location("openhtpc_refresh_match", pathlib.Path(__file__).with_name("openhtpc-refresh-match.py"))
         helper = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(helper)
     except (OSError, ImportError, AttributeError):
+        if audio_prep is not None:
+            try:
+                audio_prep()
+            except Exception:
+                pass
+        elif decision is not None and hasattr(sys.modules.get(__name__), "prepare_audio_target_bitstream"):
+            try:
+                prepare_audio_target_bitstream(decision, runner=runner)
+            except Exception:
+                pass
         return runner(command, **kwargs)
-    return helper.run_playback(home, command, media=media, runner=runner, dispatch_id=refresh_dispatch_id, **kwargs)
+    return helper.run_playback(home, command, media=media, runner=runner, dispatch_id=refresh_dispatch_id, decision=decision, audio_prep=audio_prep, **kwargs)
 
 
 def probe_media(path: pathlib.Path, ffprobe: str | None = None) -> dict | None:

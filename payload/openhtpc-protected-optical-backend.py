@@ -163,18 +163,23 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     fd,name=tempfile.mkstemp(prefix="optical-mpv.",suffix=".log",dir=state_root);os.close(fd);attempt=pathlib.Path(name)
     policy_args=effective_policy_args(decision)
     requested_mode=(decision.get("audio_output") or {}).get("requested","PCM")
-    pw_diag=None
-    try:
-        effective_pw_runner=pw_runner if pw_runner is not None else subprocess.run
-        if hasattr(policy, "prepare_audio_target_bitstream"):
-            pw_diag=policy.prepare_audio_target_bitstream(decision,runner=effective_pw_runner,finder=finder)
-        else:
-            target_info = decision.get("audio_target") or {}
-            sink_target = target_info.get("sink_target") or "@DEFAULT_AUDIO_SINK@"
-            target_desc = target_info.get("descriptor")
-            pw_diag=prepare_pipewire_hdmi_bitstream(requested_mode,sink_target=sink_target,target_descriptor=target_desc,runner=effective_pw_runner,finder=finder)
-    except Exception:
-        pw_diag={"audio_sink_id":None,"audio_sink_is_hdmi":False,"iec958_prepare_attempted":False,"iec958_prepare_status":"FAILED","iec958_prepare_reason":"PREPARATION_EXCEPTION"}
+    pw_diag_holder = [None]
+    def audio_prep(settle_timeout: float = 0.0):
+        nonlocal pw_diag_holder
+        diag = None
+        try:
+            effective_pw_runner = pw_runner if pw_runner is not None else subprocess.run
+            if hasattr(policy, "prepare_audio_target_bitstream"):
+                diag = policy.prepare_audio_target_bitstream(decision, runner=effective_pw_runner, finder=finder, settle_timeout=settle_timeout)
+            else:
+                target_info = decision.get("audio_target") or {}
+                sink_target = target_info.get("sink_target") or "@DEFAULT_AUDIO_SINK@"
+                target_desc = target_info.get("descriptor")
+                diag = prepare_pipewire_hdmi_bitstream(requested_mode, sink_target=sink_target, target_descriptor=target_desc, runner=effective_pw_runner, finder=finder, settle_timeout=settle_timeout)
+        except Exception:
+            diag = {"audio_sink_id": None, "audio_sink_is_hdmi": False, "iec958_prepare_attempted": False, "iec958_prepare_status": "FAILED", "iec958_prepare_reason": "PREPARATION_EXCEPTION"}
+        pw_diag_holder[0] = diag
+        return diag
     command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",
              "--cache=yes","--demuxer-readahead-secs=12.0","--demuxer-max-bytes=268435456","--demuxer-max-back-bytes=67108864",
              f"--log-file={attempt}",*policy_args,f"--bluray-device={request['device']}","--","bd://"]
@@ -210,13 +215,17 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     started=clock()
     try:
         if policy is not None and hasattr(policy, "play_mpv"):
-            completed=policy.play_mpv(home,command,runner=runner,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
+            completed=policy.play_mpv(home,command,runner=runner,decision=decision,audio_prep=audio_prep,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
         else:
+            audio_prep()
             completed=runner(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,env=os.environ.copy())
         exit_code=int(completed.returncode);reason="NONE"
     except OSError:
         exit_code=127;reason="MPV_NOT_STARTED"
     elapsed=max(0.0,clock()-started)
+    pw_diag=pw_diag_holder[0]
+    if pw_diag is None:
+        pw_diag=audio_prep()
     try:raw=attempt.read_text(encoding="utf-8",errors="replace")
     except OSError:raw=""
     finally:attempt.unlink(missing_ok=True)
