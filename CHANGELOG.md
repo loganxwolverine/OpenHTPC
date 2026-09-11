@@ -1,5 +1,14 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 7 — 1.2.0-rc7
+
+- Adds automatic display frame-rate matching for local media, DVD, and protected optical playback.
+- Ensures hermetic mode switching and exact display mode restoration via KScreen.
+- Synchronizes Couch UI display settings (`flex-v1.ini`) dynamically on preference changes without stale labels.
+- Preserves HD bitstream across display mode changes with post-resync PipeWire sink re-identification and codec verification before MPV launch.
+- Defers native HDR switching (OPENHTPC does not mutate KDE HDR state; HDR→SDR tone mapping remains a separate future image processing concern).
+- Passes the complete RC7 physical release qualification on Fedora KDE with Denon AVR.
+
 # OPENHTPC 1.2.0 Release Candidate 6 — 1.2.0-rc6
 
 - Centralizes and shares dynamic PipeWire IEC958 sink preparation helper between Protected Optical and MEDIA playback policy.

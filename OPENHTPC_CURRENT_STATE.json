@@ -129,13 +129,13 @@
   },
   "next_candidate": {
     "artifact_prepared": true,
-    "build": "public-release-1.2.0-rc6",
-    "filename": "OpenHTPC-1.2.0-RC6.tar.gz",
-    "media_audio_fix": "MEDIA_PIPEWIRE_IEC958_RECOVERY",
+    "build": "public-release-1.2.0-rc7",
+    "filename": "OpenHTPC-1.2.0-RC7.tar.gz",
+    "media_audio_fix": "HD_BITSTREAM_DISPLAY_RESYNC_LIFECYCLE",
     "physical_qualification": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
-    "purpose": "MEDIA_PIPEWIRE_IEC958_RECOVERY",
+    "purpose": "SALON_PLAYBACK_AND_RUNTIME_STABILITY",
     "status": "PENDING_PHYSICAL_VALIDATION_NOT_QUALIFIED",
-    "version": "1.2.0-rc6"
+    "version": "1.2.0-rc7"
   },
   "required_gate_reason": "PHYSICAL_VALIDATION",
   "required_human_gate_stage": "BEFORE_EXECUTION",
