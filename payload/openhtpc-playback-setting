@@ -77,6 +77,29 @@ def refresh_audio_mode_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+def refresh_refresh_matching_label(home: pathlib.Path, value: str) -> None:
+    """Synchronize the DISPLAY refresh matching parent label before Flex reloads it."""
+    target = home / ".config/openhtpc/flex-v1.ini"
+    try: lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError: return
+    label = "AUTOMATIQUE" if value == "AUTO" else "DÉSACTIVÉE"
+    section = ""; changed = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"): section = stripped[1:-1]
+        elif section == "SYSTEM_DISPLAY" and stripped.startswith("Entry") and "=ADAPTATION DE FRÉQUENCE : " in line:
+            prefix, rest = line.split("=", 1); _old, separator, suffix = rest.partition(";")
+            if separator: lines[index] = f"{prefix}=ADAPTATION DE FRÉQUENCE : {label};{suffix}"; changed = True
+    if not changed: return
+    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.writelines(lines); stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600); os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+
 def refresh_audio_target_label(home: pathlib.Path, target: dict) -> None:
     """Synchronize the AUDIO target parent label and checkmarks in active Flex config."""
     ini_path = home / ".config/openhtpc/flex-v1.ini"
@@ -209,6 +232,8 @@ def main() -> int:
         return 0
 
     policy.write_preference(home, sys.argv[1], sys.argv[2])
+    if sys.argv[1] == "refresh_matching":
+        refresh_refresh_matching_label(home, sys.argv[2])
     if sys.argv[1] == "presentation_mode":
         refresh_dvd_mode_label(home, sys.argv[2])
     if sys.argv[1] == "audio_output_mode":

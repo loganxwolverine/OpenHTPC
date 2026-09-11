@@ -14,8 +14,12 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 def module(name):
-    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), ROOT/'payload'/name)
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+    import importlib.machinery
+    loader = importlib.machinery.SourceFileLoader(name.replace('-', '_'), str(ROOT/'payload'/name))
+    spec = importlib.util.spec_from_loader(name.replace('-', '_'), loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m
 M = module('openhtpc-refresh-match.py')
 C = module('openhtpc-capabilities.py')
 P = module('openhtpc-playback-policy.py')
@@ -233,5 +237,20 @@ class RefreshTests(unittest.TestCase):
         self.assertIn('policy.play_mpv(home, command, media=media', (ROOT/'payload/openhtpc-play').read_text())
         self.assertIn('policy.play_mpv(home,command,runner=runner', (ROOT/'payload/openhtpc-protected-optical-backend.py').read_text())
         self.assertIn('refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --)', (ROOT/'payload/openhtpc-play-dvd').read_text())
+
+    def test_refresh_matching_label_flex_sync(self):
+        setting_mod = module('openhtpc-playback-setting')
+        ini = self.home / '.config/openhtpc/flex-v1.ini'
+        ini.parent.mkdir(parents=True, exist_ok=True)
+        ini.write_text(
+            "[SYSTEM_DISPLAY]\n"
+            "BackgroundImage=/path/bg.png\n"
+            "Entry1=ADAPTATION DE FRÉQUENCE : DÉSACTIVÉE;/path/icon;:submenu DISPLAY_REFRESH_MATCHING\n"
+            "Entry2=RETOUR;/path/back;:back\n"
+        )
+        setting_mod.refresh_refresh_matching_label(self.home, "AUTO")
+        self.assertIn("Entry1=ADAPTATION DE FRÉQUENCE : AUTOMATIQUE;/path/icon;:submenu DISPLAY_REFRESH_MATCHING", ini.read_text())
+        setting_mod.refresh_refresh_matching_label(self.home, "OFF")
+        self.assertIn("Entry1=ADAPTATION DE FRÉQUENCE : DÉSACTIVÉE;/path/icon;:submenu DISPLAY_REFRESH_MATCHING", ini.read_text())
 
 if __name__=='__main__':unittest.main()

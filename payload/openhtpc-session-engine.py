@@ -824,6 +824,9 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         audio_mode = "PCM"
     if audio_mode not in {"PCM", "BITSTREAM"}: audio_mode = "PCM"
 
+    refresh_matching = user_cfg.get("refresh_matching", "OFF") if isinstance(user_cfg, dict) else "OFF"
+    refresh_setting_label = "AUTOMATIQUE" if refresh_matching == "AUTO" else "DÉSACTIVÉE"
+
     audio_target = user_cfg.get("audio_output_target")
     if not isinstance(audio_target, dict):
         audio_target = {"mode": "SYSTEM", "node_name": None, "bus_path": None, "edid_name": None, "display_label": "SYSTEM", "device_type": "UNKNOWN"}
@@ -1011,9 +1014,14 @@ Entry1=RETOUR;{local_icon};:back
 
 [SYSTEM_DISPLAY]
 BackgroundImage={system_pages['display']}
-Entry1=ADAPTATION DE FRÉQUENCE : AUTOMATIQUE;{local_icon};:applyback {install/'openhtpc-playback-setting'} refresh_matching AUTO
-Entry2=ADAPTATION DE FRÉQUENCE : DÉSACTIVÉE;{local_icon};:applyback {install/'openhtpc-playback-setting'} refresh_matching OFF
-Entry3=RETOUR;{local_icon};:back
+Entry1=ADAPTATION DE FRÉQUENCE : {refresh_setting_label};{icon_display};:submenu DISPLAY_REFRESH_MATCHING
+Entry2=RETOUR;{icon_back};:back
+
+[DISPLAY_REFRESH_MATCHING]
+BackgroundImage={system_pages['display']}
+Entry1=AUTOMATIQUE;{icon_display};:applyback {install/'openhtpc-playback-setting'} refresh_matching AUTO
+Entry2=DÉSACTIVÉE;{icon_display};:applyback {install/'openhtpc-playback-setting'} refresh_matching OFF
+Entry3=RETOUR;{icon_back};:back
 
 [SYSTEM_AUDIO]
 BackgroundImage={system_pages['audio']}
