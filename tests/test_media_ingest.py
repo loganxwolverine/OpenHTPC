@@ -215,15 +215,22 @@ def test_1_fresh_explicit_file_ingestion(test_db, source_tree, monkeypatch):
         assert r[4] == "AVAILABLE"
 
         # Verify video_stream facts
-        vs = db.execute("SELECT stream_index, codec, profile, width, height, frame_rate_num, frame_rate_den, bit_depth, is_default FROM video_streams").fetchone()
-        assert vs == (0, "mpeg2video", "Main", 720, 576, 25, 1, 8, 1)
+        vs = db.execute(
+            "SELECT stream_index, codec, profile, width, height, frame_rate_num, frame_rate_den, "
+            "bit_depth, is_default, field_order, color_range, bitrate, language, avg_frame_rate, "
+            "r_frame_rate, is_forced FROM video_streams"
+        ).fetchone()
+        assert vs == (0, "mpeg2video", "Main", 720, 576, 25, 1, 8, 1, "tt", None, None, None, "25/1", "25/1", 0)
 
-        # Verify audio_stream facts (atmos and dtsx must NOT be inferred)
-        audio_rows = db.execute("SELECT stream_index, codec, channels, sample_rate, language, atmos, dtsx, is_default FROM audio_streams ORDER BY stream_index").fetchall()
+        # Verify audio_stream facts (atmos and dtsx must NOT be inferred, is_forced persisted)
+        audio_rows = db.execute(
+            "SELECT stream_index, codec, channels, sample_rate, language, atmos, dtsx, is_default, is_forced "
+            "FROM audio_streams ORDER BY stream_index"
+        ).fetchall()
         assert len(audio_rows) == 3
-        assert audio_rows[0] == (1, "ac3", 6, 48000, "fre", 0, 0, 1)
-        assert audio_rows[1] == (2, "ac3", 2, 48000, "eng", 0, 0, 0)
-        assert audio_rows[2] == (3, "ac3", 2, 48000, "fre", 0, 0, 0)
+        assert audio_rows[0] == (1, "ac3", 6, 48000, "fre", 0, 0, 1, 0)
+        assert audio_rows[1] == (2, "ac3", 2, 48000, "eng", 0, 0, 0, 0)
+        assert audio_rows[2] == (3, "ac3", 2, 48000, "fre", 0, 0, 0, 0)
 
         # Verify subtitle_stream facts
         sub_rows = db.execute("SELECT stream_index, codec, language, is_default, is_forced FROM subtitle_streams ORDER BY stream_index").fetchall()
@@ -512,8 +519,8 @@ def test_12_real_c1_dvd_pal_benchmark_ingestion(test_db):
         assert stats["resources"] == 1
         assert stats["video_streams"] >= 1
 
-        vs = db.execute("SELECT codec, width, height, frame_rate_num, frame_rate_den FROM video_streams").fetchone()
-        assert vs == ("mpeg2video", 720, 576, 25, 1)
+        vs = db.execute("SELECT codec, width, height, frame_rate_num, frame_rate_den, field_order, color_range, avg_frame_rate, r_frame_rate, is_forced FROM video_streams").fetchone()
+        assert vs == ("mpeg2video", 720, 576, 25, 1, "progressive", "tv", "25/1", "25/1", 0)
 
         # Re-ingest benchmark file: must be idempotent!
         res_dup = media_ingest.ingest_file(benchmark_file, benchmark_root, db_path=test_db)
@@ -548,3 +555,38 @@ def test_14_no_external_runtime_actions_or_side_effects(test_db, source_tree, mo
 
     # Check that test_db is the only file created/modified
     assert set(test_db.parent.glob("test_media.db*")) >= {test_db}
+
+
+def test_15_v2_stream_fields_full_roundtrip(test_db, source_tree, monkeypatch):
+    """Verify all Schema V2 fields roundtrip accurately from DEV2 descriptor."""
+    root, sample_file = source_tree
+    desc = _mock_probe_descriptor(sample_file)
+    desc["video_streams"][0].update({
+        "field_order": "tt",
+        "color_range": "tv",
+        "bitrate": 4500000,
+        "language": "fre",
+        "avg_frame_rate": "25/1",
+        "r_frame_rate": "25/1",
+        "is_forced": True,
+    })
+    desc["audio_streams"][0]["is_forced"] = True
+    desc["audio_streams"][1]["is_forced"] = False
+    monkeypatch.setattr(media_probe, "probe", lambda *args, **kwargs: desc)
+
+    res = media_ingest.ingest_file(sample_file, root, db_path=test_db)
+    assert res["ok"] is True
+
+    with closing(media_db.connect(test_db)) as db:
+        vs = db.execute(
+            "SELECT field_order, color_range, bitrate, language, avg_frame_rate, r_frame_rate, is_forced "
+            "FROM video_streams WHERE stream_index = 0"
+        ).fetchone()
+        assert vs == ("tt", "tv", 4500000, "fre", "25/1", "25/1", 1)
+
+        a_forced = db.execute(
+            "SELECT stream_index, is_forced FROM audio_streams ORDER BY stream_index"
+        ).fetchall()
+        assert a_forced[0] == (1, 1)
+        assert a_forced[1] == (2, 0)
+        assert a_forced[2] == (3, 0)

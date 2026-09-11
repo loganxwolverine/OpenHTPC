@@ -275,8 +275,10 @@ def ingest_descriptor(
                 pixel_format, bit_depth, frame_rate_num, frame_rate_den,
                 sample_aspect_ratio, display_aspect_ratio, color_primaries,
                 color_transfer, color_matrix, hdr_format, dolby_vision_profile,
-                duration_seconds, is_default
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, is_default,
+                field_order, color_range, bitrate, language,
+                avg_frame_rate, r_frame_rate, is_forced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 resource_id,
@@ -298,6 +300,13 @@ def ingest_descriptor(
                 v.get("dolby_vision_profile"),
                 v.get("duration_seconds"),
                 1 if v.get("is_default") else 0,
+                v.get("field_order"),
+                v.get("color_range"),
+                v.get("bitrate"),
+                v.get("language"),
+                v.get("avg_frame_rate"),
+                v.get("r_frame_rate"),
+                1 if v.get("is_forced") else 0,
             ),
         )
         video_count += 1
@@ -312,8 +321,8 @@ def ingest_descriptor(
             INSERT INTO audio_streams (
                 resource_id, stream_index, codec, profile, channels,
                 channel_layout, sample_rate, bitrate, language, title,
-                atmos, dtsx, is_default
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                atmos, dtsx, is_default, is_forced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 resource_id,
@@ -329,6 +338,7 @@ def ingest_descriptor(
                 0,
                 0,
                 1 if a.get("is_default") else 0,
+                1 if a.get("is_forced") else 0,
             ),
         )
         audio_count += 1
