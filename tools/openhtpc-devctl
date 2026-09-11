@@ -72,9 +72,11 @@ SSH_OP_TIMEOUT = 120
 TEST_PROFILES: dict[str, list[str]] = {
     "media-db": ["tests/test_media_db_foundation.py"],
     "media-probe": ["tests/test_media_probe.py"],
+    "media-ingest": ["tests/test_media_ingest.py"],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_probe.py",
+        "tests/test_media_ingest.py",
     ],
 }
 
@@ -765,6 +767,16 @@ def cmd_target_check(args: argparse.Namespace) -> int:
     )
     probe_ok = "EXECUTABLE" in r.stdout
     checks.append(("media-probe executable", probe_ok, r.stdout.strip()))
+
+    # Media Ingest presence and mode
+    r = _run_remote(
+        target,
+        ["bash", "-c",
+         "f=$HOME/.local/lib/openhtpc/openhtpc-media-ingest.py; "
+         'test -f "$f" && test -x "$f" && echo EXECUTABLE || echo MISSING_OR_NOT_EXECUTABLE'],
+    )
+    ingest_ok = "EXECUTABLE" in r.stdout
+    checks.append(("media-ingest executable", ingest_ok, r.stdout.strip()))
 
     # Optional media probe test
     if media_file:
