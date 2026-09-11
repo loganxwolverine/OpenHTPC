@@ -1,0 +1,1068 @@
+#!/usr/bin/env python3
+# Copyright 2026 Steve Dehanne
+# SPDX-License-Identifier: Apache-2.0
+#
+# Part of the OPENHTPC project. Original project by Steve Dehanne.
+"""OPENHTPC Development Workflow Orchestrator — development tooling only.
+
+THIS IS NOT AN OPENHTPC PRODUCT COMPONENT.
+Do NOT deploy to payload/, managed-files.txt, or PRODUCT_FILES.
+
+Normal workflow:
+
+    tools/openhtpc-devctl status
+    tools/openhtpc-devctl test media-foundation
+    tools/openhtpc-devctl build --name OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3 \\
+        --build-id media-probe-dev3 --dev-tranche DEV3 \\
+        --workstream MEDIA_FOUNDATION --tests "N/N PASS"
+    tools/openhtpc-devctl verify artifacts/OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3.tar.gz
+    tools/openhtpc-devctl ship artifacts/OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3.tar.gz
+    tools/openhtpc-devctl target-prepare [--dry-run]
+    tools/openhtpc-devctl target-install artifacts/OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3.tar.gz
+    tools/openhtpc-devctl target-check
+    # HUMAN VALIDATION REQUIRED — Steve physically validates image/audio/refresh/flex
+    tools/openhtpc-devctl qualification \\
+        --artifact OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3 \\
+        --image PASS --audio PASS --refresh PASS --flex-return PASS
+
+See DEVCTL.md for full documentation.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import io
+import json
+import os
+import pathlib
+import re
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import textwrap
+from typing import Any
+
+# ─── Repository constants ───────────────────────────────────────────────────
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ARTIFACTS = ROOT / "artifacts"
+TOOLS = ROOT / "tools"
+
+# Files/dirs excluded from archive (same as existing build scripts)
+EXCLUDED_FROM_ARCHIVE = {
+    ".git", "artifacts", "__pycache__", "diagnostics",
+    ".pytest_cache", ".openhtpc-autopilot",
+}
+
+# Protected stash sentinel
+PROTECTED_STASH_DESCRIPTION = "RC7 T5 network deferred"
+
+# Default remote target (can be overridden via --target)
+DEFAULT_TARGET_HOST = "steve@192.168.1.11"
+DEFAULT_TARGET_DIR = "/home/steve/dev/1.2/"
+
+# SSH/SCP timeouts (seconds)
+SSH_CONNECT_TIMEOUT = 15
+SSH_OP_TIMEOUT = 120
+
+# Known test profiles
+TEST_PROFILES: dict[str, list[str]] = {
+    "media-db": ["tests/test_media_db_foundation.py"],
+    "media-probe": ["tests/test_media_probe.py"],
+    "media-foundation": [
+        "tests/test_media_db_foundation.py",
+        "tests/test_media_probe.py",
+    ],
+}
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+def _sha256(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=check,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def _product_version() -> str:
+    try:
+        return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "UNKNOWN"
+
+
+def _check_protected_stash() -> tuple[bool, str]:
+    """Return (found, stash_ref_or_message)."""
+    result = _git("stash", "list", check=False)
+    if result.returncode != 0:
+        return False, "git stash list failed"
+    for line in result.stdout.splitlines():
+        if PROTECTED_STASH_DESCRIPTION in line:
+            ref = line.split(":")[0].strip()
+            return True, ref
+    return False, "NOT FOUND"
+
+
+def _repo_files() -> list[pathlib.Path]:
+    """Return sorted list of all files in the working tree, excluding EXCLUDED_FROM_ARCHIVE."""
+    return sorted(
+        (
+            p for p in ROOT.rglob("*")
+            if p.is_file() and not EXCLUDED_FROM_ARCHIVE.intersection(p.relative_to(ROOT).parts)
+        ),
+        key=lambda p: p.relative_to(ROOT).as_posix(),
+    )
+
+
+def _print_separator(width: int = 60) -> None:
+    print("─" * width)
+
+
+def _print_header(title: str) -> None:
+    _print_separator()
+    print(f"  {title}")
+    _print_separator()
+
+
+def _ssh_args(host: str, extra: list[str] | None = None) -> list[str]:
+    """Build safe SSH argument list (no shell=True, bounded timeout)."""
+    base = [
+        "ssh",
+        "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+        "-o", "BatchMode=no",
+        "-o", "StrictHostKeyChecking=accept-new",
+        host,
+    ]
+    return base + (extra or [])
+
+
+def _scp_args(src: str, dst: str) -> list[str]:
+    return [
+        "scp",
+        "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+        "-o", "StrictHostKeyChecking=accept-new",
+        src, dst,
+    ]
+
+
+def _run_remote(host: str, cmd: list[str], timeout: int = SSH_OP_TIMEOUT) -> subprocess.CompletedProcess[str]:
+    """Run a single remote command via SSH. No shell=True. No password injection."""
+    args = _ssh_args(host) + cmd
+    return subprocess.run(
+        args,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _build_archive_from_commit(commit: str, name: str, dest_dir: pathlib.Path) -> pathlib.Path:
+    """Build a reproducible tar.gz from an exact git commit using git archive.
+
+    Uses ``git archive --format=tar.gz`` which is fully deterministic given the
+    same commit hash and git installation.  This is the canonical approach used
+    for OPENHTPC RC8 Media Foundation development artifacts (verified against
+    the official DEV2 SHA256).
+
+    Only committed files are included — no working-tree pollution.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    archive = dest_dir / f"{name}.tar.gz"
+
+    with tempfile.NamedTemporaryFile(dir=dest_dir, prefix=f"{name}.", delete=False) as tmp:
+        tmp_path = pathlib.Path(tmp.name)
+
+    try:
+        git_result = subprocess.run(
+            ["git", "archive", "--format=tar.gz", f"--prefix={name}/", commit],
+            cwd=ROOT,
+            stdout=tmp_path.open("wb"),
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            check=True,
+        )
+        os.replace(tmp_path, archive)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return archive
+
+
+# ─── Command implementations ─────────────────────────────────────────────────
+
+def cmd_status(args: argparse.Namespace) -> int:
+    _print_header("OPENHTPC DEVCTL — STATUS")
+
+    # Git state
+    head_result = _git("rev-parse", "HEAD", check=False)
+    short_result = _git("rev-parse", "--short", "HEAD", check=False)
+    branch_result = _git("rev-parse", "--abbrev-ref", "HEAD", check=False)
+    status_result = _git("status", "--porcelain", check=False)
+
+    head = head_result.stdout.strip() if head_result.returncode == 0 else "UNKNOWN"
+    short = short_result.stdout.strip() if short_result.returncode == 0 else "UNKNOWN"
+    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "UNKNOWN"
+    porcelain = status_result.stdout.strip() if status_result.returncode == 0 else ""
+    dirty = bool(porcelain)
+    version = _product_version()
+
+    stash_found, stash_ref = _check_protected_stash()
+
+    print(f"Repository : {ROOT}")
+    print(f"Branch     : {branch}")
+    print(f"HEAD       : {head}")
+    print(f"Short HEAD : {short}")
+    print(f"State      : {'DIRTY' if dirty else 'CLEAN'}")
+    print(f"Version    : {version}")
+    print(f"Protected stash : {'PRESENT (' + stash_ref + ')' if stash_found else 'MISSING — WARNING'}")
+
+    if dirty and porcelain:
+        print("\nWorking tree changes:")
+        for line in porcelain.splitlines():
+            print(f"  {line}")
+
+    # Recent Media Foundation commits
+    log_result = _git(
+        "log", "--oneline", "-10",
+        "--", "payload/openhtpc-media-db.py", "payload/openhtpc-media-probe.py",
+        check=False,
+    )
+    if log_result.returncode == 0 and log_result.stdout.strip():
+        print("\nRecent Media Foundation commits:")
+        for line in log_result.stdout.strip().splitlines():
+            print(f"  {line}")
+
+    _print_separator()
+    return 0
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    profile = args.profile
+    if profile not in TEST_PROFILES:
+        print(f"ERROR: Unknown test profile '{profile}'", file=sys.stderr)
+        print(f"Available profiles: {', '.join(sorted(TEST_PROFILES))}", file=sys.stderr)
+        return 2
+
+    test_files = TEST_PROFILES[profile]
+    _print_header(f"OPENHTPC DEVCTL — TEST [{profile}]")
+    print(f"Profile    : {profile}")
+    print(f"Files      : {', '.join(test_files)}")
+    print()
+
+    cmd = [sys.executable, "-m", "pytest", "-v"] + test_files
+    result = subprocess.run(cmd, cwd=ROOT, check=False, stdin=subprocess.DEVNULL)
+    rc = result.returncode
+    print()
+    _print_separator()
+    print(f"  Result: {'PASS' if rc == 0 else 'FAIL'} (exit {rc})")
+    _print_separator()
+    return rc
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    name = args.name
+    build_id = args.build_id
+    dev_tranche = args.dev_tranche
+    workstream = args.workstream
+    tests = args.tests
+
+    _print_header(f"OPENHTPC DEVCTL — BUILD [{name}]")
+
+    # Resolve exact commit
+    commit_result = _git("rev-parse", "HEAD", check=False)
+    if commit_result.returncode != 0:
+        print("ERROR: Cannot resolve HEAD commit", file=sys.stderr)
+        return 1
+    commit = commit_result.stdout.strip()
+    version = _product_version()
+
+    print(f"Name       : {name}")
+    print(f"Build ID   : {build_id}")
+    print(f"Commit     : {commit}")
+    print(f"Version    : {version}")
+    print(f"Workstream : {workstream}")
+    print(f"Dev tranche: {dev_tranche}")
+    print(f"Tests      : {tests}")
+
+    # Warn if dirty
+    status_result = _git("status", "--porcelain", check=False)
+    if status_result.returncode == 0 and status_result.stdout.strip():
+        print("\nWARNING: Working tree is dirty. Archive is built from committed files only.")
+        print("         Untracked/modified files will NOT be included in the artifact.")
+
+    ARTIFACTS.mkdir(exist_ok=True)
+    archive = ARTIFACTS / f"{name}.tar.gz"
+    checksum = ARTIFACTS / f"{name}.tar.gz.sha256"
+    report = ARTIFACTS / f"{name}-report.json"
+
+    # Do NOT delete existing artifacts automatically — safety rule
+    for path in (archive, checksum, report):
+        if path.exists():
+            print(f"\nERROR: {path.name} already exists. Delete manually if replacing.", file=sys.stderr)
+            return 1
+
+    print("\nBuilding archive from exact commit (git archive)...")
+    archive = _build_archive_from_commit(commit, name, ARTIFACTS)
+
+    sha = _sha256(archive)
+    # Write sha256 sidecar using just the filename (not the full path)
+    checksum.write_text(f"{sha}  {archive.name}\n", encoding="utf-8")
+
+    # Verify archive root prefix
+    with tarfile.open(archive, "r:gz") as tar:
+        roots = {m.name.split("/", 1)[0] for m in tar.getmembers() if "/" in m.name}
+    if roots != {name}:
+        print(f"ERROR: Archive root prefix mismatch: {roots}", file=sys.stderr)
+        archive.unlink(missing_ok=True)
+        checksum.unlink(missing_ok=True)
+        return 1
+
+    # Verify checksum round-trip
+    actual_sha = _sha256(archive)
+    if actual_sha != sha:
+        print("ERROR: SHA256 verification failed after write", file=sys.stderr)
+        return 1
+
+    # Build report JSON
+    report_data: dict[str, Any] = {
+        "schema": 1,
+        "artifact": archive.name,
+        "build_id": build_id,
+        "commit": commit,
+        "dev_tranche": dev_tranche,
+        "product": "OPENHTPC",
+        "sha256": sha,
+        "status": f"OPENHTPC_RC8_{workstream}_{dev_tranche}_READY_FOR_PHYSICAL_VALIDATION",
+        "tests": tests,
+        "version": version,
+        "workstream": workstream,
+    }
+    report.write_text(
+        json.dumps(report_data, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    print()
+    print(f"Archive  : {archive}")
+    print(f"SHA256   : {sha}")
+    print(f"Checksum : {checksum}")
+    print(f"Report   : {report}")
+    _print_separator()
+    print("  BUILD COMPLETE")
+    _print_separator()
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    archive_path = pathlib.Path(args.artifact).resolve()
+    if not archive_path.is_absolute():
+        archive_path = ROOT / args.artifact
+
+    _print_header(f"OPENHTPC DEVCTL — VERIFY [{archive_path.name}]")
+
+    errors: list[str] = []
+
+    # Archive exists
+    if not archive_path.is_file():
+        print(f"ERROR: Archive not found: {archive_path}", file=sys.stderr)
+        return 1
+
+    # SHA256 sidecar exists (look in same directory)
+    sha_path = archive_path.parent / f"{archive_path.name}.sha256"
+    if not sha_path.is_file():
+        errors.append(f"SHA256 sidecar missing: {sha_path}")
+    else:
+        sidecar_text = sha_path.read_text(encoding="utf-8").strip()
+        # Support "hash  filename" or "hash  path/filename"
+        parts = sidecar_text.split(None, 1)
+        if len(parts) != 2:
+            errors.append("SHA256 sidecar malformed")
+        else:
+            sidecar_sha = parts[0]
+            print(f"Sidecar SHA : {sidecar_sha}")
+            actual_sha = _sha256(archive_path)
+            print(f"Actual SHA  : {actual_sha}")
+            if sidecar_sha != actual_sha:
+                errors.append(f"SHA256 MISMATCH: sidecar={sidecar_sha} actual={actual_sha}")
+            else:
+                print("SHA match   : OK")
+
+    # Report exists
+    stem = archive_path.name
+    for suffix in (".tar.gz", ".tgz"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    report_path = archive_path.parent / f"{stem}-report.json"
+    if not report_path.is_file():
+        errors.append(f"Report JSON missing: {report_path}")
+    else:
+        report_data = json.loads(report_path.read_text(encoding="utf-8"))
+        report_sha = report_data.get("sha256", "")
+        print(f"Report SHA  : {report_sha}")
+        if report_sha and sha_path.is_file():
+            sidecar_sha2 = sha_path.read_text(encoding="utf-8").split()[0]
+            if report_sha != sidecar_sha2:
+                errors.append(f"Report sha256 != sidecar sha256: {report_sha} vs {sidecar_sha2}")
+            else:
+                print("Report SHA  : OK")
+
+        # Commit exists in repo
+        commit = report_data.get("commit", "")
+        if commit:
+            check = _git("cat-file", "-e", f"{commit}^{{commit}}", check=False)
+            if check.returncode != 0:
+                errors.append(f"Commit {commit} not found in local repository")
+            else:
+                print(f"Commit      : {commit} (found in repo)")
+
+    # Archive root prefix coherence
+    try:
+        with tarfile.open(archive_path, "r:gz") as tar:
+            roots = {m.name.split("/", 1)[0] for m in tar.getmembers() if "/" in m.name}
+            file_count = sum(1 for m in tar.getmembers() if m.isfile())
+        if len(roots) != 1:
+            errors.append(f"Archive has multiple roots: {roots}")
+        else:
+            root_name = next(iter(roots))
+            print(f"Archive root: {root_name}")
+            if root_name != stem:
+                errors.append(f"Archive root '{root_name}' != expected '{stem}'")
+            print(f"File count  : {file_count}")
+    except Exception as exc:
+        errors.append(f"Archive read error: {exc}")
+
+    print()
+    if errors:
+        for err in errors:
+            print(f"FAIL: {err}")
+        _print_separator()
+        print("  VERIFY FAILED")
+        _print_separator()
+        return 1
+
+    _print_separator()
+    print("  VERIFY PASS")
+    _print_separator()
+    return 0
+
+
+def cmd_ship(args: argparse.Namespace) -> int:
+    archive_path = pathlib.Path(args.artifact).resolve()
+    if not archive_path.is_absolute() or not archive_path.exists():
+        archive_path = ROOT / args.artifact
+
+    target = args.target or DEFAULT_TARGET_HOST
+    dest_dir = args.dest or DEFAULT_TARGET_DIR
+    dry_run = args.dry_run
+
+    _print_header(f"OPENHTPC DEVCTL — SHIP [{archive_path.name}] → {target}:{dest_dir}")
+
+    if dry_run:
+        print("[DRY-RUN MODE — no remote mutation]")
+
+    if not archive_path.is_file():
+        print(f"ERROR: Archive not found: {archive_path}", file=sys.stderr)
+        return 1
+
+    sha_path = archive_path.parent / f"{archive_path.name}.sha256"
+    stem = archive_path.name
+    for suffix in (".tar.gz", ".tgz"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    report_path = archive_path.parent / f"{stem}-report.json"
+
+    # Verify locally first
+    local_sha = _sha256(archive_path)
+    print(f"Local SHA256 : {local_sha}")
+
+    files_to_ship = [archive_path, sha_path, report_path]
+    for f in files_to_ship:
+        status = "OK" if f.is_file() else "MISSING"
+        print(f"  {f.name}: {status}")
+
+    missing = [f for f in files_to_ship if not f.is_file()]
+    if missing:
+        print(f"\nERROR: Missing files: {[f.name for f in missing]}", file=sys.stderr)
+        return 1
+
+    if dry_run:
+        print(f"\n[DRY-RUN] Would SCP to {target}:{dest_dir}:")
+        for f in files_to_ship:
+            print(f"  {f.name}")
+        print(f"\n[DRY-RUN] Would verify remote SHA256 of {archive_path.name}")
+        print(f"[DRY-RUN] Expected: {local_sha}")
+        _print_separator()
+        print("  SHIP DRY-RUN COMPLETE")
+        _print_separator()
+        return 0
+
+    # Create remote destination directory
+    print(f"\nCreating remote directory: {target}:{dest_dir}")
+    mkdir_result = _run_remote(target, ["mkdir", "-p", dest_dir])
+    if mkdir_result.returncode != 0:
+        print(f"ERROR: mkdir failed: {mkdir_result.stderr}", file=sys.stderr)
+        return 1
+
+    # SCP each file
+    for f in files_to_ship:
+        print(f"Shipping: {f.name} ...")
+        scp = subprocess.run(
+            _scp_args(str(f), f"{target}:{dest_dir}{f.name}"),
+            stdin=sys.stdin,
+            check=False,
+            timeout=SSH_OP_TIMEOUT,
+        )
+        if scp.returncode != 0:
+            print(f"ERROR: SCP failed for {f.name}", file=sys.stderr)
+            return 1
+
+    # Remote SHA256 verification (using actual destination path, not sidecar text)
+    remote_archive = f"{dest_dir}{archive_path.name}"
+    print(f"\nVerifying remote SHA256: {remote_archive}")
+    sha_result = _run_remote(target, ["sha256sum", remote_archive])
+    if sha_result.returncode != 0:
+        print(f"ERROR: Remote sha256sum failed: {sha_result.stderr}", file=sys.stderr)
+        return 1
+
+    remote_sha = sha_result.stdout.strip().split()[0]
+    print(f"Remote SHA256: {remote_sha}")
+    print(f"Local  SHA256: {local_sha}")
+    if remote_sha != local_sha:
+        print("ERROR: SHA256 MISMATCH — transfer integrity failure", file=sys.stderr)
+        return 1
+
+    print("SHA256 MATCH")
+    _print_separator()
+    print("  SHIP COMPLETE")
+    _print_separator()
+    return 0
+
+
+def cmd_target_prepare(args: argparse.Namespace) -> int:
+    target = args.target or DEFAULT_TARGET_HOST
+    dry_run = args.dry_run
+
+    _print_header(f"OPENHTPC DEVCTL — TARGET-PREPARE [{target}]")
+
+    if dry_run:
+        print("[DRY-RUN MODE — no remote mutation]")
+
+    timestamp = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    snapshot_base = f"/home/steve/dev/snapshots/openhtpc-pre-{timestamp}"
+
+    dirs_to_snapshot = [
+        "$HOME/.local/lib/openhtpc",
+        "$HOME/.config/openhtpc",
+        "$HOME/.local/share/openhtpc/media",
+    ]
+
+    print(f"Target         : {target}")
+    print(f"Snapshot base  : {snapshot_base}")
+    print(f"Dirs to snapshot:")
+    for d in dirs_to_snapshot:
+        print(f"  {d}")
+
+    if dry_run:
+        print(f"\n[DRY-RUN] Would create snapshot at {target}:{snapshot_base}")
+        print("[DRY-RUN] Would stop OPENHTPC after successful snapshot")
+        _print_separator()
+        print("  TARGET-PREPARE DRY-RUN COMPLETE")
+        _print_separator()
+        return 0
+
+    # Create snapshot directory
+    print(f"\nCreating snapshot directory on {target} ...")
+    mkdir_r = _run_remote(target, ["mkdir", "-p", snapshot_base])
+    if mkdir_r.returncode != 0:
+        print(f"ERROR: Cannot create snapshot directory: {mkdir_r.stderr}", file=sys.stderr)
+        return 1
+
+    # Copy each source directory into snapshot
+    for src in dirs_to_snapshot:
+        # Expand $HOME remotely — use a shell one-liner safely (not shell=True locally)
+        check_r = _run_remote(
+            target,
+            ["bash", "-c", f'[ -d "{src}" ] && echo EXISTS || echo MISSING'],
+        )
+        if "EXISTS" in check_r.stdout:
+            print(f"Snapshotting {src} ...")
+            cp_r = _run_remote(
+                target,
+                ["bash", "-c", f'cp -a "{src}" "{snapshot_base}/" 2>&1'],
+            )
+            if cp_r.returncode != 0:
+                print(f"ERROR: Snapshot of {src} failed: {cp_r.stdout}", file=sys.stderr)
+                return 1
+        else:
+            print(f"Skipping {src} (not present on target)")
+
+    print(f"\nSnapshot complete: {target}:{snapshot_base}")
+
+    # Stop OPENHTPC cleanly
+    print("Stopping OPENHTPC on target ...")
+    stop_r = _run_remote(
+        target,
+        ["bash", "-c", "openhtpc stop 2>&1 || true; sleep 2; echo STOPPED"],
+    )
+    print(f"Stop result: {stop_r.stdout.strip()}")
+
+    _print_separator()
+    print("  TARGET-PREPARE COMPLETE")
+    print(f"  Snapshot: {target}:{snapshot_base}")
+    _print_separator()
+    return 0
+
+
+def cmd_target_install(args: argparse.Namespace) -> int:
+    archive_path = pathlib.Path(args.artifact).resolve()
+    if not archive_path.exists():
+        archive_path = ROOT / args.artifact
+
+    target = args.target or DEFAULT_TARGET_HOST
+    dest_dir = args.dest or DEFAULT_TARGET_DIR
+    dry_run = args.dry_run
+
+    _print_header(f"OPENHTPC DEVCTL — TARGET-INSTALL [{archive_path.name}] on {target}")
+
+    if dry_run:
+        print("[DRY-RUN MODE — no remote mutation]")
+        print(f"\n[DRY-RUN] Would verify remote SHA256 of {archive_path.name}")
+        print(f"[DRY-RUN] Would extract archive in {dest_dir}")
+        print("[DRY-RUN] Would run update.sh")
+        _print_separator()
+        print("  TARGET-INSTALL DRY-RUN COMPLETE")
+        _print_separator()
+        return 0
+
+    local_sha = _sha256(archive_path)
+    remote_archive = f"{dest_dir}{archive_path.name}"
+
+    # Verify remote artifact checksum
+    print("Verifying remote artifact SHA256 ...")
+    sha_r = _run_remote(target, ["sha256sum", remote_archive])
+    if sha_r.returncode != 0:
+        print(f"ERROR: Remote artifact not found or sha256sum failed: {sha_r.stderr}", file=sys.stderr)
+        return 1
+    remote_sha = sha_r.stdout.strip().split()[0]
+    print(f"Remote SHA256: {remote_sha}")
+    print(f"Local  SHA256: {local_sha}")
+    if remote_sha != local_sha:
+        print("ERROR: Remote artifact SHA256 mismatch. Ship again.", file=sys.stderr)
+        return 1
+    print("SHA256 MATCH")
+
+    # Extract archive name stem
+    stem = archive_path.name
+    for suffix in (".tar.gz", ".tgz"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+
+    # Extract to dest_dir
+    print(f"\nExtracting {archive_path.name} on {target}:{dest_dir} ...")
+    extract_r = _run_remote(
+        target,
+        ["bash", "-c", f'cd "{dest_dir}" && tar -xzf "{archive_path.name}" 2>&1'],
+    )
+    if extract_r.returncode != 0:
+        print(f"ERROR: Extraction failed: {extract_r.stdout}", file=sys.stderr)
+        return 1
+    print("Extraction: OK")
+
+    # Run update.sh
+    update_sh = f"{dest_dir}{stem}/update.sh"
+    print(f"\nRunning update.sh from {update_sh} ...")
+    update_r = _run_remote(
+        target,
+        ["bash", "-c", f'cd "{dest_dir}{stem}" && ./update.sh 2>&1'],
+        timeout=180,
+    )
+    print(update_r.stdout)
+    if update_r.returncode != 0:
+        print(f"ERROR: update.sh failed with exit {update_r.returncode}", file=sys.stderr)
+        return 1
+    print("update.sh: OK")
+
+    # Verify expected component installed (Media Foundation DEV2: media-probe)
+    expected_component = "$HOME/.local/lib/openhtpc/openhtpc-media-probe.py"
+    check_r = _run_remote(
+        target,
+        ["bash", "-c", f'test -x "{expected_component}" && echo MODE_OK || echo MISSING'],
+    )
+    component_ok = "MODE_OK" in check_r.stdout
+    print(f"\nMedia Probe installed: {'YES' if component_ok else 'NO — WARNING'}")
+
+    _print_separator()
+    print("  TARGET-INSTALL COMPLETE")
+    _print_separator()
+    return 0
+
+
+def cmd_target_check(args: argparse.Namespace) -> int:
+    target = args.target or DEFAULT_TARGET_HOST
+    media_file = args.media_file
+
+    _print_header(f"OPENHTPC DEVCTL — TARGET-CHECK [{target}]")
+    print("(Read-only post-install checks — no scanning, no mutation)")
+    print()
+
+    checks: list[tuple[str, bool, str]] = []
+
+    def check(name: str, result: subprocess.CompletedProcess[str], expect: str | None = None) -> bool:
+        ok = result.returncode == 0
+        if expect is not None:
+            ok = ok and expect in result.stdout
+        detail = result.stdout.strip()[:120]
+        checks.append((name, ok, detail))
+        return ok
+
+    # openhtpc version
+    r = _run_remote(target, ["openhtpc", "version"])
+    check("openhtpc version", r)
+    version_str = r.stdout.strip()
+    print(f"Installed version: {version_str}")
+
+    # Media DB status
+    r = _run_remote(
+        target,
+        ["python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "status"],
+    )
+    check("media-db status", r)
+
+    # Media DB verify
+    r = _run_remote(
+        target,
+        ["python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "verify"],
+    )
+    check("media-db verify", r)
+
+    # Media Probe presence and mode
+    r = _run_remote(
+        target,
+        ["bash", "-c",
+         "f=$HOME/.local/lib/openhtpc/openhtpc-media-probe.py; "
+         'test -f "$f" && test -x "$f" && echo EXECUTABLE || echo MISSING_OR_NOT_EXECUTABLE'],
+    )
+    probe_ok = "EXECUTABLE" in r.stdout
+    checks.append(("media-probe executable", probe_ok, r.stdout.strip()))
+
+    # Optional media probe test
+    if media_file:
+        print(f"\nProbing explicit file: {media_file}")
+        r = _run_remote(
+            target,
+            ["python3", "$HOME/.local/lib/openhtpc/openhtpc-media-probe.py",
+             "probe", media_file],
+        )
+        check("probe explicit file", r, '"ok": true')
+
+    print()
+    passed = sum(1 for _, ok, _ in checks if ok)
+    for name, ok, detail in checks:
+        status = "PASS" if ok else "FAIL"
+        print(f"  {status}  {name}")
+        if detail and not ok:
+            print(f"       {detail}")
+
+    print()
+    _print_separator()
+    print(f"  TARGET-CHECK: {passed}/{len(checks)} PASS")
+    _print_separator()
+    return 0 if passed == len(checks) else 1
+
+
+def cmd_collect(args: argparse.Namespace) -> int:
+    target = args.target or DEFAULT_TARGET_HOST
+
+    _print_header(f"OPENHTPC DEVCTL — COLLECT [{target}]")
+
+    bundle: dict[str, Any] = {
+        "schema": 1,
+        "collected_at": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+        "target": target,
+    }
+
+    def remote(cmd: list[str]) -> str:
+        r = _run_remote(target, cmd)
+        return r.stdout.strip() if r.returncode == 0 else f"ERROR: {r.stderr.strip()}"
+
+    bundle["openhtpc_version"] = remote(["openhtpc", "version"])
+    bundle["media_db_status"] = remote([
+        "python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "status",
+    ])
+    bundle["media_db_verify"] = remote([
+        "python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "verify",
+    ])
+    bundle["probe_sha256"] = remote([
+        "bash", "-c",
+        "sha256sum $HOME/.local/lib/openhtpc/openhtpc-media-probe.py 2>/dev/null || echo NOT_FOUND",
+    ])
+
+    print(json.dumps(bundle, indent=2, sort_keys=True))
+    _print_separator()
+    return 0
+
+
+def cmd_qualification(args: argparse.Namespace) -> int:
+    artifact_name = args.artifact
+    image = args.image
+    audio = args.audio
+    refresh = args.refresh
+    flex_return = args.flex_return
+
+    _print_header(f"OPENHTPC DEVCTL — QUALIFICATION [{artifact_name}]")
+
+    # Validate that human results are explicit (never auto-pass)
+    valid_values = {"PASS", "FAIL", "SKIP"}
+    for field, value in (("image", image), ("audio", audio), ("refresh", refresh), ("flex_return", flex_return)):
+        if value not in valid_values:
+            print(f"ERROR: --{field.replace('_', '-')} must be PASS, FAIL, or SKIP (got {value!r})", file=sys.stderr)
+            return 2
+
+    # Resolve artifact files
+    stem = artifact_name
+    for suffix in (".tar.gz", ".tgz"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    archive = ARTIFACTS / f"{stem}.tar.gz"
+    sha_sidecar = ARTIFACTS / f"{stem}.tar.gz.sha256"
+    report_path = ARTIFACTS / f"{stem}-report.json"
+    out_path = ARTIFACTS / f"{stem}.validation.json"
+
+    if not archive.is_file():
+        print(f"ERROR: Archive not found: {archive}", file=sys.stderr)
+        return 1
+    if not report_path.is_file():
+        print(f"ERROR: Report not found: {report_path}", file=sys.stderr)
+        return 1
+
+    sha = _sha256(archive)
+    commit_result = _git("rev-parse", "HEAD", check=False)
+    commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "UNKNOWN"
+
+    report_data = json.loads(report_path.read_text(encoding="utf-8"))
+
+    overall_physical = "PASS" if all(v == "PASS" for v in (image, audio, refresh, flex_return)) else "FAIL"
+
+    validation: dict[str, Any] = {
+        "schema": 1,
+        "artifact": f"{stem}.tar.gz",
+        "build": report_data.get("build_id", ""),
+        "commit": commit,
+        "decisive_test": "REAL_MEDIA_PROBE_AND_RC7_NON_REGRESSION_SMOKE",
+        "dev_tranche": report_data.get("dev_tranche", ""),
+        "human_physical_validation_required": True,
+        "installation_method": "update.sh",
+        "physical_qualification": overall_physical,
+        "qualified_by": "steve (human)",
+        "qualified_at": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+        "sha256": sha,
+        "version": report_data.get("version", _product_version()),
+        "workstream": report_data.get("workstream", ""),
+        "physical_checks": {
+            "image": image,
+            "audio": audio,
+            "refresh_rate": refresh,
+            "flex_return": flex_return,
+        },
+    }
+
+    if out_path.exists():
+        print(f"ERROR: Validation file already exists: {out_path}", file=sys.stderr)
+        print("Delete manually if you intend to replace it.", file=sys.stderr)
+        return 1
+
+    out_path.write_text(json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(f"Artifact   : {stem}.tar.gz")
+    print(f"SHA256     : {sha}")
+    print(f"Image      : {image}")
+    print(f"Audio      : {audio}")
+    print(f"Refresh    : {refresh}")
+    print(f"Flex return: {flex_return}")
+    print(f"Overall    : {overall_physical}")
+    print(f"Written to : {out_path}")
+    _print_separator()
+    print(f"  QUALIFICATION {'COMPLETE — PASS' if overall_physical == 'PASS' else 'COMPLETE — FAIL'}")
+    _print_separator()
+    return 0 if overall_physical == "PASS" else 1
+
+
+def cmd_human_gate(args: argparse.Namespace) -> int:
+    """Explicit human validation gate — never auto-passes."""
+    _print_header("OPENHTPC DEVCTL — HUMAN VALIDATION REQUIRED")
+    print()
+    print(textwrap.dedent("""\
+        OPENHTPC has been installed and is ready for physical validation.
+
+        Please start OPENHTPC manually:
+
+            openhtpc start
+
+        Then verify the following by observation:
+
+            [ ] Image         — correct picture on display
+            [ ] Audio         — correct audio output / AVR passthrough
+            [ ] Refresh rate  — correct Hz switch for content
+            [ ] Flex return   — application returns to Flex on exit
+
+        When done, record results with:
+
+            tools/openhtpc-devctl qualification \\
+                --artifact <NAME> \\
+                --image PASS \\
+                --audio PASS \\
+                --refresh PASS \\
+                --flex-return PASS
+
+        Do NOT pass --image/--audio/--refresh/--flex-return automatically.
+        Only Steve's physical observation is authoritative.
+    """))
+    _print_separator()
+    print("  HUMAN VALIDATION GATE — WAITING FOR STEVE")
+    _print_separator()
+    return 0
+
+
+# ─── Argument parser ─────────────────────────────────────────────────────────
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="openhtpc-devctl",
+        description="OPENHTPC Development Workflow Orchestrator (dev tooling only)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Normal workflow:
+              status             → inspect repo state
+              test <profile>     → run focused test suite
+              build ...          → produce artifact from HEAD commit
+              verify <artifact>  → verify artifact integrity
+              ship <artifact>    → SCP to target host
+              target-prepare     → snapshot + stop (before install)
+              target-install     → install via update.sh
+              target-check       → post-install read-only checks
+              human-gate         → print validation instructions for Steve
+              collect            → collect validation bundle from target
+              qualification      → record Steve's physical PASS/FAIL
+        """),
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # status
+    sub.add_parser("status", help="Show repository status")
+
+    # test
+    p_test = sub.add_parser("test", help="Run a named test profile")
+    p_test.add_argument("profile", choices=list(TEST_PROFILES), help="Test profile name")
+
+    # build
+    p_build = sub.add_parser("build", help="Build artifact from HEAD commit")
+    p_build.add_argument("--name", required=True, help="Artifact base name (e.g. OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3)")
+    p_build.add_argument("--build-id", required=True, dest="build_id", help="Build ID (e.g. media-probe-dev3)")
+    p_build.add_argument("--dev-tranche", required=True, dest="dev_tranche", help="Dev tranche (e.g. DEV3)")
+    p_build.add_argument("--workstream", required=True, help="Workstream (e.g. MEDIA_FOUNDATION)")
+    p_build.add_argument("--tests", required=True, help='Test summary (e.g. "22/22 PASS")')
+
+    # verify
+    p_verify = sub.add_parser("verify", help="Verify artifact integrity")
+    p_verify.add_argument("artifact", help="Path to .tar.gz artifact")
+
+    # ship
+    p_ship = sub.add_parser("ship", help="Ship artifact to target host")
+    p_ship.add_argument("artifact", help="Path to .tar.gz artifact")
+    p_ship.add_argument("--target", default=None, help=f"Remote host (default: {DEFAULT_TARGET_HOST})")
+    p_ship.add_argument("--dest", default=None, help=f"Remote directory (default: {DEFAULT_TARGET_DIR})")
+    p_ship.add_argument("--dry-run", action="store_true", help="Print actions without executing")
+
+    # target-prepare
+    p_tp = sub.add_parser("target-prepare", help="Snapshot + stop target before installation")
+    p_tp.add_argument("--target", default=None, help=f"Remote host (default: {DEFAULT_TARGET_HOST})")
+    p_tp.add_argument("--dry-run", action="store_true", help="Print actions without executing")
+
+    # target-install
+    p_ti = sub.add_parser("target-install", help="Install artifact on target via update.sh")
+    p_ti.add_argument("artifact", help="Path to .tar.gz artifact")
+    p_ti.add_argument("--target", default=None, help=f"Remote host (default: {DEFAULT_TARGET_HOST})")
+    p_ti.add_argument("--dest", default=None, help=f"Remote directory (default: {DEFAULT_TARGET_DIR})")
+    p_ti.add_argument("--dry-run", action="store_true", help="Print actions without executing")
+
+    # target-check
+    p_tc = sub.add_parser("target-check", help="Read-only post-install checks on target")
+    p_tc.add_argument("--target", default=None, help=f"Remote host (default: {DEFAULT_TARGET_HOST})")
+    p_tc.add_argument("--media-file", default=None, dest="media_file",
+                      help="Explicit media file to probe (must be on target host)")
+
+    # collect
+    p_collect = sub.add_parser("collect", help="Collect validation bundle from target")
+    p_collect.add_argument("--target", default=None, help=f"Remote host (default: {DEFAULT_TARGET_HOST})")
+
+    # human-gate
+    sub.add_parser("human-gate", help="Print human validation instructions")
+
+    # qualification
+    p_qual = sub.add_parser("qualification", help="Record physical validation results")
+    p_qual.add_argument("--artifact", required=True, help="Artifact name or base stem")
+    p_qual.add_argument("--image", required=True, choices=["PASS", "FAIL", "SKIP"])
+    p_qual.add_argument("--audio", required=True, choices=["PASS", "FAIL", "SKIP"])
+    p_qual.add_argument("--refresh", required=True, choices=["PASS", "FAIL", "SKIP"])
+    p_qual.add_argument("--flex-return", required=True, dest="flex_return",
+                        choices=["PASS", "FAIL", "SKIP"])
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    dispatch = {
+        "status": cmd_status,
+        "test": cmd_test,
+        "build": cmd_build,
+        "verify": cmd_verify,
+        "ship": cmd_ship,
+        "target-prepare": cmd_target_prepare,
+        "target-install": cmd_target_install,
+        "target-check": cmd_target_check,
+        "collect": cmd_collect,
+        "human-gate": cmd_human_gate,
+        "qualification": cmd_qualification,
+    }
+
+    fn = dispatch.get(args.command)
+    if fn is None:
+        print(f"ERROR: Unknown command: {args.command}", file=sys.stderr)
+        return 2
+
+    try:
+        return fn(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
+    except subprocess.CalledProcessError as exc:
+        print(f"ERROR: subprocess failed: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
