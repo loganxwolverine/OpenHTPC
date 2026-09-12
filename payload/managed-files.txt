@@ -149,6 +149,7 @@ openhtpc-media-browser
 openhtpc-media-browser.py
 openhtpc-media-db.py
 openhtpc-media-ingest.py
+openhtpc-media-match.py
 openhtpc-media-picker
 openhtpc-media-probe.py
 openhtpc-media-remove
