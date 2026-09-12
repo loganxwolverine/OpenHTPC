@@ -295,6 +295,221 @@ class TestRuntimeGraphicalContext(unittest.TestCase):
         version_text = (ROOT / "VERSION").read_text().strip()
         self.assertEqual(version_text, "1.2.0-rc7")
 
+    def test_13_cinema_auto_stale_wayland_socket_does_not_invoke_kscreen(self):
+        """Case A: cinema-auto with WAYLAND_DISPLAY present but socket missing does not invoke kscreen."""
+        stale_env = {
+            "WAYLAND_DISPLAY": "wayland-999",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_env, clear=True):
+                sig = cinema_mod._build_current_output_sig()
+                self.assertEqual(sig, "")
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_14_cinema_auto_valid_wayland_socket_invokes_kscreen(self):
+        """Case B: cinema-auto with valid Wayland socket invokes kscreen-doctor normally."""
+        self._create_unix_socket(self.runtime_dir, "wayland-0")
+        valid_env = {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        mock_output = "Output: 1 HDMI-A-1\n1920x1080@60.00*\nColor resolution: 8 (8)\n"
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=0, stdout=mock_output)
+            with mock.patch.dict(os.environ, valid_env, clear=True):
+                sig = cinema_mod._build_current_output_sig()
+                self.assertTrue(len(sig) == 64)  # sha256 hex string
+                self.assertTrue(any(
+                    call[0][0] == ["kscreen-doctor", "-o"]
+                    for call in mock_run.call_args_list
+                ))
+
+    def test_15_cinema_auto_stale_x11_endpoint_does_not_invoke_kscreen(self):
+        """Stale X11 endpoint: cinema-auto with dead DISPLAY does not invoke kscreen."""
+        stale_x11 = {
+            "DISPLAY": ":99",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_x11, clear=True):
+                sig = cinema_mod._build_current_output_sig()
+                self.assertEqual(sig, "")
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_16_calibrate_stale_wayland_socket_does_not_invoke_kscreen(self):
+        """Case A: calibrate with WAYLAND_DISPLAY present but socket missing does not invoke kscreen."""
+        stale_env = {
+            "WAYLAND_DISPLAY": "wayland-999",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_env, clear=True):
+                sig = calibrate_mod._get_display_signature()
+                self.assertEqual(sig["connector"], "UNKNOWN")
+                self.assertIsNone(sig["width"])
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_17_calibrate_valid_wayland_socket_invokes_kscreen(self):
+        """Case B: calibrate with valid Wayland socket invokes kscreen-doctor normally."""
+        self._create_unix_socket(self.runtime_dir, "wayland-0")
+        valid_env = {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        mock_output = "Output: 1 DP-2\n3840x2160@120.00*\nColor resolution: 10 (10)\n"
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=0, stdout=mock_output)
+            with mock.patch.dict(os.environ, valid_env, clear=True):
+                sig = calibrate_mod._get_display_signature()
+                self.assertEqual(sig["connector"], "DP-2")
+                self.assertEqual(sig["width"], 3840)
+                self.assertEqual(sig["height"], 2160)
+                self.assertEqual(sig["refresh_hz"], 120.0)
+                self.assertEqual(sig["bit_depth"], 10)
+                self.assertTrue(any(
+                    call[0][0] == ["kscreen-doctor", "-o"]
+                    for call in mock_run.call_args_list
+                ))
+
+    def test_18_calibrate_stale_x11_endpoint_does_not_invoke_kscreen(self):
+        """Stale X11 endpoint: calibrate with dead DISPLAY does not invoke kscreen."""
+        stale_x11 = {
+            "DISPLAY": ":99",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_x11, clear=True):
+                sig = calibrate_mod._get_display_signature()
+                self.assertEqual(sig["connector"], "UNKNOWN")
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_19_benchmark_stale_wayland_socket_does_not_invoke_kscreen(self):
+        """Case A: benchmark with WAYLAND_DISPLAY present but socket missing does not invoke kscreen."""
+        stale_env = {
+            "WAYLAND_DISPLAY": "wayland-999",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_env, clear=True):
+                sig = benchmark_mod.get_display_signature()
+                self.assertEqual(sig["resolution"], "UNKNOWN")
+                self.assertIsNone(sig["width"])
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_20_benchmark_valid_wayland_socket_invokes_kscreen(self):
+        """Case B: benchmark with valid Wayland socket invokes kscreen-doctor normally."""
+        self._create_unix_socket(self.runtime_dir, "wayland-0")
+        valid_env = {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        mock_output = "Output: 1 HDMI-A-1\n1920x1080@50.00*\nColor resolution: 8 (8)\nScale: 1.0\n"
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=0, stdout=mock_output)
+            with mock.patch.dict(os.environ, valid_env, clear=True):
+                sig = benchmark_mod.get_display_signature()
+                self.assertEqual(sig["connector"], "HDMI-A-1")
+                self.assertEqual(sig["resolution"], "1920x1080")
+                self.assertEqual(sig["width"], 1920)
+                self.assertEqual(sig["height"], 1080)
+                self.assertEqual(sig["refresh_rate_hz"], 50.0)
+                self.assertTrue(any(
+                    call[0][0] == ["kscreen-doctor", "-o"]
+                    for call in mock_run.call_args_list
+                ))
+
+    def test_21_benchmark_stale_x11_endpoint_does_not_invoke_kscreen(self):
+        """Stale X11 endpoint: benchmark with dead DISPLAY does not invoke kscreen."""
+        stale_x11 = {
+            "DISPLAY": ":99",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.dict(os.environ, stale_x11, clear=True):
+                sig = benchmark_mod.get_display_signature()
+                self.assertEqual(sig["resolution"], "UNKNOWN")
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_22_refresh_match_runtime_apply_stale_socket_does_not_invoke_kscreen(self):
+        """Case A: refresh-match Runtime.apply with stale socket does not invoke kscreen."""
+        refresh_mod = _load_module("openhtpc_refresh_match_test2", PAYLOAD / "openhtpc-refresh-match.py")
+        r = refresh_mod.Runtime.__new__(refresh_mod.Runtime)
+        r.home = self.home
+        r.install = PAYLOAD
+        r.caps = caps_mod
+        stale_env = {
+            "WAYLAND_DISPLAY": "wayland-999",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+        }
+        output = {"output_id": 1, "connector": "DP-1"}
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.object(caps_mod, "resolve_graphical_context", return_value={"status": "RESOLVED", "environment": stale_env}):
+                res = r.apply(output, "mode-1")
+                self.assertFalse(res)
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
+    def test_23_refresh_match_runtime_apply_valid_socket_invokes_kscreen(self):
+        """Case B: refresh-match Runtime.apply with valid socket invokes kscreen-doctor normally."""
+        self._create_unix_socket(self.runtime_dir, "wayland-0")
+        refresh_mod = _load_module("openhtpc_refresh_match_test3", PAYLOAD / "openhtpc-refresh-match.py")
+        r = refresh_mod.Runtime.__new__(refresh_mod.Runtime)
+        r.home = self.home
+        r.install = PAYLOAD
+        r.caps = caps_mod
+        valid_env = {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={self.runtime_dir}/bus",
+        }
+        output = {"output_id": 1, "connector": "DP-1"}
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=0)
+            with mock.patch.object(caps_mod, "resolve_graphical_context", return_value={"status": "RESOLVED", "environment": valid_env}):
+                res = r.apply(output, "mode-1")
+                self.assertTrue(res)
+                self.assertTrue(any(
+                    call[0][0] == ["kscreen-doctor", "output.1.mode.mode-1"]
+                    for call in mock_run.call_args_list
+                ))
+
+    def test_24_refresh_match_runtime_apply_stale_x11_does_not_invoke_kscreen(self):
+        """Stale X11 endpoint: refresh-match Runtime.apply with dead DISPLAY does not invoke kscreen."""
+        refresh_mod = _load_module("openhtpc_refresh_match_test4", PAYLOAD / "openhtpc-refresh-match.py")
+        r = refresh_mod.Runtime.__new__(refresh_mod.Runtime)
+        r.home = self.home
+        r.install = PAYLOAD
+        r.caps = caps_mod
+        stale_x11 = {"DISPLAY": ":99"}
+        output = {"output_id": 1, "connector": "DP-1"}
+        with mock.patch("subprocess.run") as mock_run:
+            with mock.patch.object(caps_mod, "resolve_graphical_context", return_value={"status": "RESOLVED", "environment": stale_x11}):
+                res = r.apply(output, "mode-1")
+                self.assertFalse(res)
+                for call in mock_run.call_args_list:
+                    cmd = call[0][0] if call[0] else []
+                    self.assertNotIn("kscreen-doctor", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

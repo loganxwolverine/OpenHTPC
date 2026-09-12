@@ -195,10 +195,13 @@ class Runtime:
         if not re.fullmatch(r'[A-Za-z0-9_-]+', str(mode_id)): return False
         context = self.caps.resolve_graphical_context(home=self.home, install=self.install)
         if context.get('status') != 'RESOLVED': return False
+        resolved_env = context.get('environment', {})
+        if hasattr(self.caps, 'is_graphical_context_usable') and not self.caps.is_graphical_context_usable(resolved_env):
+            return False
         env = os.environ.copy()
         for key in ('DISPLAY','WAYLAND_DISPLAY','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS'):
             env.pop(key, None)
-        env.update(context.get('environment', {}))
+        env.update(resolved_env)
         result = subprocess.run(['kscreen-doctor', f"output.{output['output_id']}.mode.{mode_id}"],
                                 env=env, capture_output=True, text=True, timeout=8, check=False)
         return result.returncode == 0

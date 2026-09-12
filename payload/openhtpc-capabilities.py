@@ -90,17 +90,16 @@ def is_graphical_context_usable(context_or_env: dict[str, Any] | None, uid: int 
     uid = os.getuid() if uid is None else uid
     runtime = env.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
     runtime_path = pathlib.Path(runtime)
-    if not runtime_path.is_dir():
-        return False
 
     wayland = env.get("WAYLAND_DISPLAY")
     if wayland and isinstance(wayland, str) and re.fullmatch(r"wayland-[0-9]+", wayland):
-        sock = runtime_path / wayland
-        try:
-            if sock.is_socket() and (sock.stat().st_uid == uid or os.access(sock, os.R_OK | os.W_OK)):
-                return True
-        except OSError:
-            pass
+        if runtime_path.is_dir():
+            sock = runtime_path / wayland
+            try:
+                if sock.is_socket() and (sock.stat().st_uid == uid or os.access(sock, os.R_OK | os.W_OK)):
+                    return True
+            except OSError:
+                pass
 
     display = env.get("DISPLAY")
     if display and isinstance(display, str) and re.fullmatch(r":[0-9]+(?:\.[0-9]+)?", display):
@@ -166,6 +165,7 @@ def resolve_graphical_context(proc_root: pathlib.Path | None = None, uid: int | 
     if current:
         if not check_socket or is_graphical_context_usable(current, uid):
             return {"status":"RESOLVED","evidence":"CALLER_ENVIRONMENT","environment":current}
+        return {"status":"UNAVAILABLE","evidence":"CALLER_ENVIRONMENT_UNUSABLE","environment":{}}
     home=pathlib.Path.home() if home is None else home
     install=home/".local/lib/openhtpc" if install is None else install
     session=read_json(home/".local/state/openhtpc/runtime-session.json")

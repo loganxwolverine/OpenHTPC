@@ -52,11 +52,38 @@ def _load_catalog() -> dict:
     return {"scopes": {}}
 
 
+def _is_graphical_context_usable() -> bool:
+    """Return True if active graphical context points to a living, accessible display socket."""
+    try:
+        caps = sys.modules.get("openhtpc_capabilities")
+        if caps is None:
+            import importlib.util
+            cap_path = pathlib.Path(__file__).with_name("openhtpc-capabilities.py")
+            if not cap_path.is_file():
+                cap_path = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", "")) / "openhtpc-capabilities.py"
+            if cap_path.is_file():
+                spec = importlib.util.spec_from_file_location("openhtpc_capabilities", cap_path)
+                if spec and spec.loader:
+                    caps = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(caps)
+        if caps and hasattr(caps, "is_graphical_context_usable"):
+            if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+                return bool(caps.is_graphical_context_usable(dict(os.environ)))
+            if hasattr(caps, "resolve_graphical_context"):
+                ctx = caps.resolve_graphical_context()
+                if ctx.get("status") == "RESOLVED" and caps.is_graphical_context_usable(ctx.get("environment")):
+                    os.environ.update(ctx["environment"])
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def _build_current_output_sig() -> str:
     """Compute the current output_signature hash for staleness comparison."""
     try:
         import subprocess, re
-        if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+        if not _is_graphical_context_usable():
             return ""
         res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=3)
         if res.returncode == 0:
