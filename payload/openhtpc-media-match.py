@@ -87,6 +87,32 @@ def set_media_db_module(mod: Any) -> None:
     _MEDIA_DB = mod
 
 
+_TMDB_PROVIDER = None
+
+
+def _load_tmdb_provider() -> Any:
+    global _TMDB_PROVIDER
+    if _TMDB_PROVIDER is not None:
+        return _TMDB_PROVIDER
+    target = Path(__file__).resolve().parent / "openhtpc-media-provider-tmdb.py"
+    if not target.is_file():
+        target = Path.home() / ".local/lib/openhtpc/openhtpc-media-provider-tmdb.py"
+    if target.is_file():
+        spec = importlib.util.spec_from_file_location("openhtpc_media_provider_tmdb", target)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _TMDB_PROVIDER = mod
+            return mod
+    return None
+
+
+def set_tmdb_provider_module(mod: Any) -> None:
+    """Dependency injection helper for hermetic testing."""
+    global _TMDB_PROVIDER
+    _TMDB_PROVIDER = mod
+
+
 class MovieClues:
     __slots__ = ("title_clue", "year_clue", "raw_stem")
 
@@ -702,6 +728,114 @@ def evaluate_media_version(
     }
 
 
+def lookup_media_version(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    provider_name: str = "tmdb_movie",
+    auto_accept: bool = True,
+    language: str | None = None,
+    home: Path | None = None,
+    opener=None,
+) -> dict[str, Any]:
+    """Query metadata provider for media_version and evaluate candidates.
+
+    Guarantees:
+    - If match_locked = 1, short-circuits BEFORE network request.
+    - On provider error/failure, leaves DB completely untouched (non-destructive).
+    - On provider success, hands candidates to evaluate_media_version().
+    """
+    # 1. Fetch media_version and associated resource
+    cur = db.execute(
+        """
+        SELECT mv.work_id, mv.identification_state, mv.match_locked, mv.duration_seconds,
+               r.relative_path, r.canonical_path
+        FROM media_versions mv
+        LEFT JOIN resources r ON r.media_version_id = mv.id
+        WHERE mv.id = ?
+        LIMIT 1
+        """,
+        (media_version_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return {"ok": False, "error": f"MEDIA_VERSION_NOT_FOUND: {media_version_id}"}
+
+    work_id, ident_state, match_locked, duration_sec, rel_path, can_path = row
+
+    # 2. Lock check: short-circuit before network call!
+    if match_locked == 1:
+        return {
+            "ok": True,
+            "status": "LOCKED",
+            "message": "media_version is locked by user; lookup skipped.",
+            "media_version_id": media_version_id,
+            "work_id": work_id,
+            "identification_state": ident_state,
+            "match_locked": 1,
+        }
+
+    # 3. Clue extraction & privacy boundary query
+    path_to_parse = rel_path or can_path or f"movie_{media_version_id}"
+    clues = extract_movie_clues(path_to_parse)
+    provider_query = create_provider_query(clues)
+
+    # 4. Dispatch to provider
+    if provider_name == "tmdb_movie":
+        provider_mod = _load_tmdb_provider()
+        if provider_mod is None:
+            return {
+                "ok": False,
+                "error": "PROVIDER_NOT_AVAILABLE",
+                "detail": "openhtpc-media-provider-tmdb component not found",
+                "media_version_id": media_version_id,
+            }
+
+        search_kwargs: dict[str, Any] = {}
+        if opener is not None:
+            search_kwargs["opener"] = opener
+        if language is not None:
+            search_kwargs["language"] = language
+        if home is not None:
+            search_kwargs["home"] = home
+
+        pres = provider_mod.search_movies(
+            title=provider_query["title_query"],
+            year=provider_query["year_query"],
+            **search_kwargs,
+        )
+
+        if pres.status in (provider_mod.STATUS_OK, provider_mod.STATUS_OK_NO_RESULTS):
+            eval_res = evaluate_media_version(
+                db,
+                media_version_id,
+                pres.candidates,
+                auto_accept=auto_accept,
+            )
+            return {
+                "ok": True,
+                "provider": provider_name,
+                "provider_status": pres.status,
+                "evaluation": eval_res,
+            }
+        else:
+            # Provider failure: non-destructive! Zero database mutation!
+            return {
+                "ok": False,
+                "provider": provider_name,
+                "provider_status": pres.status,
+                "error": pres.error_code,
+                "detail": pres.error_detail,
+                "media_version_id": media_version_id,
+            }
+
+    return {
+        "ok": False,
+        "error": "UNSUPPORTED_PROVIDER",
+        "detail": f"Provider '{provider_name}' not supported",
+        "media_version_id": media_version_id,
+    }
+
+
 def get_media_version_status(db: sqlite3.Connection, media_version_id: int) -> dict[str, Any]:
     """Retrieve identity status and work details for a media_version."""
     cur = db.execute(
@@ -824,6 +958,13 @@ def main(argv: list[str] | None = None) -> int:
     status_p = subparsers.add_parser("status", help="Show identity status for media_version")
     status_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
 
+    # lookup --media-version-id <id> [--provider tmdb_movie] [--no-auto-accept] [--language <lang>]
+    lookup_p = subparsers.add_parser("lookup", help="Query metadata provider for media_version and evaluate")
+    lookup_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID to lookup")
+    lookup_p.add_argument("--provider", default="tmdb_movie", choices=["tmdb_movie"], help="Metadata provider")
+    lookup_p.add_argument("--no-auto-accept", action="store_true", help="Do not automatically accept top match")
+    lookup_p.add_argument("--language", default=None, help="Query language (defaults to provider default)")
+
     args = parser.parse_args(argv)
 
     if args.action == "clues":
@@ -854,6 +995,19 @@ def main(argv: list[str] | None = None) -> int:
             cands = get_candidates(db, args.media_version_id)
             print(json.dumps(cands, indent=2))
             return 0
+
+        if args.action == "lookup":
+            with db:
+                res = lookup_media_version(
+                    db,
+                    args.media_version_id,
+                    provider_name=args.provider,
+                    auto_accept=not args.no_auto_accept,
+                    language=args.language,
+                    home=home_path,
+                )
+            print(json.dumps(res, indent=2))
+            return 0 if res.get("ok") else 1
 
         if args.action == "evaluate":
             raw_cands = args.candidates.strip()

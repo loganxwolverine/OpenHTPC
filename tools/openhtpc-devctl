@@ -76,12 +76,14 @@ TEST_PROFILES: dict[str, list[str]] = {
     "media-ingest": ["tests/test_media_ingest.py"],
     "media-scan": ["tests/test_media_scan.py"],
     "media-match": ["tests/test_media_match.py"],
+    "media-provider-tmdb": ["tests/test_media_provider_tmdb.py"],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_probe.py",
         "tests/test_media_ingest.py",
         "tests/test_media_scan.py",
         "tests/test_media_match.py",
+        "tests/test_media_provider_tmdb.py",
     ],
 }
 

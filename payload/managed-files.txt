@@ -152,6 +152,7 @@ openhtpc-media-ingest.py
 openhtpc-media-match.py
 openhtpc-media-picker
 openhtpc-media-probe.py
+openhtpc-media-provider-tmdb.py
 openhtpc-media-remove
 openhtpc-media-scan.py
 openhtpc-media-sources
