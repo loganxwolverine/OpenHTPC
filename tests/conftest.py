@@ -36,6 +36,8 @@ def _record_real_tree_state() -> dict[pathlib.Path, float]:
     for root in (REAL_STATE_DIR, REAL_CONFIG_DIR):
         if root.is_dir():
             for p in root.rglob("*"):
+                if p.name == "optical-refresh.lock":
+                    continue
                 try:
                     state[p.resolve()] = p.stat().st_mtime_ns
                 except OSError:

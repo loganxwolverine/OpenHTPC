@@ -17,7 +17,20 @@ import sys
 import tempfile
 import time
 
-VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
+def _load_media_types():
+    target = pathlib.Path(__file__).resolve().parent / "openhtpc-media-types.py"
+    if not target.is_file():
+        target = pathlib.Path.home() / ".local/lib/openhtpc/openhtpc-media-types.py"
+    if target.is_file():
+        spec = importlib.util.spec_from_file_location("openhtpc_media_types", target)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    return None
+
+_media_types = _load_media_types()
+VIDEO_EXTENSIONS = _media_types.VIDEO_EXTENSIONS if _media_types is not None else {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
 OPEN_MARKERS = ("VO:", "AO:", "Video:", "Audio:", "Starting playback", "Using hardware decoding")
 MAX_DIAGNOSTIC_LINES = 80
 

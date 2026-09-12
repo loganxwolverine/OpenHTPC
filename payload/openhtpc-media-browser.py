@@ -24,7 +24,20 @@ def load_theme(install: pathlib.Path):
     spec.loader.exec_module(module)
     return module
 
-VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
+def _load_media_types():
+    import importlib.util
+    for base in (pathlib.Path(__file__).resolve().parent, pathlib.Path.home() / ".local/lib/openhtpc"):
+        target = base / "openhtpc-media-types.py"
+        if target.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_types", target)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+_media_types = _load_media_types()
+VIDEO_EXTENSIONS = _media_types.VIDEO_EXTENSIONS if _media_types is not None else {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
 
 
 def path_id(path: pathlib.Path) -> str:

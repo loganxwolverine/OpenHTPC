@@ -452,17 +452,17 @@ def test_v1_to_v2_migration_rollback_on_failure(tmp_path):
 def test_v2_check_constraints(db):
     rid = resource(db)
     # Valid field_order values
-    for fo in ('progressive', 'tt', 'bb', 'tb', 'bt', 'unknown', None):
+    for i, fo in enumerate(('progressive', 'tt', 'bb', 'tb', 'bt', 'unknown', None)):
         db.execute("INSERT INTO video_streams (resource_id, stream_index, field_order) VALUES (?, ?, ?)",
-                   (rid, 100 + (hash(fo) % 1000), fo))
+                   (rid, 100 + i, fo))
     # Invalid field_order
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO video_streams (resource_id, stream_index, field_order) VALUES (?, 99, 'invalid')", (rid,))
 
     # Valid color_range values
-    for cr in ('tv', 'pc', 'unknown', None):
+    for i, cr in enumerate(('tv', 'pc', 'unknown', None)):
         db.execute("INSERT INTO video_streams (resource_id, stream_index, color_range) VALUES (?, ?, ?)",
-                   (rid, 200 + (hash(cr) % 1000), cr))
+                   (rid, 200 + i, cr))
     # Invalid color_range
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO video_streams (resource_id, stream_index, color_range) VALUES (?, 98, 'invalid')", (rid,))

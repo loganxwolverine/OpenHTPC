@@ -152,8 +152,10 @@ openhtpc-media-ingest.py
 openhtpc-media-picker
 openhtpc-media-probe.py
 openhtpc-media-remove
+openhtpc-media-scan.py
 openhtpc-media-sources
 openhtpc-media-sources-action
+openhtpc-media-types.py
 openhtpc-optical-monitor
 openhtpc-optical.py
 openhtpc-play
