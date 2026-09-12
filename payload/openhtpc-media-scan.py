@@ -230,14 +230,22 @@ class CandidateFile:
         self.mtime_ns = mtime_ns
 
 
+_media_types = _load_media_types()
+VIDEO_EXTENSIONS: frozenset[str] = _media_types.VIDEO_EXTENSIONS if _media_types is not None else frozenset({
+    ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"
+})
+
+
 def is_supported_media_extension(name: str) -> bool:
     """Case-insensitive check against authoritative VIDEO_EXTENSIONS."""
     mt = _load_media_types()
     if mt is not None and hasattr(mt, "is_candidate_media_file"):
         return mt.is_candidate_media_file(name)
     # Fallback to standard set
+    if name.startswith("."):
+        return False
     ext = os.path.splitext(name)[1].casefold()
-    return ext in {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
+    return ext in VIDEO_EXTENSIONS
 
 
 def enumerate_source_candidates(source_root: Path) -> tuple[dict[str, CandidateFile], str | None]:

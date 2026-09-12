@@ -962,17 +962,100 @@ def test_28_no_access_to_steve_real_media(sandbox_env):
 
 # ─── 29. Shared Media-Extension Authority Identical ─────────────────────────
 
-def test_29_shared_media_extension_authority_identical():
-    # Verify openhtpc-media-types.py defines exact same extensions
-    expected = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".vob"}
-    assert set(media_types.VIDEO_EXTENSIONS) == expected
+FROZEN_PRE_DEV4_EXTENSIONS = frozenset({
+    ".mkv",
+    ".mp4",
+    ".m4v",
+    ".avi",
+    ".mov",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".ts",
+    ".m2ts",
+    ".vob",
+})
 
-    # Test candidate helper
-    assert media_types.is_candidate_media_file("movie.MKV") is True
-    assert media_types.is_candidate_media_file("video.mp4") is True
+FORBIDDEN_EXTENSIONS = frozenset({
+    ".wmv",
+    ".flv",
+    ".iso",
+    ".rmvb",
+    ".divx",
+    ".asf",
+    ".ogv",
+    ".3gp",
+})
+
+
+def test_29_shared_media_extension_authority_compatibility_contract():
+    actual = media_types.VIDEO_EXTENSIONS
+
+    # Exact equality with frozen pre-DEV4 contract
+    assert actual == FROZEN_PRE_DEV4_EXTENSIONS
+    assert len(actual) == 11
+
+    # Fails if any pre-DEV4 extension was removed (.mpg, .mpeg, etc.)
+    removed = FROZEN_PRE_DEV4_EXTENSIONS - actual
+    assert not removed, f"Pre-DEV4 extensions were removed: {removed}"
+
+    # Fails if any new extension was silently added (.wmv, .flv, etc.)
+    added = actual - FROZEN_PRE_DEV4_EXTENSIONS
+    assert not added, f"New extensions were silently added: {added}"
+
+    # Verify forbidden / legacy formats are explicitly excluded
+    for forbidden in FORBIDDEN_EXTENSIONS:
+        assert forbidden not in actual
+        assert media_types.is_candidate_media_file(f"sample{forbidden}") is False
+        assert media_scan.is_supported_media_extension(f"sample{forbidden}") is False
+
+    # Candidate helper checks for all 11 valid extensions
+    for ext in FROZEN_PRE_DEV4_EXTENSIONS:
+        assert media_types.is_candidate_media_file(f"sample{ext}") is True
+        assert media_types.is_candidate_media_file(f"sample{ext.upper()}") is True
+        assert media_scan.is_supported_media_extension(f"sample{ext}") is True
+        assert media_scan.is_supported_media_extension(f"sample{ext.upper()}") is True
+
+    # Helper rejects non-media and hidden files
     assert media_types.is_candidate_media_file(".hidden.mkv") is False
     assert media_types.is_candidate_media_file("audio.flac") is False
     assert media_types.is_candidate_media_file("disc.iso") is False
+    assert media_scan.is_supported_media_extension(".hidden.mkv") is False
+    assert media_scan.is_supported_media_extension("audio.flac") is False
+
+
+def test_29b_runtime_consumers_use_shared_extension_authority():
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+
+    def _load_mod(name: str, path: Path):
+        loader = SourceFileLoader(name, str(path))
+        spec = importlib.util.spec_from_loader(name, loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        return mod
+
+    # Load the 3 qualified pre-DEV4 runtime consumers
+    browser_mod = _load_mod("test_browser", PAYLOAD / "openhtpc-media-browser.py")
+    engine_mod = _load_mod("test_engine", PAYLOAD / "openhtpc-session-engine.py")
+    play_mod = _load_mod("test_play", PAYLOAD / "openhtpc-play")
+
+    # 1. openhtpc-media-browser uses shared authority
+    assert browser_mod.VIDEO_EXTENSIONS == FROZEN_PRE_DEV4_EXTENSIONS
+    assert browser_mod.VIDEO_EXTENSIONS is browser_mod._media_types.VIDEO_EXTENSIONS
+
+    # 2. openhtpc-session-engine uses shared authority
+    assert engine_mod.VIDEO_EXTENSIONS == FROZEN_PRE_DEV4_EXTENSIONS
+    assert engine_mod.VIDEO_EXTENSIONS is engine_mod._media_types.VIDEO_EXTENSIONS
+
+    # 3. openhtpc-play uses shared authority
+    assert play_mod.VIDEO_EXTENSIONS == FROZEN_PRE_DEV4_EXTENSIONS
+    assert play_mod.VIDEO_EXTENSIONS is play_mod._media_types.VIDEO_EXTENSIONS
+
+    # 4. DEV4 scanner uses shared authority
+    assert media_scan.VIDEO_EXTENSIONS == FROZEN_PRE_DEV4_EXTENSIONS
+    assert media_scan._load_media_types() is not None
+
 
 
 # ─── 30. Size + Mtime Fingerprint Classification ────────────────────────────
