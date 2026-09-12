@@ -652,6 +652,50 @@ class TestQualification:
         val = json.loads(val_path.read_text())
         assert val["physical_qualification"] == "FAIL"
 
+    def test_qualification_dev3_refresh_and_decisive_evidence(self, tmp_path):
+        """DEV3 qualification preserves refresh limitation and decisive evidence."""
+        name = "OpenHTPC-1.2.0-RC8-Media-Foundation-Dev3"
+        archive = tmp_path / f"{name}.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tar:
+            data = b"data"
+            info = tarfile.TarInfo(name=f"{name}/VERSION")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        sha = devctl._sha256(archive)
+        report = tmp_path / f"{name}-report.json"
+        report.write_text(json.dumps({
+            "sha256": sha, "build_id": "media-ingest-dev3", "dev_tranche": "DEV3",
+            "workstream": "MEDIA_FOUNDATION", "version": "1.2.0-rc7",
+        }, indent=2))
+
+        args = MagicMock()
+        args.artifact = name
+        args.image = "PASS"
+        args.audio = "PASS"
+        args.refresh = "PASS"
+        args.flex_return = "PASS"
+        args.refresh_observed_hz = 60
+        args.refresh_limitation = "RC7_PAL_INTERLACED_CADENCE_UNPROVEN"
+        args.refresh_non_regression = "PASS"
+
+        with patch.object(devctl, "ARTIFACTS", tmp_path), \
+             patch.object(devctl, "_git", return_value=_fake_completed(stdout="27d5a425c84ec7e02ff62f07d0b102f2585bc8a9")):
+            rc = devctl.cmd_qualification(args)
+
+        assert rc == 0
+        val_path = tmp_path / f"{name}.validation.json"
+        assert val_path.is_file()
+        val = json.loads(val_path.read_text())
+        assert val["schema_version"] == 2
+        assert val["product_version"] == "1.2.0-rc7"
+        assert val["physical_qualification"] == "PASS"
+        assert val["decisive_evidence"]["V1_TO_V2_MIGRATION"] == "PASS"
+        assert val["decisive_evidence"]["FIELD_ORDER_TT_PERSISTENCE"] == "PASS"
+        assert val["refresh_truth"]["observed_display_hz"] == 60
+        assert val["refresh_truth"]["field_order"] == "tt"
+        assert val["refresh_truth"]["limitation"] == "RC7_PAL_INTERLACED_CADENCE_UNPROVEN"
+        assert val["refresh_non_regression"] == "PASS"
+
     def test_qualification_refuses_to_overwrite_existing(self, tmp_path, capsys):
         """Qualification refuses to overwrite an existing validation file."""
         name = "QualOverwrite-Dev1"
