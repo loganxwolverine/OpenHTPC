@@ -142,8 +142,19 @@ def sandbox(tmp_path):
 
     # Assets in install
     (install / "assets/ui").mkdir(parents=True)
-    media_icon = install / "assets/ui/media.png"
-    media_icon.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+    raw_media_icon = install / "assets/ui/media.png"
+    raw_media_icon.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+
+    # Short icon symlink mirroring session engine's line economy
+    uid = os.getuid()
+    short_icon = Path(f"/tmp/ohtpc-{uid}-m.png")
+    try:
+        if short_icon.is_symlink() or short_icon.is_file():
+            short_icon.unlink(missing_ok=True)
+        short_icon.symlink_to(raw_media_icon)
+        media_icon = short_icon
+    except OSError:
+        media_icon = raw_media_icon
 
     (install / "flex/assets/icons").mkdir(parents=True)
     (install / "flex/assets/icons/drive-empty.png").write_bytes(b"PNG")
@@ -1133,3 +1144,212 @@ def test_57_zero_real_network_in_tests():
     with pytest.raises(AssertionError, match="Network contact strictly forbidden"):
         s = socket.socket()
         s.connect(("127.0.0.1", 80))
+
+
+# ==============================================================================
+# TESTS 58 - 61: DEV5C2A — FLEX LINE BUDGET HARDENING & IDENTITY SAFETY
+# ==============================================================================
+
+def test_58_flex_line_budget_deterministic_matrix(sandbox):
+    """58. Deterministic matrix of 22 worst-case Flex entry line scenarios."""
+    ui = media_match_ui
+    icon = sandbox["media_icon"]
+    lines_to_check = []
+
+    # 1. Normal ASCII title
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "Inception", "year": 2010}), icon, ":submenu MEDIA_C_1_1"))
+    # 2. Maximum long ASCII title
+    lines_to_check.append(ui.bounded_flex_line(2, ui.format_candidate_label({"title": "A" * 500, "year": 2020}), icon, ":submenu MEDIA_C_1_2"))
+    # 3. Long French accented title
+    lines_to_check.append(ui.bounded_flex_line(3, ui.format_candidate_label({"title": "Éléphant à l'orée de la forêt enchantée où brûle l'été " * 10, "year": 2021}), icon, ":submenu MEDIA_C_1_3"))
+    # 4. Long Japanese title
+    lines_to_check.append(ui.bounded_flex_line(4, ui.format_candidate_label({"title": "七人の侍黒澤明監督作品映画東京物語雨月物語" * 15, "year": 1954}), icon, ":submenu MEDIA_C_1_4"))
+    # 5. Long emoji-containing title
+    lines_to_check.append(ui.bounded_flex_line(5, ui.format_candidate_label({"title": "🎬🍿🎥🎞️🌟🚀✨🔥🎉" * 20, "year": 2022}), icon, ":submenu MEDIA_C_1_5"))
+    # 6. Long localized title + long original title
+    lines_to_check.append(ui.bounded_flex_line(6, ui.format_candidate_label({"title": "Titre français long " * 10, "year": 2023, "original_title": "Original English long title " * 10}), icon, ":submenu MEDIA_C_1_6"))
+    # 7. Semicolon in title
+    lines_to_check.append(ui.bounded_flex_line(7, ui.format_candidate_label({"title": "Movie; with semicolon", "year": 2015}), icon, ":submenu MEDIA_C_1_7"))
+    # 8. Multiple semicolons
+    lines_to_check.append(ui.bounded_flex_line(8, ui.format_candidate_label({"title": "Movie; with; many; semicolons; here; and; there;", "year": 2016}), icon, ":submenu MEDIA_C_1_8"))
+    # 9. Replacement Actuel long title
+    budget_r2 = 198 - len(f"Entry2=;{icon};:fork true".encode("utf-8"))
+    lines_to_check.append(ui.bounded_flex_line(2, ui.format_replacement_display("Actuel : ", "Actuel Film " * 20, 2010, budget_r2), icon, ":fork true"))
+    # 10. Replacement Nouveau long title
+    budget_r3 = 198 - len(f"Entry3=;{icon};:fork true".encode("utf-8"))
+    lines_to_check.append(ui.bounded_flex_line(3, ui.format_replacement_display("Nouveau : ", "Nouveau Film " * 20, 2024, budget_r3), icon, ":fork true"))
+    # 11. Accepted candidate marker ✓
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "Accepted Film " * 15, "year": 2018}, is_accepted=True), icon, ":submenu MEDIA_C_1_11"))
+    # 12. Title with apostrophes
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "L'histoire d'un homme qui n'avait d'autre choix " * 10, "year": 2019}), icon, ":submenu MEDIA_C_1_12"))
+    # 13. Title with colon
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "Star Wars: Episode IV: A New Hope: Special Edition: Remastered", "year": 1977}), icon, ":submenu MEDIA_C_1_13"))
+    # 14. Title with em dash
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "Film — Partie 1 — Chapitre 2 — Version Longue — Restauration 4K", "year": 2020}), icon, ":submenu MEDIA_C_1_14"))
+    # 15. Title with combining Unicode characters
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "e\u0301\u0300\u0302\u0303\u0304\u0305\u0306\u0307\u0308\u0309" * 20, "year": 2021}), icon, ":submenu MEDIA_C_1_15"))
+    # 16. Maximum action-token length
+    max_token = "iact_" + "9" * 20 + "_" + "a" * 16 + "_" + "9" * 9
+    lines_to_check.append(ui.bounded_flex_line(1, "CONFIRMER LE CHOIX", icon, f":applyback $HOME/.local/lib/openhtpc/openhtpc-media-match-ui dispatch {max_token}"))
+    # 17. Maximum expected candidate_id digits
+    lines_to_check.append(ui.bounded_flex_line(1, ui.format_candidate_label({"title": "Candidate Extreme ID " * 5, "year": 2020}), icon, ":submenu MEDIA_RP_12345678_999999999"))
+    # 18. Maximum expected media_version_id digits
+    lines_to_check.append(ui.bounded_flex_line(1, "CONFIRMER LE CHANGEMENT", icon, ":applyback $HOME/.local/lib/openhtpc/openhtpc-media-match-ui dispatch iact_gen_999999999_1"))
+    # 19. Context action line
+    lines_to_check.append(session_engine.bounded_flex_entry(1, "Very Long Context Movie " * 5 + "  ·  MKV", icon, "mact_12345678_99999999", ":submenu MEDIA_R12345678", "CONFIRMER / CHANGER L’IDENTIFICATION"))
+    # 20. Reject confirmation line
+    lines_to_check.append(ui.bounded_flex_line(1, "OUI, AUCUN NE CORRESPOND", icon, ":applyback $HOME/.local/lib/openhtpc/openhtpc-media-match-ui dispatch iact_gen_12345678_rej"))
+    # 21. No-candidate informational line
+    lines_to_check.append(ui.bounded_flex_line(1, "Aucune proposition disponible.", icon, ":back"))
+    # 22. Return/back line
+    lines_to_check.append(ui.bounded_flex_line(2, "RETOUR", icon, ":back"))
+
+    assert len(lines_to_check) == 22
+    for idx, line in enumerate(lines_to_check, 1):
+        encoded = line.encode("utf-8")
+        assert len(encoded) <= 198, f"Case {idx} exceeds 198 bytes ({len(encoded)} bytes): {line}"
+        assert encoded.decode("utf-8"), f"Case {idx} broken UTF-8 encoding"
+
+
+def test_59_duplicate_visible_label_identity_safety(sandbox):
+    """59. Identity safety: candidates with identical visible truncated labels maintain distinct identity."""
+    mv_id, _ = _ingest_movie(sandbox, "DuplicateTruncation.mkv")
+    common_prefix = "A Really Extremely Long Movie Title That Will Definitely Exceed The Flex Line Budget " * 3
+    t1 = common_prefix + " Alpha"
+    t2 = common_prefix + " Beta"
+
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 101, t1, 2020, external_id="tmdb_101")
+        _add_candidate(db, mv_id, 102, t2, 2020, external_id="tmdb_102")
+
+        actions = {}
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R12345678", "gen59", actions, sandbox["media_icon"]
+        )
+        main_sec = next(s for s in sections if s.startswith("[MEDIA_R12345678]"))
+        lines = [l for l in main_sec.splitlines() if l.startswith("Entry") and ":submenu MEDIA_C_" in l]
+        assert len(lines) == 2
+
+        lbl1 = lines[0].split(";")[0].split("=", 1)[1]
+        lbl2 = lines[1].split(";")[0].split("=", 1)[1]
+        assert lbl1 == lbl2
+        assert "…" in lbl1
+
+        sub1 = lines[0].split(";")[2]
+        sub2 = lines[1].split(";")[2]
+        assert sub1 != sub2
+        assert "101" in sub1
+        assert "102" in sub2
+
+        token1 = next(k for k, v in actions.items() if v.get("candidate_id") == 101)
+        token2 = next(k for k, v in actions.items() if v.get("candidate_id") == 102)
+        assert token1 != token2
+        assert actions[token1]["candidate_id"] == 101
+        assert actions[token2]["candidate_id"] == 102
+
+        manifest = {"schema": 1, "manifest_generation": "gen59", "sources": [], "items": actions}
+        manifest_dir = sandbox["home"] / ".local/state/openhtpc/media-actions"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "current.json").write_text(json.dumps(manifest))
+
+        code = media_match_ui.dispatch_action(sandbox["home"], token1, sandbox["install"])
+        assert code == 0
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "USER_MATCHED"
+        assert st["work"]["title"] == t1
+        assert db.execute("SELECT status FROM match_candidates WHERE id = 101").fetchone()[0] == "ACCEPTED"
+        assert db.execute("SELECT status FROM match_candidates WHERE id = 102").fetchone()[0] == "SUPERSEDED"
+
+
+def test_60_command_immutability_under_truncation(sandbox):
+    """60. Command immutability: command payload and token semantics remain identical under label truncation."""
+    mv_id, _ = _ingest_movie(sandbox, "CommandImmutability.mkv")
+
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 201, "Short Film", 2020, external_id="tmdb_201")
+        actions_a = {}
+        sections_a = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R12345678", "gen60", actions_a, sandbox["media_icon"]
+        )
+        token_a = next(k for k, v in actions_a.items() if v.get("candidate_id") == 201)
+        action_a_data = actions_a[token_a]
+
+        db.execute("DELETE FROM match_candidates WHERE id = 201")
+        _add_candidate(db, mv_id, 201, "Extremely Long Film Title " * 20, 2020, external_id="tmdb_201")
+        actions_b = {}
+        sections_b = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R12345678", "gen60", actions_b, sandbox["media_icon"]
+        )
+        token_b = next(k for k, v in actions_b.items() if v.get("candidate_id") == 201)
+        action_b_data = actions_b[token_b]
+
+    assert token_a == token_b
+    assert action_a_data == action_b_data
+
+    cmd_a = [l.split(";")[2] for s in sections_a for l in s.splitlines() if l.startswith("Entry") and "201" in l]
+    cmd_b = [l.split(";")[2] for s in sections_b for l in s.splitlines() if l.startswith("Entry") and "201" in l]
+    assert cmd_a == cmd_b
+
+
+def test_61_worst_case_resolver_menu_audit(sandbox):
+    """61. Complete worst-case resolver menu audit: all lines <= 198 bytes and valid UTF-8."""
+    ui = media_match_ui
+    icon = sandbox["media_icon"]
+
+    # 1. Unmatched with 5 diverse worst-case candidates
+    mv_id1, _ = _ingest_movie(sandbox, "WorstCase1.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id1, 1, "七人の侍黒澤明監督作品映画東京物語雨月物語" * 10, 1954, original_title="Seven Samurai Japanese Classic Film " * 5, runtime=207)
+        _add_candidate(db, mv_id1, 2, "Éléphant à l'orée de la forêt enchantée où brûle l'été " * 8, 2021, runtime=120)
+        _add_candidate(db, mv_id1, 3, "🎬🍿🎥🎞️🌟🚀✨🔥🎉 Film Emoji Extrême " * 6, 2022, runtime=95)
+        _add_candidate(db, mv_id1, 4, "Very Long Title; with; semicolons; and; apostrophes; l'aurore;" * 5, 2023)
+        _add_candidate(db, mv_id1, 5, "e\u0301\u0300\u0302\u0303\u0304\u0305\u0306\u0307\u0308\u0309 Combining Accents " * 10, 2024)
+
+        actions1 = {}
+        sections1 = ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id1, "MEDIA_R11111111", "genW1", actions1, icon
+        )
+
+    # 2. Auto-matched requiring replacement with worst-case titles
+    mv_id2, _ = _ingest_movie(sandbox, "WorstCase2.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id2, 10, "Current Work Title That Is Incredibly Long And Exhausting " * 5, 2010, external_id="ext10")
+        _add_candidate(db, mv_id2, 11, "Replacement Work Title In Japanese 七人の侍 " * 10, 2020, external_id="ext11")
+        cand2 = media_match.MovieCandidate("tmdb_movie", "ext10", "Current Work Title That Is Incredibly Long And Exhausting " * 5, year=2010)
+        media_match.accept_candidate(db, mv_id2, cand2, score=95.0, mode="AUTO", method="EXACT")
+        db.commit()
+
+        actions2 = {}
+        sections2 = ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id2, "MEDIA_R22222222", "genW2", actions2, icon
+        )
+
+    # 3. User-matched requiring replacement with worst-case titles
+    mv_id3, _ = _ingest_movie(sandbox, "WorstCase3.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id3, 20, "User Work Accented Éléphant Forêt " * 10, 2015, external_id="ext20")
+        _add_candidate(db, mv_id3, 21, "Replacement Emoji Work 🎬🍿🎥 " * 15, 2025, external_id="ext21")
+        cand3 = media_match.MovieCandidate("tmdb_movie", "ext20", "User Work Accented Éléphant Forêt " * 10, year=2015)
+        media_match.accept_candidate(db, mv_id3, cand3, score=95.0, mode="USER", method="USER_CONFIRMATION")
+        db.commit()
+
+        actions3 = {}
+        sections3 = ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id3, "MEDIA_R33333333", "genW3", actions3, icon
+        )
+
+    all_sections = sections1 + sections2 + sections3
+    total_entry_lines = 0
+    max_len = 0
+    for sec in all_sections:
+        for line in sec.splitlines():
+            if line.startswith("Entry"):
+                total_entry_lines += 1
+                b = len(line.encode("utf-8"))
+                assert b <= 198, f"Exceeds 198 bytes ({b} bytes): {line}"
+                assert line.encode("utf-8").decode("utf-8")
+                if b > max_len:
+                    max_len = b
+
+    assert total_entry_lines >= 30
+    assert max_len <= 198

@@ -92,39 +92,189 @@ def _load_session_engine(install: Path | None = None):
     return None
 
 
-def format_candidate_label(candidate: dict[str, Any], is_accepted: bool = False) -> str:
+def _utf8_truncate(text: str, max_bytes: int, ellipsis: str = "…") -> str:
+    """Truncate text so text.encode('utf-8') <= max_bytes without splitting UTF-8 characters."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    ell_bytes = ellipsis.encode("utf-8")
+    if max_bytes < len(ell_bytes):
+        cut = encoded[:max_bytes]
+        while cut:
+            try:
+                return cut.decode("utf-8")
+            except UnicodeDecodeError:
+                cut = cut[:-1]
+        return ""
+    avail = max_bytes - len(ell_bytes)
+    cut = encoded[:avail]
+    while cut:
+        try:
+            return cut.decode("utf-8").rstrip() + ellipsis
+        except UnicodeDecodeError:
+            cut = cut[:-1]
+    return ellipsis
+
+
+def bounded_flex_line(
+    index: int,
+    label: str,
+    icon: Path | str,
+    command: str,
+    max_bytes: int = 198,
+) -> str:
+    """Format a single Flex INI Entry line guaranteed to be <= max_bytes in UTF-8."""
+    prefix = f"Entry{index}="
+    suffix = f";{icon};{command}"
+    prefix_bytes = len(prefix.encode("utf-8"))
+    suffix_bytes = len(suffix.encode("utf-8"))
+    fixed_bytes = prefix_bytes + suffix_bytes
+    if fixed_bytes >= max_bytes:
+        raise ValueError(f"Fixed metadata ({fixed_bytes} bytes) exceeds limit ({max_bytes} bytes)")
+
+    budget = max_bytes - fixed_bytes
+    clean_label = str(label).replace("\n", " ").replace("\r", " ").replace(";", "—")
+    encoded_label = clean_label.encode("utf-8")
+    if len(encoded_label) <= budget:
+        line = f"{prefix}{clean_label}{suffix}"
+    else:
+        truncated_label = _utf8_truncate(clean_label, budget, ellipsis="…")
+        line = f"{prefix}{truncated_label}{suffix}"
+
+    assert len(line.encode("utf-8")) <= max_bytes, f"Line exceeds {max_bytes} bytes: {line}"
+    line.encode("utf-8").decode("utf-8")
+    return line
+
+
+def format_replacement_display(prefix_label: str, title: str, year: int | None, max_bytes: int) -> str:
+    """Format 'Actuel : <title> (<year>)' or 'Nouveau : <title> (<year>)' bounded to max_bytes."""
+    clean_title = str(title).strip().replace("\n", " ").replace("\r", " ").replace(";", "—")
+    year_str = f" ({year})" if year else ""
+    full = f"{prefix_label}{clean_title}{year_str}"
+    if len(full.encode("utf-8")) <= max_bytes:
+        return full
+
+    ellipsis = "…"
+    fixed_overhead = len((prefix_label + ellipsis + year_str).encode("utf-8"))
+    if max_bytes >= fixed_overhead:
+        avail = max_bytes - fixed_overhead
+        title_bytes = clean_title.encode("utf-8")
+        cut = title_bytes[:avail]
+        while cut:
+            try:
+                t_trunc = cut.decode("utf-8").rstrip()
+                break
+            except UnicodeDecodeError:
+                cut = cut[:-1]
+        else:
+            t_trunc = ""
+        candidate_line = f"{prefix_label}{t_trunc}{ellipsis}{year_str}"
+        if len(candidate_line.encode("utf-8")) <= max_bytes:
+            return candidate_line
+
+    fixed_prefix = len((prefix_label + ellipsis).encode("utf-8"))
+    if max_bytes >= fixed_prefix:
+        avail = max_bytes - fixed_prefix
+        title_bytes = clean_title.encode("utf-8")
+        cut = title_bytes[:avail]
+        while cut:
+            try:
+                t_trunc = cut.decode("utf-8").rstrip()
+                break
+            except UnicodeDecodeError:
+                cut = cut[:-1]
+        else:
+            t_trunc = ""
+        return f"{prefix_label}{t_trunc}{ellipsis}"
+
+    return _utf8_truncate(full, max_bytes)
+
+
+def format_candidate_label(
+    candidate: dict[str, Any],
+    is_accepted: bool = False,
+    max_bytes: int | None = None,
+) -> str:
     """Format candidate for living-room couch UI.
 
     Hides score, provider ID, external ID, and database IDs.
     Shows localized title and year, original title only when different,
     and runtime if cleanly available. Marks accepted candidate with ✓.
+    If max_bytes is specified, truncates safely according to priority:
+    1. localized display title
+    2. release year
+    3. original title / runtime
     """
     title = str(candidate.get("title") or candidate.get("candidate_title") or "Film").strip()
     title = title.replace("\n", " ").replace("\r", " ").replace(";", "—")
     year = candidate.get("year") or candidate.get("candidate_year")
-    orig_title = candidate.get("original_title")
-    runtime = candidate.get("runtime_minutes")
+    orig_title = candidate.get("original_title") or candidate.get("candidate_original_title")
+    runtime = candidate.get("runtime_minutes") or candidate.get("candidate_runtime_minutes")
 
     prefix = "✓ " if is_accepted else ""
-    if year:
-        display = f"{prefix}{title} ({year})"
-    else:
-        display = f"{prefix}{title}"
+    year_str = f" ({year})" if year else ""
+    core = f"{prefix}{title}{year_str}"
 
+    orig_part = ""
     if orig_title and isinstance(orig_title, str):
         clean_orig = orig_title.strip().replace("\n", " ").replace("\r", " ").replace(";", "—")
         if clean_orig and clean_orig.casefold() != title.casefold():
-            display += f"  ·  Titre original : {clean_orig}"
+            orig_part = f"  ·  Titre original : {clean_orig}"
 
+    runtime_part = ""
     if runtime:
         try:
             r_int = int(runtime)
             if r_int > 0:
-                display += f"  ·  {r_int} min"
+                runtime_part = f"  ·  {r_int} min"
         except (ValueError, TypeError):
             pass
 
-    return display
+    full = f"{core}{orig_part}{runtime_part}"
+    if max_bytes is None or len(full.encode("utf-8")) <= max_bytes:
+        return full
+
+    without_runtime = f"{core}{orig_part}"
+    if len(without_runtime.encode("utf-8")) <= max_bytes:
+        return without_runtime
+
+    if len(core.encode("utf-8")) <= max_bytes:
+        return core
+
+    ellipsis = "…"
+    fixed_overhead = len((prefix + ellipsis + year_str).encode("utf-8"))
+    if max_bytes >= fixed_overhead:
+        avail = max_bytes - fixed_overhead
+        title_bytes = title.encode("utf-8")
+        cut = title_bytes[:avail]
+        while cut:
+            try:
+                t_trunc = cut.decode("utf-8").rstrip()
+                break
+            except UnicodeDecodeError:
+                cut = cut[:-1]
+        else:
+            t_trunc = ""
+        candidate_line = f"{prefix}{t_trunc}{ellipsis}{year_str}"
+        if len(candidate_line.encode("utf-8")) <= max_bytes:
+            return candidate_line
+
+    fixed_prefix = len((prefix + ellipsis).encode("utf-8"))
+    if max_bytes >= fixed_prefix:
+        avail = max_bytes - fixed_prefix
+        title_bytes = title.encode("utf-8")
+        cut = title_bytes[:avail]
+        while cut:
+            try:
+                t_trunc = cut.decode("utf-8").rstrip()
+                break
+            except UnicodeDecodeError:
+                cut = cut[:-1]
+        else:
+            t_trunc = ""
+        return f"{prefix}{t_trunc}{ellipsis}"
+
+    return _utf8_truncate(core, max_bytes)
 
 
 def get_ui_candidates(db: sqlite3.Connection, media_version_id: int, install: Path | None = None) -> list[dict[str, Any]]:
@@ -185,18 +335,18 @@ def build_resolver_menu_sections(
     sections: list[str] = []
 
     if state == "UNMATCHED" and not candidates:
-        body = f"Entry1=Aucune proposition disponible.;{icon};:back\nEntry2=RETOUR;{icon};:back"
-        sections.append(f"[{res_section_id}]\n{body}")
+        e1 = bounded_flex_line(1, "Aucune proposition disponible.", icon, ":back")
+        e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
+        sections.append(f"[{res_section_id}]\n{e1}\n{e2}")
         return sections
 
     res_entries: list[tuple[str, Path, str]] = []
     helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-match-ui"
 
-    for cand in candidates:
+    for i, cand in enumerate(candidates, 1):
         cand_id = cand["id"]
         is_accepted = (cand.get("status") == "ACCEPTED")
         same_work = is_accepted or (work_id is not None and is_work_same(db, work_id, cand))
-        cand_label = format_candidate_label(cand, is_accepted=is_accepted)
 
         needs_replace = bool(state in ("AUTO_MATCHED", "USER_MATCHED") and not same_work)
         if needs_replace:
@@ -215,7 +365,13 @@ def build_resolver_menu_sections(
             "replace": needs_replace,
         }
 
-        res_entries.append((cand_label, icon, f":submenu {conf_menu}"))
+        conf_cmd = f":submenu {conf_menu}"
+        cand_prefix = f"Entry{i}="
+        cand_suffix = f";{icon};{conf_cmd}"
+        cand_budget = 198 - len(cand_prefix.encode("utf-8")) - len(cand_suffix.encode("utf-8"))
+        cand_label = format_candidate_label(cand, is_accepted=is_accepted, max_bytes=cand_budget)
+
+        res_entries.append((cand_label, icon, conf_cmd))
 
         # Build confirmation screen
         dispatch_cmd = f":applyback {helper_path} dispatch {action_token}"
@@ -224,21 +380,26 @@ def build_resolver_menu_sections(
                 conf_title = "CONFIRMER CETTE IDENTIFICATION"
             else:
                 conf_title = "CONFIRMER CE FILM"
-            c_body = f"Entry1={conf_title};{icon};{dispatch_cmd}\nEntry2=RETOUR;{icon};:back"
-            sections.append(f"[{conf_menu}]\n{c_body}")
+            e1 = bounded_flex_line(1, conf_title, icon, dispatch_cmd)
+            e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
+            sections.append(f"[{conf_menu}]\n{e1}\n{e2}")
         else:
             curr_work = st.get("work") or {}
-            c_title = str(curr_work.get("title") or "Film").replace("\n", " ").replace("\r", " ").replace(";", "—")
-            c_year = f" ({curr_work.get('year')})" if curr_work.get("year") else ""
-            n_title = str(cand.get("title") or cand.get("candidate_title") or "Film").replace("\n", " ").replace("\r", " ").replace(";", "—")
-            n_year = f" ({cand.get('year') or cand.get('candidate_year')})" if (cand.get("year") or cand.get("candidate_year")) else ""
-            r_lines = [
-                f"Entry1=CONFIRMER LE CHANGEMENT;{icon};{dispatch_cmd}",
-                f"Entry2=Actuel : {c_title}{c_year};{icon};:fork true",
-                f"Entry3=Nouveau : {n_title}{n_year};{icon};:fork true",
-                f"Entry4=ANNULER;{icon};:back",
-            ]
-            sections.append(f"[{conf_menu}]\n" + "\n".join(r_lines))
+            c_title = str(curr_work.get("title") or "Film")
+            c_year = curr_work.get("year")
+            n_title = str(cand.get("title") or cand.get("candidate_title") or "Film")
+            n_year = cand.get("year") or cand.get("candidate_year")
+
+            budget_r2 = 198 - len(f"Entry2=;{icon};:fork true".encode("utf-8"))
+            budget_r3 = 198 - len(f"Entry3=;{icon};:fork true".encode("utf-8"))
+            actuel_label = format_replacement_display("Actuel : ", c_title, c_year, budget_r2)
+            nouveau_label = format_replacement_display("Nouveau : ", n_title, n_year, budget_r3)
+
+            r1 = bounded_flex_line(1, "CONFIRMER LE CHANGEMENT", icon, dispatch_cmd)
+            r2 = bounded_flex_line(2, actuel_label, icon, ":fork true")
+            r3 = bounded_flex_line(3, nouveau_label, icon, ":fork true")
+            r4 = bounded_flex_line(4, "ANNULER", icon, ":back")
+            sections.append(f"[{conf_menu}]\n{r1}\n{r2}\n{r3}\n{r4}")
 
     # Reject entry for UNMATCHED with pending candidates
     if state == "UNMATCHED":
@@ -251,15 +412,16 @@ def build_resolver_menu_sections(
         }
         rej_menu = f"MEDIA_RJ_{token_suffix}"
         rej_dispatch = f":applyback {helper_path} dispatch {rej_token}"
-        rej_body = f"Entry1=OUI, AUCUN NE CORRESPOND;{icon};{rej_dispatch}\nEntry2=RETOUR;{icon};:back"
-        sections.append(f"[{rej_menu}]\n{rej_body}")
+        e1 = bounded_flex_line(1, "OUI, AUCUN NE CORRESPOND", icon, rej_dispatch)
+        e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
+        sections.append(f"[{rej_menu}]\n{e1}\n{e2}")
         res_entries.append(("AUCUN DE CES FILMS", icon, f":submenu {rej_menu}"))
 
     # Decide later
     res_entries.append(("PLUS TARD", icon, ":back"))
 
     res_body = "\n".join(
-        f"Entry{i}={lbl};{ico};{cmd}" for i, (lbl, ico, cmd) in enumerate(res_entries, 1)
+        bounded_flex_line(i, lbl, ico, cmd) for i, (lbl, ico, cmd) in enumerate(res_entries, 1)
     )
     sections.append(f"[{res_section_id}]\n{res_body}")
     return sections
