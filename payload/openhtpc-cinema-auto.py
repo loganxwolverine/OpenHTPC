@@ -56,6 +56,8 @@ def _build_current_output_sig() -> str:
     """Compute the current output_signature hash for staleness comparison."""
     try:
         import subprocess, re
+        if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+            return ""
         res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=3)
         if res.returncode == 0:
             m = re.search(r"(\d+)x(\d+)@([0-9.]+)\*", res.stdout)

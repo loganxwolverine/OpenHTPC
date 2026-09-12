@@ -120,6 +120,35 @@ def start_enrichment():
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
         )
 
+# Failsafe: Flex Launcher must never be spawned when SDL has no usable graphical device
+cap_path = install / "openhtpc-capabilities.py"
+has_graphical = False
+if cap_path.is_file():
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_capabilities", cap_path)
+        if spec and spec.loader:
+            caps = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(caps)
+            if hasattr(caps, "is_graphical_context_usable") and caps.is_graphical_context_usable(dict(os.environ)):
+                has_graphical = True
+            elif hasattr(caps, "resolve_graphical_context"):
+                env_proc = os.environ.get("OPENHTPC_PROC_ROOT")
+                proc_root = pathlib.Path(env_proc) if env_proc else pathlib.Path("/proc")
+                ctx = caps.resolve_graphical_context(proc_root=proc_root, home=home, install=install)
+                if ctx.get("status") == "RESOLVED" and ctx.get("environment"):
+                    if not hasattr(caps, "is_graphical_context_usable") or caps.is_graphical_context_usable(ctx["environment"]):
+                        os.environ.update(ctx["environment"])
+                        has_graphical = True
+    except Exception:
+        pass
+if not has_graphical:
+    has_graphical = bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
+
+if not has_graphical:
+    if runtime:
+        runtime.log(home, "ui", "FLEX_START_BLOCKED_NO_GRAPHICAL_SESSION")
+    raise SystemExit("OPENHTPC: démarrage Flex impossible sans session graphique active (OPENHTPC_GRAPHICAL_SESSION_UNAVAILABLE).")
+
 regenerate()
 engine.activate_media_manifest(target, home)
 pass_fds = ()

@@ -15,6 +15,7 @@ import importlib.util
 import importlib.machinery
 import re
 import shlex
+import sys
 
 _optical_spec = importlib.util.spec_from_file_location("openhtpc_optical_presentation", pathlib.Path(__file__).with_name("openhtpc-optical.py"))
 _optical_model = importlib.util.module_from_spec(_optical_spec); _optical_spec.loader.exec_module(_optical_model)
@@ -174,7 +175,37 @@ def observed_display_size(environment=None) -> tuple[int, int] | None:
         except ValueError:
             return None
     try:
-        result = subprocess.run(["kscreen-doctor", "-j"], text=True, capture_output=True, timeout=5)
+        home = pathlib.Path(environment.get("OPENHTPC_HOME", pathlib.Path.home())) if isinstance(environment, dict) else pathlib.Path.home()
+        install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+        cap_path = install / "openhtpc-capabilities.py"
+        if not cap_path.is_file():
+            cap_path = pathlib.Path(__file__).with_name("openhtpc-capabilities.py")
+        caps = sys.modules.get("openhtpc_capabilities")
+        if caps is None and cap_path.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_capabilities", cap_path)
+                if spec and spec.loader:
+                    caps = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(caps)
+            except Exception:
+                caps = None
+        context = {"status": "UNAVAILABLE", "environment": {}}
+        if caps is not None and hasattr(caps, "resolve_graphical_context"):
+            try:
+                context = caps.resolve_graphical_context(environment=environment if isinstance(environment, dict) else None, home=home, install=install)
+            except Exception:
+                pass
+        if (
+            context.get("status") != "RESOLVED"
+            or not context.get("environment")
+            or (hasattr(caps, "is_graphical_context_usable") and not caps.is_graphical_context_usable(context["environment"]))
+        ):
+            return None
+        env = os.environ.copy()
+        for key in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+            env.pop(key, None)
+        env.update(context["environment"])
+        result = subprocess.run(["kscreen-doctor", "-j"], env=env, text=True, capture_output=True, timeout=5)
         data = json.loads(result.stdout) if result.returncode == 0 else {}
         sizes = []
         for output in data.get("outputs", []):

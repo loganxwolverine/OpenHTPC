@@ -297,6 +297,8 @@ def _get_display_signature() -> dict:
         "compositor": os.environ.get("WAYLAND_DISPLAY", "UNKNOWN"),
     }
     try:
+        if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+            return sig
         res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=3)
         if res.returncode == 0 and res.stdout:
             import re

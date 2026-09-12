@@ -80,6 +80,41 @@ def run_probe(name: str, argv: list[str], diagnostics: dict[str, Any], runner: R
 GRAPHICAL_KEYS = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "KDE_FULL_SESSION")
 
 
+def is_graphical_context_usable(context_or_env: dict[str, Any] | None, uid: int | None = None) -> bool:
+    """Verify that the graphical context points to an accessible, living display endpoint."""
+    if not isinstance(context_or_env, dict):
+        return False
+    env = context_or_env.get("environment") if "environment" in context_or_env else context_or_env
+    if not isinstance(env, dict):
+        return False
+    uid = os.getuid() if uid is None else uid
+    runtime = env.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    runtime_path = pathlib.Path(runtime)
+    if not runtime_path.is_dir():
+        return False
+
+    wayland = env.get("WAYLAND_DISPLAY")
+    if wayland and isinstance(wayland, str) and re.fullmatch(r"wayland-[0-9]+", wayland):
+        sock = runtime_path / wayland
+        try:
+            if sock.is_socket() and (sock.stat().st_uid == uid or os.access(sock, os.R_OK | os.W_OK)):
+                return True
+        except OSError:
+            pass
+
+    display = env.get("DISPLAY")
+    if display and isinstance(display, str) and re.fullmatch(r":[0-9]+(?:\.[0-9]+)?", display):
+        disp_num = re.match(r"^:([0-9]+)", display).group(1)
+        x_sock = pathlib.Path(f"/tmp/.X11-unix/X{disp_num}")
+        try:
+            if x_sock.is_socket() and (x_sock.stat().st_uid == uid or os.access(x_sock, os.R_OK | os.W_OK)):
+                return True
+        except OSError:
+            pass
+
+    return False
+
+
 def _safe_graphical_environment(values: dict[str, str], uid: int) -> dict[str, str]:
     runtime = f"/run/user/{uid}"
     result: dict[str, str] = {}
@@ -114,13 +149,23 @@ def _process_context(process: pathlib.Path, uid: int) -> tuple[str, list[str], d
     except (OSError,StopIteration,ValueError):return None
 
 
-def resolve_graphical_context(proc_root: pathlib.Path = pathlib.Path("/proc"), uid: int | None = None,
+def resolve_graphical_context(proc_root: pathlib.Path | None = None, uid: int | None = None,
                               environment: dict[str, str] | None = None, home: pathlib.Path | None = None,
-                              install: pathlib.Path | None = None) -> dict[str, Any]:
+                              install: pathlib.Path | None = None,
+                              require_live_socket: bool | None = None) -> dict[str, Any]:
     """Resolve the active same-user graphical session without mutating it."""
+    if proc_root is None or proc_root == pathlib.Path("/proc"):
+        env_proc = os.environ.get("OPENHTPC_PROC_ROOT")
+        if env_proc:
+            proc_root = pathlib.Path(env_proc)
+        elif proc_root is None:
+            proc_root = pathlib.Path("/proc")
     uid=os.getuid() if uid is None else uid
+    check_socket = (proc_root == pathlib.Path("/proc")) if require_live_socket is None else require_live_socket
     current=_safe_graphical_environment(dict(os.environ if environment is None else environment),uid)
-    if current:return {"status":"RESOLVED","evidence":"CALLER_ENVIRONMENT","environment":current}
+    if current:
+        if not check_socket or is_graphical_context_usable(current, uid):
+            return {"status":"RESOLVED","evidence":"CALLER_ENVIRONMENT","environment":current}
     home=pathlib.Path.home() if home is None else home
     install=home/".local/lib/openhtpc" if install is None else install
     session=read_json(home/".local/state/openhtpc/runtime-session.json")
@@ -131,7 +176,8 @@ def resolve_graphical_context(proc_root: pathlib.Path = pathlib.Path("/proc"), u
             if not isinstance(pid,int) or pid<=1:continue
             context=_process_context(proc_root/str(pid),uid)
             if context and any(marker in context[1] for marker in markers):
-                return {"status":"RESOLVED","evidence":evidence,"environment":context[2]}
+                if not check_socket or is_graphical_context_usable(context[2], uid):
+                    return {"status":"RESOLVED","evidence":evidence,"environment":context[2]}
     candidates=[]
     try:entries=[item for item in proc_root.iterdir() if item.name.isdigit()]
     except OSError:entries=[]
@@ -150,7 +196,8 @@ def resolve_graphical_context(proc_root: pathlib.Path = pathlib.Path("/proc"), u
                 parent_status=(parent/"status").read_text()
                 if int(next(line.split()[1] for line in parent_status.splitlines() if line.startswith("Uid:"))) != uid:continue
             except (OSError,StopIteration,ValueError):continue
-        candidates.append((priority[context[0]],-int(process.name),context[0],context[2]))
+        if not check_socket or is_graphical_context_usable(context[2], uid):
+            candidates.append((priority[context[0]],-int(process.name),context[0],context[2]))
     if not candidates:return {"status":"UNAVAILABLE","evidence":"NONE","environment":{}}
     _,_,name,safe=sorted(candidates)[0]
     return {"status":"RESOLVED","evidence":name.upper(),"environment":safe}
@@ -392,11 +439,12 @@ def collect_display(home: pathlib.Path, install: pathlib.Path, runner: Runner = 
     outputs = []; diagnostics = {}
     if context.get("status") == "RESOLVED":
         env = context.get("environment", {})
-        argv = ["env", "-u", "DISPLAY", "-u", "WAYLAND_DISPLAY", "-u", "XDG_RUNTIME_DIR",
-                "-u", "DBUS_SESSION_BUS_ADDRESS", *(f"{k}={v}" for k,v in env.items()), "kscreen-doctor", "-j"]
-        result = run_probe("display", argv, diagnostics, runner, 6)
-        if result.get("status") == "OK":
-            outputs = parse_kscreen_json(result.get("stdout", ""))
+        if is_graphical_context_usable(env) or proc_root != pathlib.Path("/proc"):
+            argv = ["env", "-u", "DISPLAY", "-u", "WAYLAND_DISPLAY", "-u", "XDG_RUNTIME_DIR",
+                    "-u", "DBUS_SESSION_BUS_ADDRESS", *(f"{k}={v}" for k,v in env.items()), "kscreen-doctor", "-j"]
+            result = run_probe("display", argv, diagnostics, runner, 6)
+            if result.get("status") == "OK":
+                outputs = parse_kscreen_json(result.get("stdout", ""))
     enabled = [o for o in outputs if o["active"]]
     active = enabled[0] if len(enabled) == 1 else None
     if active:

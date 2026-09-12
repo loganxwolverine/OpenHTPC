@@ -19,6 +19,48 @@ die() { printf '[OPENHTPC] %s\n' "$*" >&2; exit 3; }
 
 [[ -r $ENGINE ]] || die "Moteur de session absent : $ENGINE"
 
+# Propagate live graphical session context if launched from headless/SSH/TTY
+resolved_graphical_env="$(python3 - "$OPENHTPC_HOME" "$INSTALL_DIR" <<'PY'
+import importlib.util, os, pathlib, sys
+home = pathlib.Path(sys.argv[1])
+install = pathlib.Path(sys.argv[2])
+cap_path = install / "openhtpc-capabilities.py"
+if not cap_path.is_file():
+    cap_path = pathlib.Path(__file__).with_name("openhtpc-capabilities.py")
+if cap_path.is_file():
+    try:
+        spec = importlib.util.spec_from_file_location("openhtpc_capabilities", cap_path)
+        if spec and spec.loader:
+            caps = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(caps)
+            if hasattr(caps, "resolve_graphical_context"):
+                env_proc = os.environ.get("OPENHTPC_PROC_ROOT")
+                proc_root = pathlib.Path(env_proc) if env_proc else pathlib.Path("/proc")
+                ctx = caps.resolve_graphical_context(proc_root=proc_root, home=home, install=install)
+                if ctx.get("status") == "RESOLVED" and ctx.get("environment"):
+                    for k, v in ctx["environment"].items():
+                        print(f"{k}={v}")
+                    raise SystemExit(0)
+    except Exception:
+        pass
+raise SystemExit(1)
+PY
+)" || true
+
+if [[ -n "$resolved_graphical_env" ]]; then
+    while IFS='=' read -r key val; do
+        if [[ -n "$key" && -n "$val" ]]; then
+            export "$key=$val"
+        fi
+    done <<< "$resolved_graphical_env"
+fi
+
+if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" && ${1:-} != --check-only ]]; then
+    mkdir -p "$STATE_DIR"
+    [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event GRAPHICAL_SESSION_UNAVAILABLE
+    die "Échec du démarrage : session graphique indisponible (OPENHTPC_GRAPHICAL_SESSION_UNAVAILABLE)"
+fi
+
 result="$({ python3 - "$ENGINE" "$OPENHTPC_HOME" "$FLEX_CONFIG" <<'PY'
 import importlib.util
 import pathlib
