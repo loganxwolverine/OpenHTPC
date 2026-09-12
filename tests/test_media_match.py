@@ -567,3 +567,244 @@ def test_35_no_access_to_steve_real_library(sandbox):
         rows = db.execute("SELECT canonical_path, relative_path FROM resources").fetchall()
         for cpath, rpath in rows:
             assert not cpath.startswith("/home/steve/media")
+
+
+# ─── 36 to 48: DEV5A.1 Title Prefix Weight Calibration Tests ──────────────────
+
+def test_36_scoring_weights_exact_prefix_subset():
+    """Verify calibrated weights: exact=50, prefix=30, subset=25, year=30."""
+    # 1. Exact title alone (no year)
+    score_exact, reasons = media_match.score_candidate({"title": "Alien"}, "Alien")
+    assert score_exact == 50.0
+    assert "title_exact" in reasons
+
+    # 2. Prefix title alone (no year)
+    score_prefix, reasons = media_match.score_candidate({"title": "Alien: Covenant"}, "Alien")
+    assert score_prefix == 30.0
+    assert "title_prefix" in reasons
+
+    # 3. Subset title alone (no year)
+    score_subset, reasons = media_match.score_candidate({"title": "The Making of Alien"}, "Alien")
+    assert score_subset == 25.0
+    assert "title_subset" in reasons
+
+    # 4. Exact title + exact year = 80.0
+    score_exact_year, reasons = media_match.score_candidate({"title": "Alien", "year": 1979}, "Alien", 1979)
+    assert score_exact_year == 80.0
+    assert "title_exact" in reasons and "year_exact" in reasons
+
+    # 5. Prefix title + exact year = 60.0
+    score_prefix_year, reasons = media_match.score_candidate({"title": "Alien: Covenant", "year": 1979}, "Alien", 1979)
+    assert score_prefix_year == 60.0
+    assert "title_prefix" in reasons and "year_exact" in reasons
+
+    # 6. Margin exact-vs-prefix = 20.0
+    margin = score_exact_year - score_prefix_year
+    assert margin == 20.0
+
+
+def test_37_auto_match_gate_margin_boundary(sandbox):
+    """Verify margin >= 20.0 qualifies for AUTO_MATCH when score >= 80.0."""
+    mv_id = _create_and_ingest_resource(sandbox, "TestMovie (2020).mkv")
+    candidates = [
+        {"provider": "fixture", "external_id": "1", "title": "TestMovie", "year": 2020},
+        {"provider": "fixture", "external_id": "2", "title": "TestMovie: The Sequel", "year": 2020},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work_id"] is not None
+
+
+def test_38_live_catalog_regression_1917(sandbox):
+    """Verify 1917 (2019) auto-matches against competing 1917, le train de l'enfer."""
+    mv_id = _create_and_ingest_resource(sandbox, "1917 (2019).mkv")
+    candidates = [
+        {"provider": "tmdb_movie", "external_id": "530915", "title": "1917", "original_title": "1917", "year": 2019},
+        {"provider": "tmdb_movie", "external_id": "647545", "title": "1917, le train de l'enfer", "original_title": "1917, le train de l'enfer", "year": 2019},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work"]["title"] == "1917"
+        assert st["work"]["year"] == 2019
+
+
+def test_39_live_catalog_regression_alien(sandbox):
+    """Verify Alien (1979) auto-matches via original_title against prefix competitor."""
+    mv_id = _create_and_ingest_resource(sandbox, "Alien (1979).mkv")
+    candidates = [
+        {"provider": "tmdb_movie", "external_id": "348", "title": "Alien, le huitième passager", "original_title": "Alien", "year": 1979},
+        {"provider": "tmdb_movie", "external_id": "1167579", "title": "Alien: Experience in Terror", "original_title": "Alien: Experience in Terror", "year": 1979},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work"]["title"] == "Alien, le huitième passager"
+        assert st["work"]["original_title"] == "Alien"
+
+
+def test_40_live_catalog_regression_dune(sandbox):
+    """Verify Dune (2021) auto-matches against Dune Dreams."""
+    mv_id = _create_and_ingest_resource(sandbox, "Dune (2021).mkv")
+    candidates = [
+        {"provider": "tmdb_movie", "external_id": "438631", "title": "Dune", "original_title": "Dune", "year": 2021},
+        {"provider": "tmdb_movie", "external_id": "818926", "title": "Dune Dreams", "original_title": "Dune Dreams", "year": 2021},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work"]["title"] == "Dune"
+
+
+def test_41_live_catalog_regression_spiderman(sandbox):
+    """Verify Spider-Man (2002) auto-matches against prefix competitor."""
+    mv_id = _create_and_ingest_resource(sandbox, "Spider-Man (2002).mkv")
+    candidates = [
+        {"provider": "tmdb_movie", "external_id": "557", "title": "Spider-Man", "original_title": "Spider-Man", "year": 2002},
+        {"provider": "tmdb_movie", "external_id": "270764", "title": "Spider-Man: The Return of the Green Goblin", "original_title": "Spider-Man: The Return of the Green Goblin", "year": 2002},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work"]["title"] == "Spider-Man"
+
+
+def test_42_live_catalog_regression_matrix(sandbox):
+    """Verify The Matrix (1999) auto-matches via original_title against prefix competitor."""
+    mv_id = _create_and_ingest_resource(sandbox, "The Matrix (1999).mkv")
+    candidates = [
+        {"provider": "tmdb_movie", "external_id": "603", "title": "Matrix", "original_title": "The Matrix", "year": 1999},
+        {"provider": "tmdb_movie", "external_id": "684428", "title": "The Matrix: What Is Bullet-Time?", "original_title": "The Matrix: What Is Bullet-Time?", "year": 1999},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "AUTO_MATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "AUTO_MATCHED"
+        assert st["work"]["original_title"] == "The Matrix"
+
+
+def test_43_control_cases_no_regression(sandbox):
+    """Control non-regression check: The Thing 1982, 300 2014, 1984 1984, 2001 1968 auto-match."""
+    test_cases = [
+        ("The Thing (1982).mkv", [
+            {"provider": "fixture", "external_id": "1091", "title": "The Thing", "year": 1982},
+            {"provider": "fixture", "external_id": "741271", "title": "The Making of 'The Thing'", "year": 1982},
+        ], "1091"),
+        ("300 Rise of an Empire (2014).mkv", [
+            {"provider": "fixture", "external_id": "53182", "title": "300 : La Naissance d'un Empire", "original_title": "300: Rise of an Empire", "year": 2014},
+        ], "53182"),
+        ("1984 (1984).mkv", [
+            {"provider": "fixture", "external_id": "9314", "title": "1984", "year": 1984},
+            {"provider": "fixture", "external_id": "1202249", "title": "Magasinet Special: Chess 1984", "year": 1984},
+        ], "9314"),
+        ("2001 A Space Odyssey (1968).mkv", [
+            {"provider": "fixture", "external_id": "62", "title": "2001 : L'Odyssée de l'espace", "original_title": "2001: A Space Odyssey", "year": 1968},
+        ], "62"),
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        for fname, cands, expected_id in test_cases:
+            mv_id = _create_and_ingest_resource(sandbox, fname)
+            with db:
+                res = media_match.evaluate_media_version(db, mv_id, cands, auto_accept=True)
+            assert res["status"] == "AUTO_MATCHED", f"Failed for {fname}"
+            ext_row = db.execute("SELECT external_id FROM external_ids WHERE work_id = (SELECT work_id FROM media_versions WHERE id = ?)", (mv_id,)).fetchone()
+            assert ext_row[0] == expected_id
+
+
+def test_44_no_year_ambiguous_remain_unmatched(sandbox):
+    """No-year ambiguous cases must NEVER auto-match under calibrated weights."""
+    no_year_cases = [
+        ("The Thing.mkv", [
+            {"provider": "fixture", "external_id": "1091", "title": "The Thing", "year": 1982},
+            {"provider": "fixture", "external_id": "60935", "title": "The Thing", "year": 2011},
+        ]),
+        ("Dracula.mkv", [
+            {"provider": "fixture", "external_id": "11868", "title": "Dracula", "year": 1958},
+            {"provider": "fixture", "external_id": "1246049", "title": "Dracula", "year": 1931},
+        ]),
+        ("King Kong.mkv", [
+            {"provider": "fixture", "external_id": "10730", "title": "King Kong", "year": 1976},
+            {"provider": "fixture", "external_id": "244", "title": "King Kong", "year": 1933},
+        ]),
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        for fname, cands in no_year_cases:
+            mv_id = _create_and_ingest_resource(sandbox, fname)
+            with db:
+                res = media_match.evaluate_media_version(db, mv_id, cands, auto_accept=True)
+            assert res["status"] == "UNMATCHED"
+            assert res["reason"] == "NO_YEAR_CLUE_CONSERVATIVE_GATE"
+            st = media_match.get_media_version_status(db, mv_id)
+            assert st["work_id"] is None
+            assert st["identification_state"] == "UNMATCHED"
+
+
+def test_45_adversarial_query_longer_than_candidate(sandbox):
+    """If file is Alien Something (1979), a candidate named Alien (1979) must NOT be exact."""
+    mv_id = _create_and_ingest_resource(sandbox, "Alien Something (1979).mkv")
+    candidates = [
+        {"provider": "fixture", "external_id": "1", "title": "Alien", "year": 1979},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        # Prefix match only -> 30 + 30 = 60.0 < 80.0 threshold, so TITLE_NOT_EXACT_MATCH or SCORE_BELOW_AUTO_THRESHOLD
+        assert res["status"] == "UNMATCHED"
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["work_id"] is None
+
+
+def test_46_adversarial_same_prefix_wrong_year():
+    """Prefix candidate with wrong year gets penalty and is discarded."""
+    score, reasons = media_match.score_candidate({"title": "Alien: Covenant", "year": 2017}, "Alien", 1979)
+    # 30.0 (prefix) - 20.0 (year mismatch) = 10.0
+    assert score == 10.0
+    assert "year_mismatch_2017_vs_1979" in reasons
+    # Filtered out by evaluate_candidate_list (< 50.0)
+    scored = media_match.evaluate_candidate_list([{"title": "Alien: Covenant", "year": 2017}], "Alien", 1979)
+    assert len(scored) == 0
+
+
+def test_47_adversarial_prefix_without_year():
+    """Prefix candidate without year clue scores 30.0, filtered out (< 50.0)."""
+    score, reasons = media_match.score_candidate({"title": "Alien: Covenant", "year": 1979}, "Alien", year_clue=None)
+    assert score == 30.0
+    assert "title_prefix" in reasons and "year_clue_absent" in reasons
+    scored = media_match.evaluate_candidate_list([{"title": "Alien: Covenant", "year": 1979}], "Alien", year_clue=None)
+    assert len(scored) == 0
+
+
+def test_48_adversarial_two_exact_same_year_insufficient_margin(sandbox):
+    """If two exact candidates exist with same score and year, remain UNMATCHED due to margin=0.0."""
+    mv_id = _create_and_ingest_resource(sandbox, "Duplicate (2020).mkv")
+    candidates = [
+        {"provider": "fixture", "external_id": "dup_1", "title": "Duplicate", "year": 2020},
+        {"provider": "fixture", "external_id": "dup_2", "title": "Duplicate", "year": 2020},
+    ]
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        with db:
+            res = media_match.evaluate_media_version(db, mv_id, candidates, auto_accept=True)
+        assert res["status"] == "UNMATCHED"
+        assert "MARGIN_INSUFFICIENT" in res["reason"]
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["work_id"] is None
+        assert st["identification_state"] == "UNMATCHED"
+        assert st["pending_candidates_count"] == 2

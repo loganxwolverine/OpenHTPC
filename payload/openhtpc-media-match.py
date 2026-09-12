@@ -296,7 +296,7 @@ def score_candidate(
     Score components:
     1. Title Matching (0 to 50 points):
        - Exact normalized match: +50.0
-       - Prefix match: +35.0
+       - Prefix match: +30.0
        - Word-subset match: +25.0
        - Partial token match: +15.0
        - Base match: +5.0
@@ -328,7 +328,7 @@ def score_candidate(
         score += 50.0
         reasons.append("title_exact")
     elif norm_clue and (cand_title_norm.startswith(norm_clue) or norm_clue.startswith(cand_title_norm)):
-        score += 35.0
+        score += 30.0
         reasons.append("title_prefix")
     elif norm_clue and all(w in cand_title_norm.split() for w in norm_clue.split()):
         score += 25.0
