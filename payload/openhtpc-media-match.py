@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import os
@@ -488,22 +489,56 @@ def persist_candidates(
     return inserted_ids
 
 
+def compute_candidate_set_revision(db: sqlite3.Connection, media_version_id: int) -> str:
+    """Deterministic, schema-free candidate-set revision hash (SHA256)."""
+    cur = db.execute(
+        """
+        SELECT id, provider, external_id, status, score, created_at
+        FROM match_candidates
+        WHERE media_version_id = ?
+        ORDER BY id ASC
+        """,
+        (media_version_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return hashlib.sha256(b"empty").hexdigest()
+    canonical = [
+        {
+            "id": r[0],
+            "provider": str(r[1]),
+            "external_id": str(r[2]),
+            "status": str(r[3]),
+            "score": round(float(r[4]), 1),
+            "created_at": str(r[5]),
+        }
+        for r in rows
+    ]
+    serialized = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def accept_candidate(
     db: sqlite3.Connection,
     media_version_id: int,
     candidate: MovieCandidate | dict[str, Any],
-    score: float,
+    score: float | None = None,
     mode: str = "USER",
     method: str | None = None,
+    replace: bool = False,
+    expected_revision: str | None = None,
 ) -> dict[str, Any]:
     """Transactionally accept an identity candidate for media_version_id.
 
     1. Checks match_locked: if locked and mode is AUTO, rejects immediately.
-    2. Looks up existing external_ids(provider, external_id) -> reuses work_id.
-    3. If not found, creates ONE works row (work_type='MOVIE') and external_ids link.
-    4. Updates media_versions(work_id, identification_state, match_confidence, match_method, match_locked).
-    5. Sets candidate status='ACCEPTED' and supersedes other pending candidates.
-    6. Ensures technical resources, video/audio/subtitle streams are NOT touched.
+    2. Validates candidate-set revision if expected_revision is supplied.
+    3. Prevents silent overwrite if already identified and replace is not True.
+    4. Looks up existing external_ids(provider, external_id) -> reuses work_id.
+    5. If not found, creates ONE works row (work_type='MOVIE') and external_ids link.
+    6. Updates media_versions(work_id, identification_state, match_confidence, match_method, match_locked).
+    7. Invariant: At most ONE candidate row has status='ACCEPTED'; all other PENDING/ACCEPTED/SUPERSEDED
+       candidates become SUPERSEDED; REJECTED candidates are preserved.
+    8. Ensures technical resources, video/audio/subtitle streams are NOT touched.
     """
     if isinstance(candidate, dict):
         cand = MovieCandidate.from_dict(candidate)
@@ -519,7 +554,12 @@ def accept_candidate(
     )
     row = cur.fetchone()
     if row is None:
-        raise ValueError(f"MEDIA_VERSION_NOT_FOUND: {media_version_id}")
+        return {
+            "ok": False,
+            "error": "MEDIA_VERSION_NOT_FOUND",
+            "message": f"media_version {media_version_id} not found",
+            "media_version_id": media_version_id,
+        }
 
     current_work_id, current_state, match_locked = row
     if match_locked == 1 and mode == "AUTO":
@@ -531,7 +571,41 @@ def accept_candidate(
             "work_id": current_work_id,
         }
 
-    # 2. Duplicate WORK Prevention: Check if this external ID already has a WORK
+    # Revision check if supplied
+    if expected_revision is not None:
+        current_rev = compute_candidate_set_revision(db, media_version_id)
+        if expected_revision != current_rev:
+            return {
+                "ok": False,
+                "error": "CANDIDATE_STALE",
+                "message": f"Candidate set revision mismatch: expected '{expected_revision}', got '{current_rev}'",
+                "media_version_id": media_version_id,
+                "expected_revision": expected_revision,
+                "current_revision": current_rev,
+            }
+
+    # 2. Guard against silent overwrite of existing identity (Defect #2)
+    has_existing = (current_work_id is not None) or (current_state in ("AUTO_MATCHED", "USER_MATCHED"))
+    if has_existing and mode == "USER" and not replace:
+        is_same_work = False
+        if current_work_id is not None:
+            ext_chk = db.execute(
+                "SELECT 1 FROM external_ids WHERE work_id = ? AND provider = ? AND external_id = ?",
+                (current_work_id, cand.provider, cand.external_id),
+            ).fetchone()
+            if ext_chk is not None:
+                is_same_work = True
+        if not is_same_work:
+            return {
+                "ok": False,
+                "error": "REPLACEMENT_CONFIRMATION_REQUIRED",
+                "message": "media_version already has an identified work; explicit replace confirmation required.",
+                "media_version_id": media_version_id,
+                "current_work_id": current_work_id,
+                "current_state": current_state,
+            }
+
+    # 3. Duplicate WORK Prevention: Check if this external ID already has a WORK
     cur = db.execute(
         "SELECT work_id FROM external_ids WHERE provider = ? AND external_id = ?",
         (cand.provider, cand.external_id),
@@ -573,12 +647,12 @@ def accept_candidate(
                 work_id,
                 cand.provider,
                 cand.external_id,
-                str(score),
+                str(score) if score is not None else None,
                 now_iso,
             ),
         )
 
-    # 3. Update media_version
+    # 4. Update media_version
     ident_state = "USER_MATCHED" if mode == "USER" else "AUTO_MATCHED"
     new_locked = 1 if mode == "USER" else 0
     resolved_method = method or ("USER_CONFIRMATION" if mode == "USER" else "AUTO_TITLE_YEAR_EXACT")
@@ -605,24 +679,28 @@ def accept_candidate(
         ),
     )
 
-    # 4. Update candidate statuses
+    # 5. Update candidate statuses (Defect #1 fix: at most one ACCEPTED candidate)
     db.execute(
         """
         UPDATE match_candidates
-        SET status = 'ACCEPTED'
-        WHERE media_version_id = ? AND provider = ? AND external_id = ?
+        SET status = 'SUPERSEDED'
+        WHERE media_version_id = ?
+          AND status IN ('PENDING', 'ACCEPTED', 'SUPERSEDED')
+          AND NOT (provider = ? AND external_id = ?)
         """,
         (media_version_id, cand.provider, cand.external_id),
     )
     db.execute(
         """
         UPDATE match_candidates
-        SET status = 'SUPERSEDED'
-        WHERE media_version_id = ? AND status = 'PENDING'
+        SET status = 'ACCEPTED'
+        WHERE media_version_id = ?
+          AND provider = ? AND external_id = ?
         """,
-        (media_version_id,),
+        (media_version_id, cand.provider, cand.external_id),
     )
 
+    rev = compute_candidate_set_revision(db, media_version_id)
     return {
         "ok": True,
         "media_version_id": media_version_id,
@@ -636,6 +714,221 @@ def accept_candidate(
         "external_id": cand.external_id,
         "title": cand.title,
         "year": cand.year,
+        "candidate_set_revision": rev,
+    }
+
+
+def accept_candidate_by_id(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    candidate_id: int,
+    replace: bool = False,
+    expected_revision: str | None = None,
+) -> dict[str, Any]:
+    """Accept a candidate by candidate_id with full validation and concurrency guards."""
+    cur = db.execute(
+        "SELECT work_id, identification_state, match_locked FROM media_versions WHERE id = ?",
+        (media_version_id,),
+    )
+    mv_row = cur.fetchone()
+    if mv_row is None:
+        return {
+            "ok": False,
+            "error": "MEDIA_VERSION_NOT_FOUND",
+            "message": f"media_version {media_version_id} not found",
+            "media_version_id": media_version_id,
+        }
+
+    current_work_id, current_state, match_locked = mv_row
+
+    # Global candidate existence check
+    cur = db.execute(
+        """
+        SELECT id, media_version_id, provider, external_id, candidate_title, candidate_year,
+               candidate_payload_json, score, status
+        FROM match_candidates
+        WHERE id = ?
+        """,
+        (candidate_id,),
+    )
+    cand_row = cur.fetchone()
+    if cand_row is None:
+        return {
+            "ok": False,
+            "error": "CANDIDATE_NOT_FOUND",
+            "message": f"Candidate {candidate_id} not found",
+            "candidate_id": candidate_id,
+        }
+
+    c_id, c_mvid, provider, external_id, title, year, payload_json, score, status = cand_row
+
+    # Check candidate belongs to this media_version
+    if c_mvid != media_version_id:
+        return {
+            "ok": False,
+            "error": "CANDIDATE_MISMATCH",
+            "message": f"Candidate {candidate_id} belongs to media_version {c_mvid}, not {media_version_id}",
+            "candidate_id": candidate_id,
+            "media_version_id": media_version_id,
+        }
+
+    # Check revision guard if provided
+    if expected_revision is not None:
+        current_rev = compute_candidate_set_revision(db, media_version_id)
+        if expected_revision != current_rev:
+            return {
+                "ok": False,
+                "error": "CANDIDATE_STALE",
+                "message": f"Candidate set revision mismatch: expected '{expected_revision}', got '{current_rev}'",
+                "candidate_id": candidate_id,
+                "media_version_id": media_version_id,
+                "expected_revision": expected_revision,
+                "current_revision": current_rev,
+            }
+
+    # Check replacement confirmation requirement
+    has_existing = (current_work_id is not None) or (current_state in ("AUTO_MATCHED", "USER_MATCHED"))
+    is_same_work = False
+    if current_work_id is not None:
+        ext_chk = db.execute(
+            "SELECT 1 FROM external_ids WHERE work_id = ? AND provider = ? AND external_id = ?",
+            (current_work_id, provider, external_id),
+        ).fetchone()
+        if ext_chk is not None:
+            is_same_work = True
+
+    if not replace:
+        if has_existing and not is_same_work:
+            return {
+                "ok": False,
+                "error": "REPLACEMENT_CONFIRMATION_REQUIRED",
+                "message": "media_version already has an identified work; explicit replace confirmation required.",
+                "media_version_id": media_version_id,
+                "current_work_id": current_work_id,
+                "current_state": current_state,
+            }
+        if status != "PENDING" and not is_same_work:
+            return {
+                "ok": False,
+                "error": "CANDIDATE_STALE",
+                "message": f"Candidate {candidate_id} status is '{status}'; only PENDING candidates can be accepted without explicit replacement",
+                "candidate_id": candidate_id,
+                "status": status,
+            }
+    else:
+        if status not in ("PENDING", "SUPERSEDED", "ACCEPTED", "REJECTED"):
+            return {
+                "ok": False,
+                "error": "CANDIDATE_STALE",
+                "message": f"Candidate {candidate_id} status is '{status}'; cannot be accepted",
+                "candidate_id": candidate_id,
+                "status": status,
+            }
+
+    orig_title = None
+    runtime_min = None
+    try:
+        p_data = json.loads(payload_json) if payload_json else {}
+        orig_title = p_data.get("original_title")
+        runtime_min = p_data.get("runtime_minutes")
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    cand = MovieCandidate(
+        provider=provider,
+        external_id=external_id,
+        title=title,
+        original_title=orig_title,
+        year=year,
+        runtime_minutes=runtime_min,
+    )
+
+    return accept_candidate(
+        db,
+        media_version_id,
+        cand,
+        score=score,
+        mode="USER",
+        method="USER_CONFIRMATION",
+        replace=replace,
+        expected_revision=expected_revision,
+    )
+
+
+def reject_candidates(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    expected_revision: str | None = None,
+) -> dict[str, Any]:
+    """Reject all current suggestions for an unmatched media_version (None of these)."""
+    cur = db.execute(
+        "SELECT work_id, identification_state, match_locked FROM media_versions WHERE id = ?",
+        (media_version_id,),
+    )
+    mv_row = cur.fetchone()
+    if mv_row is None:
+        return {
+            "ok": False,
+            "error": "MEDIA_VERSION_NOT_FOUND",
+            "message": f"media_version {media_version_id} not found",
+            "media_version_id": media_version_id,
+        }
+
+    current_work_id, current_state, match_locked = mv_row
+
+    if current_state != "UNMATCHED" or current_work_id is not None:
+        return {
+            "ok": False,
+            "error": "REPLACEMENT_CONFIRMATION_REQUIRED",
+            "message": "Cannot reject candidates on identified media_version; explicit replacement required.",
+            "media_version_id": media_version_id,
+            "current_work_id": current_work_id,
+            "identification_state": current_state,
+        }
+
+    if expected_revision is not None:
+        current_rev = compute_candidate_set_revision(db, media_version_id)
+        if expected_revision != current_rev:
+            return {
+                "ok": False,
+                "error": "CANDIDATE_STALE",
+                "message": f"Candidate set revision mismatch: expected '{expected_revision}', got '{current_rev}'",
+                "media_version_id": media_version_id,
+                "expected_revision": expected_revision,
+                "current_revision": current_rev,
+            }
+
+    pending_count = db.execute(
+        "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status = 'PENDING'",
+        (media_version_id,),
+    ).fetchone()[0]
+
+    if pending_count == 0:
+        return {
+            "ok": False,
+            "error": "NO_PENDING_CANDIDATES",
+            "message": "No pending candidates to reject.",
+            "media_version_id": media_version_id,
+        }
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "UPDATE match_candidates SET status = 'REJECTED' WHERE media_version_id = ? AND status = 'PENDING'",
+        (media_version_id,),
+    )
+    db.execute(
+        "UPDATE media_versions SET updated_at = ? WHERE id = ?",
+        (now_iso, media_version_id),
+    )
+
+    new_rev = compute_candidate_set_revision(db, media_version_id)
+    return {
+        "ok": True,
+        "action": "rejected",
+        "media_version_id": media_version_id,
+        "rejected_count": pending_count,
+        "candidate_set_revision": new_rev,
+        "identification_state": "UNMATCHED",
     }
 
 
@@ -853,18 +1146,32 @@ def get_media_version_status(db: sqlite3.Connection, media_version_id: int) -> d
     )
     row = cur.fetchone()
     if row is None:
-        return {"ok": False, "error": f"MEDIA_VERSION_NOT_FOUND: {media_version_id}"}
+        return {"ok": False, "error": "MEDIA_VERSION_NOT_FOUND", "message": f"media_version {media_version_id} not found"}
 
     (
         mv_id, w_id, ident_state, confidence, method, locked, prov_title, prov_year,
         w_title, w_year, w_type, w_orig_title, r_id, r_path, r_avail
     ) = row
 
-    # Count pending candidates
-    cand_count = db.execute(
-        "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status = 'PENDING'",
-        (media_version_id,),
-    ).fetchone()[0]
+    # Count candidate statuses
+    cand_counts = dict(
+        db.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM match_candidates
+            WHERE media_version_id = ?
+            GROUP BY status
+            """,
+            (media_version_id,),
+        ).fetchall()
+    )
+    pending_count = cand_counts.get("PENDING", 0)
+    accepted_count = cand_counts.get("ACCEPTED", 0)
+    rejected_count = cand_counts.get("REJECTED", 0)
+    superseded_count = cand_counts.get("SUPERSEDED", 0)
+    total_candidates = sum(cand_counts.values())
+
+    rev = compute_candidate_set_revision(db, media_version_id)
 
     return {
         "ok": True,
@@ -888,12 +1195,17 @@ def get_media_version_status(db: sqlite3.Connection, media_version_id: int) -> d
             "relative_path": r_path,
             "availability_status": r_avail,
         } if r_id is not None else None,
-        "pending_candidates_count": cand_count,
+        "pending_candidates_count": pending_count,
+        "accepted_candidates_count": accepted_count,
+        "rejected_candidates_count": rejected_count,
+        "superseded_candidates_count": superseded_count,
+        "total_candidates_count": total_candidates,
+        "candidate_set_revision": rev,
     }
 
 
 def get_candidates(db: sqlite3.Connection, media_version_id: int) -> list[dict[str, Any]]:
-    """List match_candidates for a media_version."""
+    """List match_candidates for a media_version ordered by score DESC, id ASC."""
     rows = db.execute(
         """
         SELECT id, provider, external_id, candidate_title, candidate_year,
@@ -916,8 +1228,12 @@ def get_candidates(db: sqlite3.Connection, media_version_id: int) -> list[dict[s
             "id": r[0],
             "provider": r[1],
             "external_id": r[2],
+            "title": r[3],
             "candidate_title": r[3],
+            "year": r[4],
             "candidate_year": r[4],
+            "original_title": payload.get("original_title"),
+            "runtime_minutes": payload.get("runtime_minutes"),
             "payload": payload,
             "score": r[6],
             "status": r[7],
@@ -949,10 +1265,23 @@ def main(argv: list[str] | None = None) -> int:
     cand_p = subparsers.add_parser("candidates", help="List stored candidates for media_version")
     cand_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
 
-    # accept --media-version-id <id> --candidate-id <id>
+    # accept --media-version-id <id> --candidate-id <id> [--replace] [--expected-revision <rev>]
     accept_p = subparsers.add_parser("accept", help="User acceptance of candidate")
     accept_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
     accept_p.add_argument("--candidate-id", type=int, required=True, help="ID in match_candidates table")
+    accept_p.add_argument("--replace", action="store_true", help="Explicitly replace existing identification")
+    accept_p.add_argument("--expected-revision", default=None, help="Expected candidate set revision")
+
+    # replace --media-version-id <id> --candidate-id <id> [--expected-revision <rev>]
+    replace_p = subparsers.add_parser("replace", help="Explicit replacement of existing identification")
+    replace_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
+    replace_p.add_argument("--candidate-id", type=int, required=True, help="ID in match_candidates table")
+    replace_p.add_argument("--expected-revision", default=None, help="Expected candidate set revision")
+
+    # reject --media-version-id <id> [--expected-revision <rev>]
+    reject_p = subparsers.add_parser("reject", help="Reject all current suggestions (None of these)")
+    reject_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
+    reject_p.add_argument("--expected-revision", default=None, help="Expected candidate set revision")
 
     # status --media-version-id <id>
     status_p = subparsers.add_parser("status", help="Show identity status for media_version")
@@ -992,8 +1321,25 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if st.get("ok") else 1
 
         if args.action == "candidates":
+            mv_chk = db.execute("SELECT 1 FROM media_versions WHERE id = ?", (args.media_version_id,)).fetchone()
+            if mv_chk is None:
+                out = {
+                    "ok": False,
+                    "error": "MEDIA_VERSION_NOT_FOUND",
+                    "message": f"media_version {args.media_version_id} not found",
+                    "media_version_id": args.media_version_id,
+                }
+                print(json.dumps(out, indent=2))
+                return 1
             cands = get_candidates(db, args.media_version_id)
-            print(json.dumps(cands, indent=2))
+            rev = compute_candidate_set_revision(db, args.media_version_id)
+            out = {
+                "ok": True,
+                "media_version_id": args.media_version_id,
+                "candidate_set_revision": rev,
+                "candidates": cands,
+            }
+            print(json.dumps(out, indent=2))
             return 0
 
         if args.action == "lookup":
@@ -1029,49 +1375,25 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(res, indent=2))
             return 0 if res.get("ok") else 1
 
-        if args.action == "accept":
-            # Lookup candidate from match_candidates
-            cur = db.execute(
-                """
-                SELECT provider, external_id, candidate_title, candidate_year,
-                       candidate_payload_json, score
-                FROM match_candidates
-                WHERE id = ? AND media_version_id = ?
-                """,
-                (args.candidate_id, args.media_version_id),
-            )
-            row = cur.fetchone()
-            if row is None:
-                print(f"ERROR: Candidate {args.candidate_id} not found for media_version {args.media_version_id}", file=sys.stderr)
-                return 1
-
-            provider, external_id, title, year, payload_json, score = row
-            orig_title = None
-            runtime_min = None
-            try:
-                p_data = json.loads(payload_json)
-                orig_title = p_data.get("original_title")
-                runtime_min = p_data.get("runtime_minutes")
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-            cand = MovieCandidate(
-                provider=provider,
-                external_id=external_id,
-                title=title,
-                original_title=orig_title,
-                year=year,
-                runtime_minutes=runtime_min,
-            )
-
+        if args.action in ("accept", "replace"):
+            replace_flag = True if args.action == "replace" else args.replace
             with db:
-                res = accept_candidate(
+                res = accept_candidate_by_id(
                     db,
                     args.media_version_id,
-                    cand,
-                    score=score,
-                    mode="USER",
-                    method="USER_CONFIRMATION",
+                    args.candidate_id,
+                    replace=replace_flag,
+                    expected_revision=args.expected_revision,
+                )
+            print(json.dumps(res, indent=2))
+            return 0 if res.get("ok") else 1
+
+        if args.action == "reject":
+            with db:
+                res = reject_candidates(
+                    db,
+                    args.media_version_id,
+                    expected_revision=args.expected_revision,
                 )
             print(json.dumps(res, indent=2))
             return 0 if res.get("ok") else 1
