@@ -1,0 +1,498 @@
+#!/usr/bin/env python3
+"""Living-room human identity resolver UI helper for OpenHTPC (DEV5C2).
+
+Provides couch-friendly presentation formatting, Flex resolver/confirmation
+menu section generation, and safe action dispatching via DEV5C1 contracts.
+
+Zero network calls. Zero direct writes to works, external_ids, or media_versions.
+Single-Flex process architecture.
+"""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import closing
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+from typing import Any
+
+
+_MEDIA_MATCH = None
+_MEDIA_DB = None
+_SESSION_ENGINE = None
+
+
+def set_media_match_module(mod: Any) -> None:
+    global _MEDIA_MATCH
+    _MEDIA_MATCH = mod
+
+
+def set_media_db_module(mod: Any) -> None:
+    global _MEDIA_DB
+    _MEDIA_DB = mod
+
+
+def set_session_engine_module(mod: Any) -> None:
+    global _SESSION_ENGINE
+    _SESSION_ENGINE = mod
+
+
+def _load_media_db(install: Path | None = None):
+    if _MEDIA_DB is not None:
+        return _MEDIA_DB
+    candidates = [
+        install / "openhtpc-media-db.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-db.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_db", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def _load_media_match(install: Path | None = None):
+    if _MEDIA_MATCH is not None:
+        return _MEDIA_MATCH
+    candidates = [
+        install / "openhtpc-media-match.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-match.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_match", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def _load_session_engine(install: Path | None = None):
+    if _SESSION_ENGINE is not None:
+        return _SESSION_ENGINE
+    candidates = [
+        install / "openhtpc-session-engine.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-session-engine.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_session_engine", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def format_candidate_label(candidate: dict[str, Any], is_accepted: bool = False) -> str:
+    """Format candidate for living-room couch UI.
+
+    Hides score, provider ID, external ID, and database IDs.
+    Shows localized title and year, original title only when different,
+    and runtime if cleanly available. Marks accepted candidate with ✓.
+    """
+    title = str(candidate.get("title") or candidate.get("candidate_title") or "Film").strip()
+    title = title.replace("\n", " ").replace("\r", " ").replace(";", "—")
+    year = candidate.get("year") or candidate.get("candidate_year")
+    orig_title = candidate.get("original_title")
+    runtime = candidate.get("runtime_minutes")
+
+    prefix = "✓ " if is_accepted else ""
+    if year:
+        display = f"{prefix}{title} ({year})"
+    else:
+        display = f"{prefix}{title}"
+
+    if orig_title and isinstance(orig_title, str):
+        clean_orig = orig_title.strip().replace("\n", " ").replace("\r", " ").replace(";", "—")
+        if clean_orig and clean_orig.casefold() != title.casefold():
+            display += f"  ·  Titre original : {clean_orig}"
+
+    if runtime:
+        try:
+            r_int = int(runtime)
+            if r_int > 0:
+                display += f"  ·  {r_int} min"
+        except (ValueError, TypeError):
+            pass
+
+    return display
+
+
+def get_ui_candidates(db: sqlite3.Connection, media_version_id: int, install: Path | None = None) -> list[dict[str, Any]]:
+    """Retrieve candidate list for UI, filtering out REJECTED candidates."""
+    media_match = _load_media_match(install)
+    if not media_match:
+        raise RuntimeError("openhtpc-media-match module unavailable")
+    raw_candidates = media_match.get_candidates(db, media_version_id)
+    filtered = [c for c in raw_candidates if c.get("status") != "REJECTED"]
+    return filtered[:5]
+
+
+def get_status(db: sqlite3.Connection, media_version_id: int, install: Path | None = None) -> dict[str, Any]:
+    """Retrieve identity status for media_version via DEV5C1."""
+    media_match = _load_media_match(install)
+    if not media_match:
+        raise RuntimeError("openhtpc-media-match module unavailable")
+    return media_match.get_media_version_status(db, media_version_id)
+
+
+def is_work_same(db: sqlite3.Connection, current_work_id: int | None, candidate: dict[str, Any]) -> bool:
+    """Check if candidate represents the currently accepted work."""
+    if current_work_id is None:
+        return False
+    provider = candidate.get("provider")
+    external_id = candidate.get("external_id")
+    if not provider or not external_id:
+        return False
+    row = db.execute(
+        "SELECT 1 FROM external_ids WHERE work_id = ? AND provider = ? AND external_id = ?",
+        (current_work_id, str(provider), str(external_id)),
+    ).fetchone()
+    return row is not None
+
+
+def build_resolver_menu_sections(
+    home: Path,
+    install: Path,
+    db: sqlite3.Connection,
+    media_version_id: int,
+    res_section_id: str,
+    generation: str,
+    actions: dict[str, Any],
+    icon: Path,
+) -> list[str]:
+    """Build Flex INI menu sections for candidate list and confirmations.
+
+    All mutations use safe action tokens dispatched to DEV5C1 via :applyback.
+    Returns list of formatted section strings.
+    """
+    st = get_status(db, media_version_id, install)
+    candidates = get_ui_candidates(db, media_version_id, install)
+    rev = st.get("candidate_set_revision") or ""
+    state = st.get("identification_state") or "UNMATCHED"
+    work_id = st.get("work_id")
+    token_suffix = res_section_id[8:] if res_section_id.startswith("MEDIA_R") else res_section_id
+
+    sections: list[str] = []
+
+    if state == "UNMATCHED" and not candidates:
+        body = f"Entry1=Aucune proposition disponible.;{icon};:back\nEntry2=RETOUR;{icon};:back"
+        sections.append(f"[{res_section_id}]\n{body}")
+        return sections
+
+    res_entries: list[tuple[str, Path, str]] = []
+    helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-match-ui"
+
+    for cand in candidates:
+        cand_id = cand["id"]
+        is_accepted = (cand.get("status") == "ACCEPTED")
+        same_work = is_accepted or (work_id is not None and is_work_same(db, work_id, cand))
+        cand_label = format_candidate_label(cand, is_accepted=is_accepted)
+
+        needs_replace = bool(state in ("AUTO_MATCHED", "USER_MATCHED") and not same_work)
+        if needs_replace:
+            conf_menu = f"MEDIA_RP_{token_suffix}_{cand_id}"
+            action_type = "replace"
+        else:
+            conf_menu = f"MEDIA_C_{token_suffix}_{cand_id}"
+            action_type = "accept"
+
+        action_token = f"iact_{generation}_{token_suffix}_{cand_id}"
+        actions[action_token] = {
+            "action": action_type,
+            "media_version_id": media_version_id,
+            "candidate_id": cand_id,
+            "expected_revision": rev,
+            "replace": needs_replace,
+        }
+
+        res_entries.append((cand_label, icon, f":submenu {conf_menu}"))
+
+        # Build confirmation screen
+        dispatch_cmd = f":applyback {helper_path} dispatch {action_token}"
+        if not needs_replace:
+            if same_work and state == "AUTO_MATCHED":
+                conf_title = "CONFIRMER CETTE IDENTIFICATION"
+            else:
+                conf_title = "CONFIRMER CE FILM"
+            c_body = f"Entry1={conf_title};{icon};{dispatch_cmd}\nEntry2=RETOUR;{icon};:back"
+            sections.append(f"[{conf_menu}]\n{c_body}")
+        else:
+            curr_work = st.get("work") or {}
+            c_title = str(curr_work.get("title") or "Film").replace("\n", " ").replace("\r", " ").replace(";", "—")
+            c_year = f" ({curr_work.get('year')})" if curr_work.get("year") else ""
+            n_title = str(cand.get("title") or cand.get("candidate_title") or "Film").replace("\n", " ").replace("\r", " ").replace(";", "—")
+            n_year = f" ({cand.get('year') or cand.get('candidate_year')})" if (cand.get("year") or cand.get("candidate_year")) else ""
+            r_lines = [
+                f"Entry1=CONFIRMER LE CHANGEMENT;{icon};{dispatch_cmd}",
+                f"Entry2=Actuel : {c_title}{c_year};{icon};:fork true",
+                f"Entry3=Nouveau : {n_title}{n_year};{icon};:fork true",
+                f"Entry4=ANNULER;{icon};:back",
+            ]
+            sections.append(f"[{conf_menu}]\n" + "\n".join(r_lines))
+
+    # Reject entry for UNMATCHED with pending candidates
+    if state == "UNMATCHED":
+        rej_token = f"iact_{generation}_{token_suffix}_rej"
+        actions[rej_token] = {
+            "action": "reject",
+            "media_version_id": media_version_id,
+            "candidate_id": None,
+            "expected_revision": rev,
+        }
+        rej_menu = f"MEDIA_RJ_{token_suffix}"
+        rej_dispatch = f":applyback {helper_path} dispatch {rej_token}"
+        rej_body = f"Entry1=OUI, AUCUN NE CORRESPOND;{icon};{rej_dispatch}\nEntry2=RETOUR;{icon};:back"
+        sections.append(f"[{rej_menu}]\n{rej_body}")
+        res_entries.append(("AUCUN DE CES FILMS", icon, f":submenu {rej_menu}"))
+
+    # Decide later
+    res_entries.append(("PLUS TARD", icon, ":back"))
+
+    res_body = "\n".join(
+        f"Entry{i}={lbl};{ico};{cmd}" for i, (lbl, ico, cmd) in enumerate(res_entries, 1)
+    )
+    sections.append(f"[{res_section_id}]\n{res_body}")
+    return sections
+
+
+def _regenerate_ui(home: Path, install: Path) -> bool:
+    """Regenerate Flex configuration using session engine without spawning Flex."""
+    engine = _load_session_engine(install)
+    if not engine:
+        return False
+    try:
+        flex_config = home / ".config/openhtpc/flex-v1.ini"
+        sources = []
+        try:
+            state = engine.evaluate(home)
+            sources = state.get("sources", [])
+        except Exception:
+            user_config_file = home / ".config/openhtpc/user-config.json"
+            if user_config_file.is_file():
+                try:
+                    u_data = json.loads(user_config_file.read_text(encoding="utf-8"))
+                    sources = [Path(s) for s in u_data.get("local_media_sources", [])]
+                except Exception:
+                    sources = []
+        return engine.publish_flex_config(flex_config, home, sources, install)
+    except Exception as exc:
+        print(f"WARNING: UI regeneration failed: {exc}", file=sys.stderr)
+        return False
+
+
+def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
+    """Dispatch an ephemeral action token to DEV5C1 with optimistic concurrency."""
+    if install is None:
+        install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+
+    manifest_path = home / ".local/state/openhtpc/media-actions/current.json"
+    if not manifest_path.is_file():
+        print("ERROR: ACTION_MANIFEST_MISSING", file=sys.stderr)
+        return 1
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"ERROR: ACTION_MANIFEST_INVALID: {exc}", file=sys.stderr)
+        return 1
+
+    actions = manifest.get("items", {})
+    action_data = actions.get(token)
+    if not action_data or not isinstance(action_data, dict):
+        print(f"ERROR: INVALID_ACTION_TOKEN: {token}", file=sys.stderr)
+        return 1
+
+    action_type = action_data.get("action")
+    mv_id = action_data.get("media_version_id")
+    cand_id = action_data.get("candidate_id")
+    expected_rev = action_data.get("expected_revision")
+    replace = action_data.get("replace", False)
+
+    if not isinstance(mv_id, int):
+        print("ERROR: INVALID_ACTION_IDENTITY", file=sys.stderr)
+        return 1
+
+    media_db = _load_media_db(install)
+    media_match = _load_media_match(install)
+    if not media_db or not media_match:
+        print("ERROR: MODULE_UNAVAILABLE", file=sys.stderr)
+        return 2
+
+    media_match.set_media_db_module(media_db)
+
+    db_file = home / ".local/share/openhtpc/media/media.db"
+    if not db_file.is_file():
+        db_file = media_db.database_path(home=home, environ={})
+    if not db_file.is_file():
+        print(f"ERROR: DB_NOT_FOUND: {db_file}", file=sys.stderr)
+        return 1
+
+    with closing(media_db.connect(db_file)) as db:
+        if action_type in ("accept", "replace"):
+            if not isinstance(cand_id, int):
+                print("ERROR: CANDIDATE_ID_REQUIRED", file=sys.stderr)
+                return 1
+            res = media_match.accept_candidate_by_id(
+                db,
+                media_version_id=mv_id,
+                candidate_id=cand_id,
+                replace=bool(replace or action_type == "replace"),
+                expected_revision=expected_rev,
+            )
+        elif action_type == "reject":
+            res = media_match.reject_candidates(
+                db,
+                media_version_id=mv_id,
+                expected_revision=expected_rev,
+            )
+        else:
+            print(f"ERROR: UNKNOWN_ACTION: {action_type}", file=sys.stderr)
+            return 1
+
+        if not res.get("ok"):
+            err = res.get("error")
+            if err == "CANDIDATE_STALE":
+                print("Les propositions ont changé. La liste va être actualisée.", file=sys.stderr)
+                # Obtain new revision and refresh UI without automatic acceptance retry
+                _regenerate_ui(home, install)
+                return 1
+            print(f"ERROR: {err}: {res.get('message')}", file=sys.stderr)
+            return 1
+
+        db.commit()
+
+        # Successful DB commit: regenerate Flex presentation
+        _regenerate_ui(home, install)
+        return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="OpenHTPC Living-Room Identity Resolver UI")
+    parser.add_argument("--home", type=Path, default=None, help="OpenHTPC user home")
+    parser.add_argument("--install", type=Path, default=None, help="OpenHTPC install dir")
+    parser.add_argument("--db", type=Path, default=None, help="Explicit media.db path")
+
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    # dispatch <token>
+    disp_p = subparsers.add_parser("dispatch", help="Execute an ephemeral action token")
+    disp_p.add_argument("token", help="Action token (iact_...)")
+
+    # status --media-version-id <id>
+    stat_p = subparsers.add_parser("status", help="Get identity status for UI")
+    stat_p.add_argument("--media-version-id", type=int, required=True)
+
+    # candidates --media-version-id <id>
+    cand_p = subparsers.add_parser("candidates", help="Get filtered candidates for UI")
+    cand_p.add_argument("--media-version-id", type=int, required=True)
+
+    # accept --media-version-id <id> --candidate-id <id> [--replace] [--expected-revision <rev>]
+    acc_p = subparsers.add_parser("accept", help="Accept candidate via DEV5C1")
+    acc_p.add_argument("--media-version-id", type=int, required=True)
+    acc_p.add_argument("--candidate-id", type=int, required=True)
+    acc_p.add_argument("--replace", action="store_true")
+    acc_p.add_argument("--expected-revision", default=None)
+
+    # replace --media-version-id <id> --candidate-id <id> [--expected-revision <rev>]
+    rep_p = subparsers.add_parser("replace", help="Replace candidate via DEV5C1")
+    rep_p.add_argument("--media-version-id", type=int, required=True)
+    rep_p.add_argument("--candidate-id", type=int, required=True)
+    rep_p.add_argument("--expected-revision", default=None)
+
+    # reject --media-version-id <id> [--expected-revision <rev>]
+    rej_p = subparsers.add_parser("reject", help="Reject candidates via DEV5C1")
+    rej_p.add_argument("--media-version-id", type=int, required=True)
+    rej_p.add_argument("--expected-revision", default=None)
+
+    args = parser.parse_args(argv)
+
+    home = args.home if args.home else Path(os.environ.get("OPENHTPC_HOME", Path.home())).resolve()
+    install = args.install if args.install else Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc")).resolve()
+
+    if args.subcommand == "dispatch":
+        return dispatch_action(home, args.token, install)
+
+    media_db = _load_media_db(install)
+    media_match = _load_media_match(install)
+    if not media_db or not media_match:
+        print("ERROR: OpenHTPC components unavailable", file=sys.stderr)
+        return 2
+
+    db_file = args.db if args.db else media_db.database_path(home=home)
+    if not db_file.is_file():
+        print(f"ERROR: Database file not found: {db_file}", file=sys.stderr)
+        return 1
+
+    with closing(media_db.connect(db_file)) as db:
+        if args.subcommand == "status":
+            st = get_status(db, args.media_version_id, install)
+            print(json.dumps(st, indent=2))
+            return 0 if st.get("ok") else 1
+
+        if args.subcommand == "candidates":
+            cands = get_ui_candidates(db, args.media_version_id, install)
+            formatted = [
+                {
+                    "id": c["id"],
+                    "label": format_candidate_label(c, is_accepted=(c.get("status") == "ACCEPTED")),
+                    "raw": c,
+                }
+                for c in cands
+            ]
+            print(json.dumps({"ok": True, "candidates": formatted}, indent=2))
+            return 0
+
+        if args.subcommand == "accept":
+            res = media_match.accept_candidate_by_id(
+                db,
+                media_version_id=args.media_version_id,
+                candidate_id=args.candidate_id,
+                replace=args.replace,
+                expected_revision=args.expected_revision,
+            )
+            print(json.dumps(res, indent=2))
+            if res.get("ok"):
+                _regenerate_ui(home, install)
+                return 0
+            return 1
+
+        if args.subcommand == "replace":
+            res = media_match.accept_candidate_by_id(
+                db,
+                media_version_id=args.media_version_id,
+                candidate_id=args.candidate_id,
+                replace=True,
+                expected_revision=args.expected_revision,
+            )
+            print(json.dumps(res, indent=2))
+            if res.get("ok"):
+                _regenerate_ui(home, install)
+                return 0
+            return 1
+
+        if args.subcommand == "reject":
+            res = media_match.reject_candidates(
+                db,
+                media_version_id=args.media_version_id,
+                expected_revision=args.expected_revision,
+            )
+            print(json.dumps(res, indent=2))
+            if res.get("ok"):
+                _regenerate_ui(home, install)
+                return 0
+            return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

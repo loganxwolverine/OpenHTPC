@@ -303,6 +303,72 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     folder_icon = home / ".local/lib/openhtpc/assets/ui/folder.png"
     remove_icon = home / ".local/lib/openhtpc/flex/assets/icons/drive-empty.png"
 
+    # Short icon symlinks for line buffer economy (libinih INI_MAX_LINE 200)
+    uid = os.getuid()
+    short_icon = pathlib.Path(f"/tmp/ohtpc-{uid}-m.png")
+    try:
+        if short_icon.is_symlink() or short_icon.is_file():
+            short_icon.unlink(missing_ok=True)
+        short_icon.symlink_to(icon)
+        entry_icon = short_icon
+    except OSError:
+        entry_icon = icon
+
+    short_remove_icon = pathlib.Path(f"/tmp/ohtpc-{uid}-d.png")
+    try:
+        if short_remove_icon.is_symlink() or short_remove_icon.is_file():
+            short_remove_icon.unlink(missing_ok=True)
+        short_remove_icon.symlink_to(remove_icon)
+        effective_remove_icon = short_remove_icon
+    except OSError:
+        effective_remove_icon = remove_icon
+
+    # Preload identity map from media.db if present (single read-only pass)
+    media_db_path = home / ".local/share/openhtpc/media/media.db"
+    identity_map: dict[tuple[str, str], dict[str, Any]] = {}
+    if media_db_path.is_file():
+        try:
+            import sqlite3
+            with sqlite3.connect(f"file:{media_db_path}?mode=ro", uri=True) as db:
+                rows = db.execute(
+                    """
+                    SELECT r.source_id, r.relative_path, r.media_version_id,
+                           mv.identification_state, mv.match_locked, mv.work_id,
+                           w.title, w.year, w.original_title
+                    FROM resources r
+                    JOIN media_versions mv ON mv.id = r.media_version_id
+                    LEFT JOIN works w ON w.id = mv.work_id
+                    """
+                ).fetchall()
+                for r in rows:
+                    identity_map[(r[0], r[1])] = {
+                        "media_version_id": r[2],
+                        "identification_state": r[3],
+                        "match_locked": r[4],
+                        "work_id": r[5],
+                        "title": r[6],
+                        "year": r[7],
+                        "original_title": r[8],
+                    }
+        except Exception:
+            identity_map = {}
+
+    # Load UI helper for resolver menu construction
+    match_ui = None
+    ui_script = install / "openhtpc-media-match-ui"
+    if not ui_script.is_file():
+        ui_script = pathlib.Path(__file__).resolve().parent / "openhtpc-media-match-ui"
+    if ui_script.is_file():
+        try:
+            import importlib.machinery
+            loader = importlib.machinery.SourceFileLoader("openhtpc_media_match_ui", str(ui_script))
+            spec = importlib.util.spec_from_loader("openhtpc_media_match_ui", loader)
+            if spec and spec.loader:
+                match_ui = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(match_ui)
+        except Exception:
+            match_ui = None
+
     def section_for(folder: pathlib.Path, source_root: pathlib.Path, source_id: str, depth: int = 0) -> str | None:
         try: resolved = folder.resolve(strict=True)
         except OSError: return None
@@ -337,12 +403,59 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         stem = os.path.splitext(item.name)[0]
                         title = ini_value(stem)
                         if len(title) > 72: title = title[:69].rstrip() + "…"
-                        entries.append((f"{title}  ·  {ext[1:].upper()}", icon, command))
+
+                        ident = identity_map.get((source_id, relative.as_posix()))
+                        mv_id = ident.get("media_version_id") if ident else None
+                        state = ident.get("identification_state") if ident else "UNMATCHED"
+
+                        if state == "AUTO_MATCHED":
+                            context_title = "CONFIRMER / CHANGER L’IDENTIFICATION"
+                        elif state == "USER_MATCHED":
+                            context_title = "CHANGER L’IDENTIFICATION"
+                        else:
+                            context_title = "IDENTIFIER LE FILM"
+
+                        res_menu = f"MEDIA_R{item_id[:8]}"
+                        context_cmd = f":submenu {res_menu}"
+
+                        if match_ui and mv_id is not None and media_db_path.is_file():
+                            try:
+                                import sqlite3
+                                with sqlite3.connect(f"file:{media_db_path}?mode=ro", uri=True) as db:
+                                    res_secs = match_ui.build_resolver_menu_sections(
+                                        home=home,
+                                        install=install,
+                                        db=db,
+                                        media_version_id=mv_id,
+                                        res_section_id=res_menu,
+                                        generation=generation,
+                                        actions=actions,
+                                        icon=entry_icon,
+                                    )
+                                    sections.extend(res_secs)
+                            except Exception:
+                                pass
+                        else:
+                            no_cand_body = "\n".join([
+                                bounded_flex_entry(1, "Aucune proposition disponible.", entry_icon, ":back"),
+                                bounded_flex_entry(2, "RETOUR", entry_icon, ":back"),
+                            ])
+                            sections.append(f"[{res_menu}]\n{no_cand_body}")
+
+                        entries.append((f"{title}  ·  {ext[1:].upper()}", entry_icon, command, context_cmd, context_title))
             except OSError:
                 continue
         if resolved == source_root.resolve():
-            entries.append(("RETIRER CETTE SOURCE D'OPENHTPC", remove_icon, f"{remove_bin} \"{str(source_root)}\""))
-        body = "\n".join(bounded_flex_entry(i, label, entry_icon, command) for i, (label, entry_icon, command) in enumerate(entries, 1))
+            entries.append(("RETIRER CETTE SOURCE D'OPENHTPC", effective_remove_icon, f"$HOME/.local/lib/openhtpc/openhtpc-media-remove \"{str(source_root)}\""))
+        body_entries = []
+        for i, entry_tuple in enumerate(entries, 1):
+            if len(entry_tuple) == 5:
+                lbl, ico, cmd, c_cmd, c_title = entry_tuple
+                body_entries.append(bounded_flex_entry(i, lbl, ico, cmd, c_cmd, c_title))
+            else:
+                lbl, ico, cmd = entry_tuple
+                body_entries.append(bounded_flex_entry(i, lbl, ico, cmd))
+        body = "\n".join(body_entries)
         sections.append(f"[{name}]\n{body}")
         return name
 
@@ -358,7 +471,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
             inventory.append({"source_id":sid,"configured_path":str(source),"canonical_path":str(canonical) if canonical is not None else None})
             label = ini_value(source.name or str(source)) + ("" if target else " — indisponible")
             source_cmd = f":submenu {target}" if target else ":fork true"
-            context_cmd = f"{remove_bin} \"{str(source)}\""
+            context_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-media-remove \"{str(source)}\""
             roots.append((label, folder_icon, source_cmd, context_cmd, "RETIRER LA SOURCE"))
         roots.append(("+ AJOUTER UNE SOURCE", add_icon, f"{picker_bin}"))
 
@@ -366,24 +479,39 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     root_entries = []
     for i, entry_tuple in enumerate(roots, 1):
         if len(entry_tuple) == 5:
-            label, entry_icon, command, context_cmd, context_title = entry_tuple
-            root_entries.append(f"Entry{i}={label};{entry_icon};{command};{context_cmd};{context_title}")
+            label, entry_icon_root, command, context_cmd, context_title = entry_tuple
+            root_entries.append(f"Entry{i}={label};{entry_icon_root};{command};{context_cmd};{context_title}")
         else:
-            label, entry_icon, command = entry_tuple
-            root_entries.append(f"Entry{i}={label};{entry_icon};{command}")
+            label, entry_icon_root, command = entry_tuple
+            root_entries.append(f"Entry{i}={label};{entry_icon_root};{command}")
     root_body = "\n".join(root_entries)
 
     write_media_model_state(home,generation,inventory,actions,manifest_target)
     return "MEDIA_ROOT", "\n\n".join([f"[MEDIA_ROOT]\n{root_body}", *reversed(sections)])
 
 
-def bounded_flex_entry(index: int, label: str, icon: pathlib.Path, command: str, max_bytes: int = 198) -> str:
+def bounded_flex_entry(
+    index: int,
+    label: str,
+    icon: pathlib.Path,
+    command: str,
+    context_cmd: str | None = None,
+    context_title: str | None = None,
+    max_bytes: int = 198,
+) -> str:
     """Serialize an Entry line that fits in Flex/inih's 200-byte input buffer."""
     prefix = f"Entry{index}="
-    suffix = f";{icon};{command}"
+    if context_cmd is not None and context_title is not None:
+        suffix = f";{icon};{command};{context_cmd};{context_title}"
+    else:
+        suffix = f";{icon};{command}"
     budget = max_bytes - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8"))
     if budget < 1:
-        raise ValueError("Flex entry metadata exceeds parser line limit")
+        if context_cmd is not None and context_title is not None:
+            suffix = f";{icon};{command}"
+            budget = max_bytes - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8"))
+        if budget < 1:
+            raise ValueError("Flex entry metadata exceeds parser line limit")
     encoded = label.encode("utf-8")
     if len(encoded) > budget:
         ellipsis = "…"
@@ -393,6 +521,9 @@ def bounded_flex_entry(index: int, label: str, icon: pathlib.Path, command: str,
             media_suffix = f"  ·  {tail}"
             encoded = head.encode("utf-8")
         reserved = len((ellipsis + media_suffix).encode("utf-8"))
+        if budget < reserved:
+            media_suffix = ""
+            reserved = len(ellipsis.encode("utf-8"))
         encoded = encoded[:max(0, budget - reserved)]
         while True:
             try:
@@ -817,6 +948,7 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
     system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "metadata", "tmdb", "processing", "playback", "diagnostics", "technical", "about")
     system_pages = {name: home / f".cache/openhtpc/system-{name}.png" for name in system_page_keys}
     dashboard = home / ".cache/openhtpc/system-dashboard.png"
+    system_model = {}
     system_page = install / "openhtpc-system-page"
     if system_page.is_file():
         loader = importlib.machinery.SourceFileLoader("openhtpc_system_live", str(system_page))

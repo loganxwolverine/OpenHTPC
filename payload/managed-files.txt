@@ -150,6 +150,7 @@ openhtpc-media-browser.py
 openhtpc-media-db.py
 openhtpc-media-ingest.py
 openhtpc-media-match.py
+openhtpc-media-match-ui
 openhtpc-media-picker
 openhtpc-media-probe.py
 openhtpc-media-provider-tmdb.py
