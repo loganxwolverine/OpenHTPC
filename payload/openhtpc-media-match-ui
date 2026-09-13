@@ -310,6 +310,24 @@ def is_work_same(db: sqlite3.Connection, current_work_id: int | None, candidate:
     return row is not None
 
 
+def build_stale_menu_section(
+    res_section_id: str,
+    list_section_id: str,
+    icon: Path | str,
+    header: str = "LES PROPOSITIONS ONT CHANGÉ",
+    secondary: str = "La liste a été actualisée.",
+    action_label: str = "VOIR LA NOUVELLE LISTE",
+    back_label: str = "RETOUR",
+    max_bytes: int = 198,
+) -> str:
+    """Build dedicated in-process Flex stale information screen section."""
+    e1 = bounded_flex_line(1, header, icon, ":fork true", max_bytes=max_bytes)
+    e2 = bounded_flex_line(2, secondary, icon, ":fork true", max_bytes=max_bytes)
+    e3 = bounded_flex_line(3, action_label, icon, f":submenu {list_section_id}", max_bytes=max_bytes)
+    e4 = bounded_flex_line(4, back_label, icon, ":back", max_bytes=max_bytes)
+    return f"[{res_section_id}]\n{e1}\n{e2}\n{e3}\n{e4}"
+
+
 def build_resolver_menu_sections(
     home: Path,
     install: Path,
@@ -319,18 +337,25 @@ def build_resolver_menu_sections(
     generation: str,
     actions: dict[str, Any],
     icon: Path,
+    stale_notice: bool = False,
 ) -> list[str]:
     """Build Flex INI menu sections for candidate list and confirmations.
 
     All mutations use safe action tokens dispatched to DEV5C1 via :applyback.
     Returns list of formatted section strings.
     """
+    if not stale_notice:
+        env_stale = os.environ.get("OPENHTPC_STALE_NOTICE_MV")
+        if env_stale and str(media_version_id) in env_stale.split(","):
+            stale_notice = True
+
     st = get_status(db, media_version_id, install)
     candidates = get_ui_candidates(db, media_version_id, install)
     rev = st.get("candidate_set_revision") or ""
     state = st.get("identification_state") or "UNMATCHED"
     work_id = st.get("work_id")
     token_suffix = res_section_id[8:] if res_section_id.startswith("MEDIA_R") else res_section_id
+    list_section_id = f"MEDIA_RL_{token_suffix}"
 
     sections: list[str] = []
 
@@ -363,6 +388,7 @@ def build_resolver_menu_sections(
             "candidate_id": cand_id,
             "expected_revision": rev,
             "replace": needs_replace,
+            "resolver_section_id": res_section_id,
         }
 
         conf_cmd = f":submenu {conf_menu}"
@@ -409,6 +435,7 @@ def build_resolver_menu_sections(
             "media_version_id": media_version_id,
             "candidate_id": None,
             "expected_revision": rev,
+            "resolver_section_id": res_section_id,
         }
         rej_menu = f"MEDIA_RJ_{token_suffix}"
         rej_dispatch = f":applyback {helper_path} dispatch {rej_token}"
@@ -423,11 +450,23 @@ def build_resolver_menu_sections(
     res_body = "\n".join(
         bounded_flex_line(i, lbl, ico, cmd) for i, (lbl, ico, cmd) in enumerate(res_entries, 1)
     )
-    sections.append(f"[{res_section_id}]\n{res_body}")
+
+    if stale_notice:
+        stale_sec = build_stale_menu_section(
+            res_section_id=res_section_id,
+            list_section_id=list_section_id,
+            icon=icon,
+        )
+        sections.append(f"[{list_section_id}]\n{res_body}")
+        sections.append(stale_sec)
+    else:
+        sections.append(f"[{list_section_id}]\n{res_body}")
+        sections.append(f"[{res_section_id}]\n{res_body}")
+
     return sections
 
 
-def _regenerate_ui(home: Path, install: Path) -> bool:
+def _regenerate_ui(home: Path, install: Path, stale_mv_id: int | None = None) -> bool:
     """Regenerate Flex configuration using session engine without spawning Flex."""
     engine = _load_session_engine(install)
     if not engine:
@@ -446,7 +485,14 @@ def _regenerate_ui(home: Path, install: Path) -> bool:
                     sources = [Path(s) for s in u_data.get("local_media_sources", [])]
                 except Exception:
                     sources = []
-        return engine.publish_flex_config(flex_config, home, sources, install)
+        if stale_mv_id is not None:
+            os.environ["OPENHTPC_STALE_NOTICE_MV"] = str(stale_mv_id)
+        else:
+            os.environ.pop("OPENHTPC_STALE_NOTICE_MV", None)
+        try:
+            return engine.publish_flex_config(flex_config, home, sources, install)
+        finally:
+            os.environ.pop("OPENHTPC_STALE_NOTICE_MV", None)
     except Exception as exc:
         print(f"WARNING: UI regeneration failed: {exc}", file=sys.stderr)
         return False
@@ -524,9 +570,9 @@ def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
             err = res.get("error")
             if err == "CANDIDATE_STALE":
                 print("Les propositions ont changé. La liste va être actualisée.", file=sys.stderr)
-                # Obtain new revision and refresh UI without automatic acceptance retry
-                _regenerate_ui(home, install)
-                return 1
+                # Obtain new revision and refresh UI with visible stale notice without automatic acceptance retry
+                ok_regen = _regenerate_ui(home, install, stale_mv_id=mv_id)
+                return 0 if ok_regen else 1
             print(f"ERROR: {err}: {res.get('message')}", file=sys.stderr)
             return 1
 

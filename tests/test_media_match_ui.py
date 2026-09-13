@@ -666,9 +666,18 @@ def test_25_stale_revision_invokes_candidate_stale_handling(sandbox, capsys):
     (manifest_dir / "current.json").write_text(json.dumps(manifest))
 
     code = media_match_ui.dispatch_action(sandbox["home"], token, sandbox["install"])
-    assert code != 0
+    assert code == 0
     err = capsys.readouterr().err
     assert "Les propositions ont changé. La liste va être actualisée." in err
+
+    # Verify stale screen rendered in flex-v1.ini
+    flex_config = sandbox["home"] / ".config/openhtpc/flex-v1.ini"
+    assert flex_config.is_file()
+    content = flex_config.read_text(encoding="utf-8")
+    assert "LES PROPOSITIONS ONT CHANGÉ" in content
+    assert "VOIR LA NOUVELLE LISTE" in content
+    assert "La liste a été actualisée." in content
+    assert "RETOUR" in content
 
 
 def test_26_stale_revision_causes_no_automatic_acceptance_retry(sandbox):
@@ -1353,3 +1362,276 @@ def test_61_worst_case_resolver_menu_audit(sandbox):
 
     assert total_entry_lines >= 30
     assert max_len <= 198
+
+
+# ==============================================================================
+# TESTS 62 - 69: DEV5C2B STALE CANDIDATE UX HARDENING & QUALIFICATION FIXTURE
+# ==============================================================================
+
+def test_62_dev5c2b_exact_qualification_fixture(sandbox):
+    """62. DEV5C2B: Exact controlled qualification fixture reproduction.
+
+    R1:
+      candidate 1091 (The Thing, 1982)
+      candidate 60935 (The Thing, 2011)
+    R2:
+      candidate 1091
+      candidate 60935
+      candidate 999999999 (The Thing — Stale Qualification Candidate, 1982)
+
+    Stale-confirm candidate 1091 with expected R1.
+    Expected:
+      - CANDIDATE_STALE handled cleanly
+      - UNMATCHED in DB
+      - work_id is None
+      - match_locked is 0
+      - zero accepted candidates (all PENDING)
+      - visible stale screen in flex-v1.ini with exact text
+      - refreshed candidate resolver offers current R2
+    """
+    mv_id, _ = _ingest_movie(sandbox, "The Thing.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 3, "The Thing", 1982, external_id="1091")
+        _add_candidate(db, mv_id, 4, "The Thing", 2011, external_id="60935")
+        r1 = media_match.compute_candidate_set_revision(db, mv_id)
+
+    # Initial flex config generation with R1
+    config_path = sandbox["home"] / ".config/openhtpc/flex-v1.ini"
+    session_engine.publish_flex_config(config_path, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    session_engine.activate_media_manifest(config_path, sandbox["home"])
+
+    manifest_file = sandbox["home"] / ".local/state/openhtpc/media-actions/current.json"
+    manifest1 = json.loads(manifest_file.read_text())
+    token_cand3 = next(k for k, v in manifest1["items"].items() if v.get("candidate_id") == 3)
+    assert manifest1["items"][token_cand3]["expected_revision"] == r1
+
+    # Controlled mutation: add candidate 5 to form R2
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 5, "The Thing — Stale Qualification Candidate", 1982, external_id="999999999")
+        r2 = media_match.compute_candidate_set_revision(db, mv_id)
+        assert r1 != r2
+
+    # Human attempts to confirm candidate 3 with stale token from R1
+    code = media_match_ui.dispatch_action(sandbox["home"], token_cand3, sandbox["install"])
+    assert code == 0
+
+    # 1. Zero identity mutation in DB
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "UNMATCHED"
+        assert st["work_id"] is None
+        assert st["match_locked"] == 0
+
+        # All 3 candidates remain PENDING (zero accepted candidates)
+        rows = db.execute("SELECT id, status FROM match_candidates WHERE media_version_id = ? ORDER BY id", (mv_id,)).fetchall()
+        assert len(rows) == 3
+        for cid, cstatus in rows:
+            assert cstatus == "PENDING", f"Candidate {cid} status is {cstatus}, expected PENDING"
+
+    # 2. Visible stale screen rendered in flex-v1.ini
+    ini_content = config_path.read_text(encoding="utf-8")
+    assert "LES PROPOSITIONS ONT CHANGÉ" in ini_content
+    assert "La liste a été actualisée." in ini_content
+    assert "VOIR LA NOUVELLE LISTE" in ini_content
+    assert "RETOUR" in ini_content
+
+    # 3. Refreshed candidate resolver contains the new candidate
+    assert "The Thing — Stale Qualification Candidate" in ini_content
+
+    # 4. Refreshed manifest uses authoritative R2, not stale R1
+    manifest2 = json.loads(manifest_file.read_text())
+    token_cand3_r2 = next(k for k, v in manifest2["items"].items() if v.get("candidate_id") == 3)
+    assert token_cand3_r2 != token_cand3
+    assert manifest2["items"][token_cand3_r2]["expected_revision"] == r2
+
+
+def test_63_dev5c2b_stale_screen_lines_byte_budget(sandbox):
+    """63. DEV5C2B: All lines in stale screen pass the 198 UTF-8 byte budget."""
+    icon = sandbox["media_icon"]
+    sec = media_match_ui.build_stale_menu_section(
+        res_section_id="MEDIA_R12345678",
+        list_section_id="MEDIA_RL_12345678",
+        icon=icon,
+    )
+    for line in sec.splitlines():
+        if line.startswith("Entry"):
+            b = len(line.encode("utf-8"))
+            assert b <= 198, f"Stale screen line exceeds 198 bytes ({b} bytes): {line}"
+            # Check UTF-8 roundtrip
+            assert line.encode("utf-8").decode("utf-8") == line
+
+
+def test_64_dev5c2b_stale_screen_long_utf8_truncation(sandbox):
+    """64. DEV5C2B: Extreme length multibyte UTF-8 input is truncated cleanly within 198 bytes."""
+    icon = sandbox["media_icon"]
+    huge_header = "LES PROPOSITIONS ONT ÉTÉ MODIFIÉES AVEC DES CARACTÈRES ACCENTUÉS ET MULTIBYTE 🍿🎬 " * 20
+    huge_secondary = "Une actualisation de la liste des correspondances potentielles a eu lieu ⚡ " * 20
+    huge_action = "VOIR LA NOUVELLE LISTE COMPLÈTE AVEC LES NOUVELLES PROPOSITIONS " * 10
+    huge_back = "RETOURNER AU MENU PRÉCÉDENT " * 10
+
+    sec = media_match_ui.build_stale_menu_section(
+        res_section_id="MEDIA_R99999999",
+        list_section_id="MEDIA_RL_99999999",
+        icon=icon,
+        header=huge_header,
+        secondary=huge_secondary,
+        action_label=huge_action,
+        back_label=huge_back,
+    )
+    for line in sec.splitlines():
+        if line.startswith("Entry"):
+            b = len(line.encode("utf-8"))
+            assert b <= 198, f"Truncated line exceeds 198 bytes ({b} bytes): {line}"
+            assert line.encode("utf-8").decode("utf-8") == line
+
+
+def test_65_dev5c2b_no_current_identity_marker_when_unmatched(sandbox):
+    """65. DEV5C2B: Current-identity marker (✓) is NEVER emitted when state is UNMATCHED."""
+    mv_id, _ = _ingest_movie(sandbox, "UnmatchedGlyphCheck.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 101, "Candidate Alpha", 1982, status="PENDING")
+        _add_candidate(db, mv_id, 102, "Candidate Beta", 2011, status="PENDING")
+        cands = media_match_ui.get_ui_candidates(db, mv_id, sandbox["install"])
+        for c in cands:
+            lbl = media_match_ui.format_candidate_label(c, is_accepted=(c.get("status") == "ACCEPTED"))
+            assert not lbl.startswith("✓"), f"Candidate {c['id']} unexpectedly marked with accepted glyph: {lbl}"
+            assert not lbl.startswith("□")
+
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R10101010", "genG", {}, sandbox["media_icon"]
+        )
+        for sec in sections:
+            for line in sec.splitlines():
+                if "Candidate Alpha" in line:
+                    assert "✓" not in line
+
+
+def test_66_dev5c2b_current_identity_marker_emitted_only_when_accepted(sandbox):
+    """66. DEV5C2B: Current-identity marker (✓) is emitted ONLY when candidate status is ACCEPTED."""
+    mv_id, _ = _ingest_movie(sandbox, "AcceptedGlyphCheck.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 201, "Candidate Accepted", 1982, status="ACCEPTED")
+        _add_candidate(db, mv_id, 202, "Candidate Pending", 2011, status="PENDING")
+        cands = media_match_ui.get_ui_candidates(db, mv_id, sandbox["install"])
+        c_acc = next(c for c in cands if c["id"] == 201)
+        c_pnd = next(c for c in cands if c["id"] == 202)
+
+        lbl_acc = media_match_ui.format_candidate_label(c_acc, is_accepted=(c_acc.get("status") == "ACCEPTED"))
+        lbl_pnd = media_match_ui.format_candidate_label(c_pnd, is_accepted=(c_pnd.get("status") == "ACCEPTED"))
+
+        assert lbl_acc.startswith("✓ Candidate Accepted")
+        assert lbl_pnd.startswith("Candidate Pending")
+        assert not lbl_pnd.startswith("✓")
+
+
+def test_67_dev5c2b_subsequent_confirmation_from_refreshed_list_succeeds(sandbox):
+    """67. DEV5C2B: Subsequent confirmation using the refreshed R2 token succeeds."""
+    mv_id, _ = _ingest_movie(sandbox, "SubsequentConfirm.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 1, "Movie 1", 1982)
+        _add_candidate(db, mv_id, 2, "Movie 2", 2011)
+        r1 = media_match.compute_candidate_set_revision(db, mv_id)
+
+    config_path = sandbox["home"] / ".config/openhtpc/flex-v1.ini"
+    session_engine.publish_flex_config(config_path, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    session_engine.activate_media_manifest(config_path, sandbox["home"])
+
+    manifest_file = sandbox["home"] / ".local/state/openhtpc/media-actions/current.json"
+    manifest1 = json.loads(manifest_file.read_text())
+    stale_token = next(k for k, v in manifest1["items"].items() if v.get("candidate_id") == 1)
+
+    # Invalidate R1 by adding candidate 3
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 3, "Movie 3", 2024)
+
+    # Attempt 1: Stale confirmation
+    code1 = media_match_ui.dispatch_action(sandbox["home"], stale_token, sandbox["install"])
+    assert code1 == 0
+
+    # Read refreshed manifest (generated by stale handling)
+    manifest2 = json.loads(manifest_file.read_text())
+    fresh_token = next(k for k, v in manifest2["items"].items() if v.get("candidate_id") == 1)
+
+    # Attempt 2: Human picks Movie 1 from refreshed list
+    code2 = media_match_ui.dispatch_action(sandbox["home"], fresh_token, sandbox["install"])
+    assert code2 == 0
+
+    # Now item is USER_MATCHED with candidate 1 ACCEPTED
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "USER_MATCHED"
+        assert st["work_id"] is not None
+        c1 = db.execute("SELECT status FROM match_candidates WHERE id = 1").fetchone()
+        assert c1[0] == "ACCEPTED"
+
+
+def test_68_dev5c2b_stale_reject_handling_and_zero_mutation(sandbox):
+    """68. DEV5C2B: Stale reject confirmation also displays stale notice and mutates zero rows."""
+    mv_id, _ = _ingest_movie(sandbox, "StaleReject.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 1, "Cand Reject 1", 2000)
+        r1 = media_match.compute_candidate_set_revision(db, mv_id)
+
+    config_path = sandbox["home"] / ".config/openhtpc/flex-v1.ini"
+    session_engine.publish_flex_config(config_path, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    session_engine.activate_media_manifest(config_path, sandbox["home"])
+
+    manifest_file = sandbox["home"] / ".local/state/openhtpc/media-actions/current.json"
+    manifest1 = json.loads(manifest_file.read_text())
+    rej_token = next(k for k, v in manifest1["items"].items() if v.get("action") == "reject")
+
+    # Invalidate revision by adding second candidate
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 2, "Cand Reject 2", 2005)
+
+    code = media_match_ui.dispatch_action(sandbox["home"], rej_token, sandbox["install"])
+    assert code == 0
+
+    # DB remains UNMATCHED, candidate 1 remains PENDING
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "UNMATCHED"
+        row = db.execute("SELECT status FROM match_candidates WHERE id = 1").fetchone()
+        assert row[0] == "PENDING"
+
+    # Stale screen visible
+    ini_content = config_path.read_text(encoding="utf-8")
+    assert "LES PROPOSITIONS ONT CHANGÉ" in ini_content
+    assert "VOIR LA NOUVELLE LISTE" in ini_content
+
+
+def test_69_dev5c2b_single_flex_and_zero_network(sandbox):
+    """69. DEV5C2B: Stale handling uses zero network calls and single-Flex in-process primitives."""
+    mv_id, _ = _ingest_movie(sandbox, "SingleFlexCheck.mkv")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, 1, "Movie A", 2010)
+
+    token = "iact_gen69_12345678_1"
+    actions = {
+        token: {
+            "action": "accept",
+            "media_version_id": mv_id,
+            "candidate_id": 1,
+            "expected_revision": "invalid_rev",
+        }
+    }
+    manifest = {"schema": 1, "manifest_generation": "gen69", "sources": [], "items": actions}
+    manifest_dir = sandbox["home"] / ".local/state/openhtpc/media-actions"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "current.json").write_text(json.dumps(manifest))
+
+    with mock.patch("urllib.request.urlopen", side_effect=RuntimeError("Provider called!")):
+        with mock.patch("http.client.HTTPConnection.request", side_effect=RuntimeError("HTTP call!")):
+            code = media_match_ui.dispatch_action(sandbox["home"], token, sandbox["install"])
+            assert code == 0
+
+    config_path = sandbox["home"] / ".config/openhtpc/flex-v1.ini"
+    ini_content = config_path.read_text(encoding="utf-8")
+
+    # In-process primitives only
+    assert ":submenu" in ini_content
+    assert ":applyback" in ini_content
+    assert ":back" in ini_content
+    # No kdialog, no second flex launcher invocation
+    assert "kdialog" not in ini_content
+    assert "flex-launcher" not in ini_content
