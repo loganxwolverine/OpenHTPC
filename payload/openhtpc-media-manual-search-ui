@@ -1,0 +1,718 @@
+#!/usr/bin/env python3
+"""OpenHTPC Living-Room Media Manual Search Orchestrator (DEV5C3B2).
+
+Coordinates the couch search flow:
+1. Prefills title and year from local database clues.
+2. Invokes generic text entry for movie title.
+3. Invokes generic text entry for optional year.
+4. Displays living-room confirmation screen.
+5. On confirmation: executes DEV5C3A manual search (exactly ONE provider call).
+6. Regenerates canonical Flex resolver menus on success.
+7. Displays living-room error screen on provider failure without modifying database.
+
+Zero network calls before explicit final confirmation.
+Zero database schema changes.
+Single-Flex architecture with safe :applyback return.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import subprocess
+import sys
+from typing import Any
+
+DEFAULT_LANGUAGE = "fr-FR"
+
+
+def resolve_graphical_env(install: Path | None = None) -> dict[str, str]:
+    """Authoritatively resolve the active graphical session environment."""
+    env = dict(os.environ)
+    if env.get("WAYLAND_DISPLAY") and env.get("XDG_RUNTIME_DIR"):
+        return env
+    try:
+        candidates = [
+            install / "openhtpc-capabilities.py" if install else None,
+            Path(__file__).resolve().parent / "openhtpc-capabilities.py",
+        ]
+        for p in candidates:
+            if p and p.is_file():
+                spec = importlib.util.spec_from_file_location("openhtpc_capabilities", p)
+                if spec and spec.loader:
+                    caps = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(caps)
+                    ctx = caps.resolve_graphical_context()
+                    if ctx.get("status") == "RESOLVED" and ctx.get("environment"):
+                        env.update(ctx["environment"])
+                        return env
+    except Exception:
+        pass
+    return env
+
+
+def _load_media_match(install: Path | None = None):
+    candidates = [
+        install / "openhtpc-media-match.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-match.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_match", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def _load_media_db(install: Path | None = None):
+    candidates = [
+        install / "openhtpc-media-db.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-db.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_db", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def _load_media_match_ui(install: Path | None = None):
+    candidates = [
+        install / "openhtpc-media-match-ui" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-match-ui",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_match_ui", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def get_prefill_hints(
+    db: sqlite3.Connection,
+    media_version_id: int,
+) -> tuple[str, str]:
+    """Determine initial title and year prefill clues without contacting provider."""
+    cur = db.execute(
+        "SELECT work_id, provisional_title, provisional_year, identification_state "
+        "FROM media_versions WHERE id = ?",
+        (media_version_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return "", ""
+
+    work_id, prov_title, prov_year, _ = row
+
+    title = ""
+    year = ""
+
+    if work_id:
+        w_cur = db.execute("SELECT title, year FROM works WHERE id = ?", (work_id,))
+        w_row = w_cur.fetchone()
+        if w_row:
+            if w_row[0]:
+                title = str(w_row[0])
+            if w_row[1]:
+                year = str(w_row[1])
+
+    if not title and prov_title:
+        title = str(prov_title)
+
+    if not year and prov_year:
+        year = str(prov_year)
+
+    if not title:
+        r_cur = db.execute(
+            "SELECT relative_path, canonical_path FROM resources WHERE media_version_id = ? LIMIT 1",
+            (media_version_id,),
+        )
+        r_row = r_cur.fetchone()
+        if r_row:
+            p_str = r_row[0] or r_row[1] or ""
+            if p_str:
+                title = Path(p_str).stem
+
+    return title, year
+
+
+def invoke_text_entry(
+    title: str,
+    initial: str = "",
+    max_length: int = 255,
+    submit_label: str = "VALIDER",
+    cancel_label: str = "ANNULER",
+    install: Path | None = None,
+    env: dict[str, str] | None = None,
+    platform_arg: str | None = None,
+) -> dict[str, Any]:
+    """Invoke openhtpc-text-entry.py via subprocess with clean argument passing."""
+    candidates = [
+        install / "openhtpc-text-entry.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-text-entry.py",
+    ]
+    script_path: Path | None = None
+    for p in candidates:
+        if p and p.is_file():
+            script_path = p
+            break
+
+    if not script_path:
+        raise FileNotFoundError("openhtpc-text-entry.py component not found")
+
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "--title",
+        str(title),
+        "--initial-text",
+        str(initial),
+        "--max-length",
+        str(max_length),
+        "--submit-label",
+        str(submit_label),
+        "--cancel-label",
+        str(cancel_label),
+    ]
+
+    effective_env = dict(os.environ if env is None else env)
+    if platform_arg:
+        cmd.extend(["-platform", platform_arg])
+    elif effective_env.get("QT_QPA_PLATFORM"):
+        cmd.extend(["-platform", effective_env["QT_QPA_PLATFORM"]])
+
+    proc = subprocess.run(
+        cmd,
+        env=effective_env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    if proc.returncode != 0:
+        return {"ok": False, "cancelled": True, "text": initial}
+
+    stdout_clean = proc.stdout.strip()
+    if not stdout_clean:
+        return {"ok": False, "cancelled": True, "text": initial}
+
+    try:
+        data = json.loads(stdout_clean)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        # If there's extra text, try finding the last JSON block
+        matches = re.findall(r"\{[^{}]*\}", stdout_clean, re.DOTALL)
+        if matches:
+            try:
+                data = json.loads(matches[-1])
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+    return {"ok": False, "cancelled": True, "text": initial}
+
+
+def create_confirmation_window_class():
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    class ConfirmationWindow(QtWidgets.QWidget):
+        def __init__(self, title: str, year: str) -> None:
+            super().__init__()
+            self.title_text = title
+            self.year_text = year
+            self.decision = "CANCEL"
+
+            self.setWindowTitle("OPENHTPC — Confirmation de recherche")
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #161b22;
+                    color: #c9d1d9;
+                    font-family: 'Open Sans', 'Noto Sans', sans-serif;
+                }
+                QLabel#HeaderLabel {
+                    color: #58a6ff;
+                    font-size: 26px;
+                    font-weight: bold;
+                    padding-bottom: 10px;
+                }
+                QFrame#InfoBox {
+                    background-color: #0d1117;
+                    border: 2px solid #30363d;
+                    border-radius: 8px;
+                    padding: 24px;
+                }
+                QLabel#MovieTitle {
+                    color: #ffffff;
+                    font-size: 30px;
+                    font-weight: bold;
+                }
+                QLabel#MovieYear {
+                    color: #8b949e;
+                    font-size: 22px;
+                    font-weight: 500;
+                }
+                QPushButton.ActionBtn {
+                    background-color: #21262d;
+                    border: 2px solid #30363d;
+                    border-radius: 8px;
+                    color: #c9d1d9;
+                    font-size: 20px;
+                    font-weight: bold;
+                    min-height: 52px;
+                    min-width: 170px;
+                    padding: 8px 16px;
+                }
+                QPushButton.ActionBtnSelected {
+                    background-color: #238636;
+                    border: 3px solid #56d364;
+                    border-radius: 8px;
+                    color: #ffffff;
+                    font-size: 21px;
+                    font-weight: bold;
+                    min-height: 52px;
+                    min-width: 170px;
+                    padding: 8px 16px;
+                }
+                QLabel#HelpLabel {
+                    color: #6e7681;
+                    font-size: 15px;
+                    padding-top: 10px;
+                }
+            """)
+
+            main_layout = QtWidgets.QVBoxLayout(self)
+            main_layout.setContentsMargins(60, 40, 60, 40)
+            main_layout.setSpacing(20)
+
+            header = QtWidgets.QLabel("RECHERCHER CE FILM SUR TMDB ?")
+            header.setObjectName("HeaderLabel")
+            header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            main_layout.addWidget(header)
+
+            info_box = QtWidgets.QFrame()
+            info_box.setObjectName("InfoBox")
+            box_layout = QtWidgets.QVBoxLayout(info_box)
+            box_layout.setSpacing(8)
+
+            t_lbl = QtWidgets.QLabel(self.title_text)
+            t_lbl.setObjectName("MovieTitle")
+            t_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            t_lbl.setWordWrap(True)
+            box_layout.addWidget(t_lbl)
+
+            y_str = f"Année : {self.year_text}" if self.year_text else "Année : non spécifiée"
+            y_lbl = QtWidgets.QLabel(y_str)
+            y_lbl.setObjectName("MovieYear")
+            y_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            box_layout.addWidget(y_lbl)
+
+            main_layout.addWidget(info_box)
+
+            self.buttons: list[QtWidgets.QPushButton] = []
+            btn_labels = ["RECHERCHER", "MODIFIER", "ANNULER"]
+            self.selected_idx = 0
+
+            btn_layout = QtWidgets.QHBoxLayout()
+            btn_layout.setSpacing(20)
+
+            for bl in btn_labels:
+                btn = QtWidgets.QPushButton(bl)
+                btn.setProperty("class", "ActionBtn")
+                btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+                btn_layout.addWidget(btn)
+                self.buttons.append(btn)
+
+            main_layout.addLayout(btn_layout)
+
+            help_lbl = QtWidgets.QLabel("Flèches : Choisir  •  Entrée : Valider  •  Échap : Annuler")
+            help_lbl.setObjectName("HelpLabel")
+            help_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            main_layout.addWidget(help_lbl)
+
+            self.update_btn_states()
+
+        def update_btn_states(self) -> None:
+            for i, btn in enumerate(self.buttons):
+                is_sel = (i == self.selected_idx)
+                btn.setProperty("class", "ActionBtnSelected" if is_sel else "ActionBtn")
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+
+        def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+            key = event.key()
+            if key in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Up):
+                self.selected_idx = (self.selected_idx - 1) % len(self.buttons)
+                self.update_btn_states()
+                event.accept()
+            elif key in (QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Down):
+                self.selected_idx = (self.selected_idx + 1) % len(self.buttons)
+                self.update_btn_states()
+                event.accept()
+            elif key in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                if self.selected_idx == 0:
+                    self.decision = "SEARCH"
+                elif self.selected_idx == 1:
+                    self.decision = "MODIFY"
+                else:
+                    self.decision = "CANCEL"
+                self.close()
+                event.accept()
+            elif key in (QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Back):
+                self.decision = "CANCEL"
+                self.close()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+
+    return ConfirmationWindow
+
+
+def create_error_window_class():
+    from PySide6 import QtCore, QtGui, QtWidgets
+
+    class ProviderErrorWindow(QtWidgets.QWidget):
+        def __init__(self, message: str = "Vérifiez la connexion réseau ou la configuration TMDb.") -> None:
+            super().__init__()
+            self.setWindowTitle("OPENHTPC — Recherche")
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #161b22;
+                    color: #c9d1d9;
+                    font-family: 'Open Sans', 'Noto Sans', sans-serif;
+                }
+                QLabel#HeaderLabel {
+                    color: #f85149;
+                    font-size: 26px;
+                    font-weight: bold;
+                    padding-bottom: 12px;
+                }
+                QLabel#MsgLabel {
+                    color: #f0f6fc;
+                    font-size: 20px;
+                    padding-bottom: 24px;
+                }
+                QPushButton.ActionBtnSelected {
+                    background-color: #21262d;
+                    border: 3px solid #58a6ff;
+                    border-radius: 8px;
+                    color: #ffffff;
+                    font-size: 20px;
+                    font-weight: bold;
+                    min-height: 52px;
+                    min-width: 160px;
+                }
+                QLabel#HelpLabel {
+                    color: #6e7681;
+                    font-size: 15px;
+                    padding-top: 10px;
+                }
+            """)
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(60, 40, 60, 40)
+            layout.setSpacing(16)
+
+            header = QtWidgets.QLabel("RECHERCHE IMPOSSIBLE")
+            header.setObjectName("HeaderLabel")
+            header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(header)
+
+            msg = QtWidgets.QLabel(message)
+            msg.setObjectName("MsgLabel")
+            msg.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            msg.setWordWrap(True)
+            layout.addWidget(msg)
+
+            btn = QtWidgets.QPushButton("RETOUR")
+            btn.setProperty("class", "ActionBtnSelected")
+            btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+            layout.addWidget(btn, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+
+            help_lbl = QtWidgets.QLabel("Entrée ou Échap pour revenir au menu")
+            help_lbl.setObjectName("HelpLabel")
+            help_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(help_lbl)
+
+        def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+            if event.key() in (
+                QtCore.Qt.Key.Key_Return,
+                QtCore.Qt.Key.Key_Enter,
+                QtCore.Qt.Key.Key_Escape,
+                QtCore.Qt.Key.Key_Back,
+            ):
+                self.close()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+
+    return ProviderErrorWindow
+
+
+def show_confirmation_window(
+    title: str,
+    year: str,
+    env: dict[str, str] | None = None,
+    install: Path | None = None,
+    platform_arg: str | None = None,
+) -> str:
+    """Display explicit search confirmation window and return 'SEARCH', 'MODIFY', or 'CANCEL'."""
+    from PySide6 import QtGui, QtWidgets
+
+    app = QtWidgets.QApplication.instance()
+    created_app = False
+    if app is None:
+        qt_args = [sys.argv[0]]
+        if platform_arg:
+            qt_args.extend(["-platform", platform_arg])
+        elif env and env.get("QT_QPA_PLATFORM"):
+            qt_args.extend(["-platform", env["QT_QPA_PLATFORM"]])
+        app = QtWidgets.QApplication(qt_args)
+        created_app = True
+
+    # Font setup
+    font_candidates = [
+        (install / "flex/assets/fonts/OpenSans-Regular.ttf") if install else None,
+        Path(os.environ.get("OPENHTPC_INSTALL_DIR", Path.home() / ".local/lib/openhtpc")) / "flex/assets/fonts/OpenSans-Regular.ttf",
+        Path(__file__).resolve().parent / "flex/assets/fonts/OpenSans-Regular.ttf",
+    ]
+    for fc in font_candidates:
+        if fc and fc.is_file():
+            fid = QtGui.QFontDatabase.addApplicationFont(str(fc))
+            families = QtGui.QFontDatabase.applicationFontFamilies(fid)
+            if families:
+                app.setFont(QtGui.QFont(families[0], 14))
+                break
+
+    win_cls = create_confirmation_window_class()
+    window = win_cls(title, year)
+    window.resize(800, 480)
+    window.show()
+
+    if created_app:
+        app.exec()
+    return window.decision
+
+
+def show_error_window(
+    message: str = "Vérifiez la connexion réseau ou la configuration TMDb.",
+    env: dict[str, str] | None = None,
+    install: Path | None = None,
+    platform_arg: str | None = None,
+) -> None:
+    """Display provider error window."""
+    from PySide6 import QtGui, QtWidgets
+
+    app = QtWidgets.QApplication.instance()
+    created_app = False
+    if app is None:
+        qt_args = [sys.argv[0]]
+        if platform_arg:
+            qt_args.extend(["-platform", platform_arg])
+        elif env and env.get("QT_QPA_PLATFORM"):
+            qt_args.extend(["-platform", env["QT_QPA_PLATFORM"]])
+        app = QtWidgets.QApplication(qt_args)
+        created_app = True
+
+    win_cls = create_error_window_class()
+    window = win_cls(message)
+    window.resize(700, 380)
+    window.show()
+
+    if created_app:
+        app.exec()
+
+
+def orchestrate_manual_search(
+    media_version_id: int,
+    home: Path | None = None,
+    install: Path | None = None,
+    platform_arg: str | None = None,
+    custom_db_path: Path | None = None,
+    mock_search_fn: Any | None = None,
+) -> int:
+    """Main orchestration flow for living-room manual search."""
+    if home is None:
+        home = Path(os.environ.get("OPENHTPC_HOME", Path.home()))
+    if install is None:
+        install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+
+    db_path = custom_db_path or (home / ".local/share/openhtpc/media/media.db")
+    if not db_path.is_file():
+        print(f"ERROR: Database not found at {db_path}", file=sys.stderr)
+        return 1
+
+    # Step 1: Read prefill hints from database (Read-only)
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as ro_db:
+            initial_title, initial_year = get_prefill_hints(ro_db, media_version_id)
+    except sqlite3.Error as exc:
+        print(f"ERROR: Failed reading database: {exc}", file=sys.stderr)
+        return 1
+
+    env = resolve_graphical_env(install)
+
+    # Step 2: Loop title -> year -> confirmation
+    current_title = initial_title
+    current_year = initial_year
+
+    while True:
+        # Title Entry
+        t_res = invoke_text_entry(
+            title="OPENHTPC — Titre du film",
+            initial=current_title,
+            max_length=255,
+            submit_label="SUIVANT",
+            install=install,
+            env=env,
+            platform_arg=platform_arg,
+        )
+        if t_res.get("cancelled") or not t_res.get("ok"):
+            return 0
+        entered_title = t_res.get("text", "").strip()
+        if not entered_title:
+            return 0
+        current_title = entered_title
+
+        # Year Entry
+        y_res = invoke_text_entry(
+            title="OPENHTPC — Année (optionnelle)",
+            initial=current_year,
+            max_length=4,
+            submit_label="VALIDER",
+            install=install,
+            env=env,
+            platform_arg=platform_arg,
+        )
+        if y_res.get("cancelled") or not y_res.get("ok"):
+            return 0
+        current_year = y_res.get("text", "").strip()
+
+        # Confirmation Dialog
+        decision = show_confirmation_window(
+            title=current_title,
+            year=current_year,
+            env=env,
+            install=install,
+            platform_arg=platform_arg,
+        )
+
+        if decision == "CANCEL":
+            return 0
+        elif decision == "MODIFY":
+            continue
+        elif decision == "SEARCH":
+            break
+
+    # Step 3: Network authority gate — exactly ONE call to DEV5C3A manual search
+    clean_year_val: int | None = None
+    if current_year:
+        try:
+            clean_year_val = int(current_year)
+        except ValueError:
+            clean_year_val = None
+
+    try:
+        with sqlite3.connect(str(db_path), timeout=10.0) as rw_db:
+            rw_db.execute("PRAGMA foreign_keys = ON;")
+            rw_db.execute("PRAGMA busy_timeout = 5000;")
+
+            if mock_search_fn is not None:
+                res = mock_search_fn(
+                    db=rw_db,
+                    media_version_id=media_version_id,
+                    title=current_title,
+                    year=clean_year_val,
+                    home=home,
+                )
+            else:
+                match_mod = _load_media_match(install)
+                if not match_mod:
+                    print("ERROR: openhtpc-media-match module unavailable", file=sys.stderr)
+                    return 1
+                res = match_mod.manual_search_media_version(
+                    db=rw_db,
+                    media_version_id=media_version_id,
+                    title=current_title,
+                    year=clean_year_val,
+                    home=home,
+                )
+    except sqlite3.Error as exc:
+        print(f"ERROR: Database transaction failed: {exc}", file=sys.stderr)
+        return 1
+
+    # Step 4: Handle result
+    if not res.get("ok"):
+        # Provider failure: zero database mutation, display living-room error screen
+        show_error_window(
+            message="Vérifiez la connexion réseau ou la configuration TMDb.",
+            env=env,
+            install=install,
+            platform_arg=platform_arg,
+        )
+        return 0
+
+    # Step 5: Success (either candidates stored or OK_NO_RESULTS) -> regenerate Flex UI
+    match_ui = _load_media_match_ui(install)
+    if match_ui and hasattr(match_ui, "_regenerate_ui"):
+        match_ui._regenerate_ui(home, install)
+
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="OpenHTPC Living-Room Media Manual Search Orchestrator")
+    parser.add_argument("action_or_id", nargs="?", default=None, help="Action ('search') or media_version_id")
+    parser.add_argument("media_version_id", nargs="?", type=int, default=None, help="Target media_version_id")
+    parser.add_argument("--home", type=Path, default=None, help="OpenHTPC home directory")
+    parser.add_argument("--install-dir", type=Path, default=None, help="OpenHTPC install directory")
+    parser.add_argument("-platform", default=None, help="Qt platform (e.g. offscreen, wayland)")
+
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    platform_val = None
+    if "-platform" in raw_args:
+        idx = raw_args.index("-platform")
+        if idx + 1 < len(raw_args):
+            platform_val = raw_args[idx + 1]
+            del raw_args[idx:idx + 2]
+        else:
+            del raw_args[idx]
+
+    try:
+        args = parser.parse_args(raw_args)
+    except SystemExit as exc:
+        return exc.code
+
+    mv_id: int | None = None
+    if args.action_or_id:
+        if args.action_or_id.isdigit():
+            mv_id = int(args.action_or_id)
+        elif args.action_or_id == "search" and args.media_version_id is not None:
+            mv_id = args.media_version_id
+
+    if mv_id is None:
+        print("ERROR: media_version_id is required", file=sys.stderr)
+        return 2
+
+    return orchestrate_manual_search(
+        media_version_id=mv_id,
+        home=args.home,
+        install=args.install_dir,
+        platform_arg=platform_val,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

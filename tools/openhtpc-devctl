@@ -80,6 +80,10 @@ TEST_PROFILES: dict[str, list[str]] = {
     "media-match-human-resolution": ["tests/test_media_match_human_resolution.py"],
     "media-match-ui": ["tests/test_media_match_ui.py"],
     "media-manual-search": ["tests/test_media_match_manual_search.py"],
+    "media-manual-search-ui": [
+        "tests/test_text_entry.py",
+        "tests/test_media_manual_search_ui.py",
+    ],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_probe.py",
@@ -90,6 +94,8 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_media_match_human_resolution.py",
         "tests/test_media_match_ui.py",
         "tests/test_media_match_manual_search.py",
+        "tests/test_text_entry.py",
+        "tests/test_media_manual_search_ui.py",
     ],
 }
 

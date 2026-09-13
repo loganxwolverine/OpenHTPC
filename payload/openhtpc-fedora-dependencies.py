@@ -13,6 +13,7 @@ CONTRACTS = {
     "procps-ng": ("COMMAND", ("ps", "pgrep")),
     "python3": ("COMMAND", ("python3",)),
     "python3-pillow": ("PYTHON", ("PIL",)),
+    "python3-pyside6": ("PYTHON", ("PySide6",)),
     "mpv": ("COMMAND", ("mpv",)),
     "libva-utils": ("COMMAND", ("vainfo",)),
     "vulkan-tools": ("COMMAND", ("vulkaninfo",)),

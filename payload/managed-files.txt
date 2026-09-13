@@ -149,6 +149,7 @@ openhtpc-media-browser
 openhtpc-media-browser.py
 openhtpc-media-db.py
 openhtpc-media-ingest.py
+openhtpc-media-manual-search-ui
 openhtpc-media-match.py
 openhtpc-media-match-ui
 openhtpc-media-picker
@@ -182,6 +183,7 @@ openhtpc-system-action
 openhtpc-system-model.py
 openhtpc-system-page
 openhtpc-system-view
+openhtpc-text-entry.py
 openhtpc-theme.py
 openhtpc-tmdb.py
 openhtpc-tmdb-recovery

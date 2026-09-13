@@ -359,10 +359,14 @@ def build_resolver_menu_sections(
 
     sections: list[str] = []
 
+    search_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui"
+    search_cmd = f":applyback {search_helper_path} {media_version_id}"
+
     if state == "UNMATCHED" and not candidates:
         e1 = bounded_flex_line(1, "Aucune proposition disponible.", icon, ":back")
-        e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
-        sections.append(f"[{res_section_id}]\n{e1}\n{e2}")
+        e2 = bounded_flex_line(2, "RECHERCHER MANUELLEMENT", icon, search_cmd)
+        e3 = bounded_flex_line(3, "RETOUR", icon, ":back")
+        sections.append(f"[{res_section_id}]\n{e1}\n{e2}\n{e3}")
         return sections
 
     res_entries: list[tuple[str, Path, str]] = []
@@ -427,8 +431,9 @@ def build_resolver_menu_sections(
             r4 = bounded_flex_line(4, "ANNULER", icon, ":back")
             sections.append(f"[{conf_menu}]\n{r1}\n{r2}\n{r3}\n{r4}")
 
-    # Reject entry for UNMATCHED with pending candidates
+    # Manual search & reject entries for UNMATCHED with pending candidates
     if state == "UNMATCHED":
+        res_entries.append(("RECHERCHER MANUELLEMENT", icon, search_cmd))
         rej_token = f"iact_{generation}_{token_suffix}_rej"
         actions[rej_token] = {
             "action": "reject",
@@ -443,6 +448,8 @@ def build_resolver_menu_sections(
         e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
         sections.append(f"[{rej_menu}]\n{e1}\n{e2}")
         res_entries.append(("AUCUN DE CES FILMS", icon, f":submenu {rej_menu}"))
+    elif state in ("AUTO_MATCHED", "USER_MATCHED"):
+        res_entries.append(("RECHERCHER UNE AUTRE IDENTIFICATION", icon, search_cmd))
 
     # Decide later
     res_entries.append(("PLUS TARD", icon, ":back"))
