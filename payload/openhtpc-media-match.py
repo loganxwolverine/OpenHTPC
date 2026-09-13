@@ -36,6 +36,7 @@ import re
 import sqlite3
 import sys
 from typing import Any
+import unicodedata
 
 _MEDIA_DB = None
 
@@ -63,6 +64,8 @@ VALID_PROVIDER_NAMESPACES = frozenset({
     "fixture_movie",
     "test_movie",
 })
+
+DEFAULT_LANGUAGE = "fr-FR"
 
 
 def _load_media_db() -> Any:
@@ -1129,6 +1132,293 @@ def lookup_media_version(
     }
 
 
+def manual_search_media_version(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    title: str,
+    year: int | str | None = None,
+    language: str = DEFAULT_LANGUAGE,
+    home: Path | None = None,
+    opener=None,
+) -> dict[str, Any]:
+    """Execute explicit manual movie search and store candidate suggestions.
+
+    Core constitutional rules:
+    - HUMAN QUERY AUTHORITY != HUMAN IDENTITY AUTHORITY.
+    - Exactly ONE provider search (page=1, no retries, no details/alt titles).
+    - NEVER automatically assigns identity, even for a score of 100.
+    - Candidate suggestions are ranked against the manual query clues, NOT filename clues.
+    - Existing identity (UNMATCHED, AUTO_MATCHED, USER_MATCHED) remains untouched.
+    - Active PENDING candidate generation is replaced (up to 5 candidates stored).
+    - Existing ACCEPTED candidate is preserved and omitted from duplicate PENDING.
+    - Existing REJECTED or SUPERSEDED candidate with matching external_id is reactivated to PENDING.
+    - Provider failures leave DB, identity, and revision completely untouched.
+    - Zero provider results clears active PENDING candidates, leaves identity untouched, updates revision.
+    """
+    # 1. Verify media_version exists in database
+    cur = db.execute(
+        "SELECT work_id, identification_state, match_locked FROM media_versions WHERE id = ?",
+        (media_version_id,),
+    )
+    mv_row = cur.fetchone()
+    if mv_row is None:
+        return {
+            "ok": False,
+            "error": "MEDIA_VERSION_NOT_FOUND",
+            "media_version_id": media_version_id,
+        }
+    work_id, ident_state, match_locked = mv_row
+
+    # 2. Input validation & normalization (pre-network)
+    if title is None:
+        return {
+            "ok": False,
+            "error": "TITLE_EMPTY",
+            "media_version_id": media_version_id,
+        }
+    norm_title = unicodedata.normalize("NFC", str(title))
+    clean_title = re.sub(r"[\r\n\t\x00-\x1f\x7f-\x9f]+", " ", norm_title).strip()
+    if not clean_title:
+        return {
+            "ok": False,
+            "error": "TITLE_EMPTY",
+            "media_version_id": media_version_id,
+        }
+    if len(clean_title) > 255:
+        return {
+            "ok": False,
+            "error": "TITLE_TOO_LONG",
+            "media_version_id": media_version_id,
+        }
+
+    clean_year: int | None = None
+    if year is not None:
+        if isinstance(year, str):
+            y_str = year.strip()
+            if not y_str:
+                clean_year = None
+            else:
+                if not re.fullmatch(r"[+-]?\d+", y_str):
+                    return {
+                        "ok": False,
+                        "error": "YEAR_INVALID",
+                        "media_version_id": media_version_id,
+                    }
+                try:
+                    clean_year = int(y_str)
+                except ValueError:
+                    return {
+                        "ok": False,
+                        "error": "YEAR_INVALID",
+                        "media_version_id": media_version_id,
+                    }
+        elif isinstance(year, int) and not isinstance(year, bool):
+            clean_year = year
+        else:
+            return {
+                "ok": False,
+                "error": "YEAR_INVALID",
+                "media_version_id": media_version_id,
+            }
+
+    if clean_year is not None:
+        current_year = datetime.now(timezone.utc).year
+        if not (1888 <= clean_year <= current_year + 5):
+            return {
+                "ok": False,
+                "error": "YEAR_OUT_OF_RANGE",
+                "media_version_id": media_version_id,
+            }
+
+    clean_language = language or DEFAULT_LANGUAGE
+
+    # 3. Call DEV5B TMDb Movie Provider
+    provider_mod = _load_tmdb_provider()
+    if provider_mod is None:
+        return {
+            "ok": False,
+            "error": "PROVIDER_NOT_AVAILABLE",
+            "detail": "openhtpc-media-provider-tmdb component not found",
+            "media_version_id": media_version_id,
+        }
+
+    search_kwargs: dict[str, Any] = {
+        "title": clean_title,
+        "year": clean_year,
+        "language": clean_language,
+    }
+    if home is not None:
+        search_kwargs["home"] = home
+    if opener is not None:
+        search_kwargs["opener"] = opener
+
+    pres = provider_mod.search_movies(**search_kwargs)
+
+    # Provider failure: non-destructive! Zero database mutation!
+    if pres.status not in (provider_mod.STATUS_OK, provider_mod.STATUS_OK_NO_RESULTS):
+        return {
+            "ok": False,
+            "status": pres.status,
+            "error": pres.error_code or pres.status,
+            "detail": pres.error_detail,
+            "media_version_id": media_version_id,
+        }
+
+    # 4. Process candidates: deduplicate response, score against MANUAL QUERY, rank
+    raw_candidates = pres.candidates or []
+    seen_keys: set[tuple[str, str]] = set()
+    unique_candidates: list[MovieCandidate] = []
+    for item in raw_candidates:
+        cand = MovieCandidate.from_dict(item) if isinstance(item, dict) else item
+        k = (cand.provider, str(cand.external_id))
+        if k not in seen_keys:
+            seen_keys.add(k)
+            unique_candidates.append(cand)
+
+    scored: list[tuple[float, MovieCandidate, list[str]]] = []
+    for cand in unique_candidates:
+        score, reasons = score_candidate(
+            cand,
+            title_clue=clean_title,
+            year_clue=clean_year,
+            duration_seconds=None,
+        )
+        scored.append((score, cand, reasons))
+
+    # Sort: highest score first, tie-break on external_id string
+    scored.sort(key=lambda x: (-x[0], str(x[1].external_id)))
+
+    # 5. Transactional DB update
+    with db:
+        # Re-verify media_version still exists inside transaction
+        mv_chk = db.execute(
+            "SELECT work_id, identification_state, match_locked FROM media_versions WHERE id = ?",
+            (media_version_id,),
+        ).fetchone()
+        if mv_chk is None:
+            return {
+                "ok": False,
+                "error": "MEDIA_VERSION_NOT_FOUND",
+                "media_version_id": media_version_id,
+            }
+        work_id, ident_state, match_locked = mv_chk
+
+        # Existing candidate rows for this media_version
+        existing_rows = db.execute(
+            """
+            SELECT id, provider, external_id, status
+            FROM match_candidates
+            WHERE media_version_id = ?
+            ORDER BY id ASC
+            """,
+            (media_version_id,),
+        ).fetchall()
+
+        accepted_keys = {
+            (r[1], str(r[2])) for r in existing_rows if r[3] == "ACCEPTED"
+        }
+        prior_pending_ids = {
+            r[0] for r in existing_rows if r[3] == "PENDING"
+        }
+        existing_by_key: dict[tuple[str, str], list[tuple[int, str]]] = {}
+        for r in existing_rows:
+            k = (r[1], str(r[2]))
+            existing_by_key.setdefault(k, []).append((r[0], r[3]))
+
+        # Rule A: Omit returned duplicates of existing ACCEPTED from new PENDING
+        filtered_scored = [
+            (score, cand, reasons)
+            for (score, cand, reasons) in scored
+            if (cand.provider, str(cand.external_id)) not in accepted_keys
+        ]
+
+        # Top 5 candidate storage limit
+        top_candidates = filtered_scored[:5]
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for score, cand, reasons in top_candidates:
+            k = (cand.provider, str(cand.external_id))
+            payload = json.dumps({
+                "original_title": cand.original_title,
+                "runtime_minutes": cand.runtime_minutes,
+                "match_reasons": reasons,
+            })
+
+            if k in existing_by_key:
+                primary_id, primary_status = existing_by_key[k][0]
+                prior_pending_ids.discard(primary_id)
+                db.execute(
+                    """
+                    UPDATE match_candidates
+                    SET status = 'PENDING',
+                        score = ?,
+                        candidate_title = ?,
+                        candidate_year = ?,
+                        candidate_payload_json = ?,
+                        created_at = ?
+                    WHERE id = ?
+                    """,
+                    (score, cand.title, cand.year, payload, now_iso, primary_id),
+                )
+                # Cleanup any legacy duplicate rows for this key
+                if len(existing_by_key[k]) > 1:
+                    dup_ids = [r[0] for r in existing_by_key[k][1:]]
+                    placeholders = ",".join("?" * len(dup_ids))
+                    db.execute(
+                        f"DELETE FROM match_candidates WHERE id IN ({placeholders})",
+                        dup_ids,
+                    )
+                    for did in dup_ids:
+                        prior_pending_ids.discard(did)
+            else:
+                db.execute(
+                    """
+                    INSERT INTO match_candidates (
+                        media_version_id, provider, external_id, candidate_title,
+                        candidate_year, candidate_payload_json, score, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+                    """,
+                    (
+                        media_version_id,
+                        cand.provider,
+                        cand.external_id,
+                        cand.title,
+                        cand.year,
+                        payload,
+                        score,
+                        now_iso,
+                    ),
+                )
+
+        # Delete any prior PENDING candidates not retained in top_candidates
+        if prior_pending_ids:
+            placeholders = ",".join("?" * len(prior_pending_ids))
+            db.execute(
+                f"DELETE FROM match_candidates WHERE id IN ({placeholders})",
+                list(prior_pending_ids),
+            )
+
+        new_rev = compute_candidate_set_revision(db, media_version_id)
+
+    candidates_stored = len(top_candidates)
+    return {
+        "ok": True,
+        "status": "OK" if candidates_stored > 0 else "OK_NO_RESULTS",
+        "media_version_id": media_version_id,
+        "query": {
+            "title": clean_title,
+            "year": clean_year,
+            "language": clean_language,
+        },
+        "candidates_stored": candidates_stored,
+        "candidate_set_revision": new_rev,
+        "identification_state": ident_state,
+        "work_id": work_id,
+        "match_locked": match_locked,
+    }
+
+
 def get_media_version_status(db: sqlite3.Connection, media_version_id: int) -> dict[str, Any]:
     """Retrieve identity status and work details for a media_version."""
     cur = db.execute(
@@ -1294,6 +1584,13 @@ def main(argv: list[str] | None = None) -> int:
     lookup_p.add_argument("--no-auto-accept", action="store_true", help="Do not automatically accept top match")
     lookup_p.add_argument("--language", default=None, help="Query language (defaults to provider default)")
 
+    # manual-search --media-version-id <id> --title <title> [--year <year>] [--language <lang>]
+    manual_p = subparsers.add_parser("manual-search", help="Explicit manual search for movie metadata")
+    manual_p.add_argument("--media-version-id", type=int, required=True, help="Media version ID")
+    manual_p.add_argument("--title", required=True, help="Movie title query")
+    manual_p.add_argument("--year", default=None, help="Optional movie year")
+    manual_p.add_argument("--language", default=None, help="Query language (defaults to fr-FR)")
+
     args = parser.parse_args(argv)
 
     if args.action == "clues":
@@ -1352,6 +1649,18 @@ def main(argv: list[str] | None = None) -> int:
                     language=args.language,
                     home=home_path,
                 )
+            print(json.dumps(res, indent=2))
+            return 0 if res.get("ok") else 1
+
+        if args.action == "manual-search":
+            res = manual_search_media_version(
+                db,
+                args.media_version_id,
+                title=args.title,
+                year=args.year,
+                language=args.language or DEFAULT_LANGUAGE,
+                home=home_path,
+            )
             print(json.dumps(res, indent=2))
             return 0 if res.get("ok") else 1
 

@@ -79,6 +79,7 @@ TEST_PROFILES: dict[str, list[str]] = {
     "media-provider-tmdb": ["tests/test_media_provider_tmdb.py"],
     "media-match-human-resolution": ["tests/test_media_match_human_resolution.py"],
     "media-match-ui": ["tests/test_media_match_ui.py"],
+    "media-manual-search": ["tests/test_media_match_manual_search.py"],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_probe.py",
@@ -88,6 +89,7 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_media_provider_tmdb.py",
         "tests/test_media_match_human_resolution.py",
         "tests/test_media_match_ui.py",
+        "tests/test_media_match_manual_search.py",
     ],
 }
 
