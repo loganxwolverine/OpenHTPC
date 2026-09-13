@@ -85,6 +85,21 @@ def _load_media_db(install: Path | None = None):
     return None
 
 
+def load_extensionless_module(name: str, path: Path):
+    """Load a Python module from an extensionless script path."""
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader, origin=str(path))
+    if spec and spec.loader:
+        mod = importlib.util.module_from_spec(spec)
+        mod.__file__ = str(path.resolve())
+        spec.loader.exec_module(mod)
+        return mod
+    return None
+
+
 def _load_media_match_ui(install: Path | None = None):
     candidates = [
         install / "openhtpc-media-match-ui" if install else None,
@@ -92,11 +107,12 @@ def _load_media_match_ui(install: Path | None = None):
     ]
     for p in candidates:
         if p and p.is_file():
-            spec = importlib.util.spec_from_file_location("openhtpc_media_match_ui", p)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                return mod
+            try:
+                mod = load_extensionless_module("openhtpc_media_match_ui", p)
+                if mod:
+                    return mod
+            except Exception:
+                pass
     return None
 
 
@@ -668,6 +684,8 @@ def orchestrate_manual_search(
     match_ui = _load_media_match_ui(install)
     if match_ui and hasattr(match_ui, "_regenerate_ui"):
         match_ui._regenerate_ui(home, install)
+    else:
+        print("WARNING: openhtpc-media-match-ui unavailable for UI regeneration", file=sys.stderr)
 
     return 0
 

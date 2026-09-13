@@ -41,12 +41,18 @@ def set_session_engine_module(mod: Any) -> None:
     _SESSION_ENGINE = mod
 
 
+def _this_dir() -> Path:
+    if "__file__" in globals() and globals()["__file__"]:
+        return Path(globals()["__file__"]).resolve().parent
+    return Path.cwd()
+
+
 def _load_media_db(install: Path | None = None):
     if _MEDIA_DB is not None:
         return _MEDIA_DB
     candidates = [
         install / "openhtpc-media-db.py" if install else None,
-        Path(__file__).resolve().parent / "openhtpc-media-db.py",
+        _this_dir() / "openhtpc-media-db.py",
     ]
     for p in candidates:
         if p and p.is_file():
@@ -63,7 +69,7 @@ def _load_media_match(install: Path | None = None):
         return _MEDIA_MATCH
     candidates = [
         install / "openhtpc-media-match.py" if install else None,
-        Path(__file__).resolve().parent / "openhtpc-media-match.py",
+        _this_dir() / "openhtpc-media-match.py",
     ]
     for p in candidates:
         if p and p.is_file():
@@ -80,7 +86,7 @@ def _load_session_engine(install: Path | None = None):
         return _SESSION_ENGINE
     candidates = [
         install / "openhtpc-session-engine.py" if install else None,
-        Path(__file__).resolve().parent / "openhtpc-session-engine.py",
+        _this_dir() / "openhtpc-session-engine.py",
     ]
     for p in candidates:
         if p and p.is_file():
@@ -354,19 +360,25 @@ def build_resolver_menu_sections(
     rev = st.get("candidate_set_revision") or ""
     state = st.get("identification_state") or "UNMATCHED"
     work_id = st.get("work_id")
-    token_suffix = res_section_id[8:] if res_section_id.startswith("MEDIA_R") else res_section_id
+    token_suffix = res_section_id.removeprefix("MEDIA_R") if res_section_id.startswith("MEDIA_R") else res_section_id
     list_section_id = f"MEDIA_RL_{token_suffix}"
 
     sections: list[str] = []
 
     search_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui"
-    search_cmd = f":applyback {search_helper_path} {media_version_id}"
+    ms_menu = f"MEDIA_MS_{token_suffix}"
+    ms_cmd = f":submenu {ms_menu}"
+    ms_launch_cmd = f":applyback {search_helper_path} {media_version_id}"
+    ms_e1 = bounded_flex_line(1, "LANCER LA RECHERCHE", icon, ms_launch_cmd)
+    ms_e2 = bounded_flex_line(2, "RETOUR", icon, ":back")
+    ms_section = f"[{ms_menu}]\n{ms_e1}\n{ms_e2}"
 
     if state == "UNMATCHED" and not candidates:
         e1 = bounded_flex_line(1, "Aucune proposition disponible.", icon, ":back")
-        e2 = bounded_flex_line(2, "RECHERCHER MANUELLEMENT", icon, search_cmd)
+        e2 = bounded_flex_line(2, "RECHERCHER MANUELLEMENT", icon, ms_cmd)
         e3 = bounded_flex_line(3, "RETOUR", icon, ":back")
         sections.append(f"[{res_section_id}]\n{e1}\n{e2}\n{e3}")
+        sections.append(ms_section)
         return sections
 
     res_entries: list[tuple[str, Path, str]] = []
@@ -433,7 +445,7 @@ def build_resolver_menu_sections(
 
     # Manual search & reject entries for UNMATCHED with pending candidates
     if state == "UNMATCHED":
-        res_entries.append(("RECHERCHER MANUELLEMENT", icon, search_cmd))
+        res_entries.append(("RECHERCHER MANUELLEMENT", icon, ms_cmd))
         rej_token = f"iact_{generation}_{token_suffix}_rej"
         actions[rej_token] = {
             "action": "reject",
@@ -449,7 +461,7 @@ def build_resolver_menu_sections(
         sections.append(f"[{rej_menu}]\n{e1}\n{e2}")
         res_entries.append(("AUCUN DE CES FILMS", icon, f":submenu {rej_menu}"))
     elif state in ("AUTO_MATCHED", "USER_MATCHED"):
-        res_entries.append(("RECHERCHER UNE AUTRE IDENTIFICATION", icon, search_cmd))
+        res_entries.append(("RECHERCHER UNE AUTRE IDENTIFICATION", icon, ms_cmd))
 
     # Decide later
     res_entries.append(("PLUS TARD", icon, ":back"))
@@ -457,6 +469,8 @@ def build_resolver_menu_sections(
     res_body = "\n".join(
         bounded_flex_line(i, lbl, ico, cmd) for i, (lbl, ico, cmd) in enumerate(res_entries, 1)
     )
+
+    sections.append(ms_section)
 
     if stale_notice:
         stale_sec = build_stale_menu_section(

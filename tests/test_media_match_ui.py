@@ -444,12 +444,14 @@ def test_15_unmatched_no_candidates_informational_state(sandbox):
         sections = media_match_ui.build_resolver_menu_sections(
             sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R12345678", "gen", {}, sandbox["media_icon"]
         )
-        assert len(sections) == 1
+        assert len(sections) == 2
         sec = sections[0]
         assert "Aucune proposition disponible." in sec
+        assert "RECHERCHER MANUELLEMENT" in sec
         assert "RETOUR" in sec
         assert ":back" in sec
         assert "CONFIRMER" not in sec
+        assert "LANCER LA RECHERCHE" in sections[1]
 
 
 def test_16_decide_later_zero_mutation(sandbox):

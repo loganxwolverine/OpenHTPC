@@ -246,11 +246,12 @@ def test_03_zero_candidate_resolver_exposes_manual_search(sandbox):
         sections = media_match_ui.build_resolver_menu_sections(
             sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R30303030", "gen", {}, sandbox["media_icon"]
         )
-        assert len(sections) == 1
+        assert len(sections) == 2
         sec = sections[0]
         assert "Aucune proposition disponible." in sec
         assert "RECHERCHER MANUELLEMENT" in sec
         assert "RETOUR" in sec
+        assert "LANCER LA RECHERCHE" in sections[1]
 
 
 # 4. TITLE PREFILL FROM PROVISIONAL CLUE
@@ -852,3 +853,154 @@ def test_35_query_not_persisted_to_canonical_db(sandbox):
         assert "search_query" not in cols
         assert "manual_query" not in cols
         assert "last_search" not in cols
+
+
+# 36. REAL EXTENSIONLESS MODULE LOADING
+def test_36_real_extensionless_module_loading(sandbox):
+    """Verify load_extensionless_module and _load_media_match_ui load real openhtpc-media-match-ui without mocks."""
+    # Test low-level extensionless loader
+    mod = manual_search_ui.load_extensionless_module("test_match_ui", sandbox["install"] / "openhtpc-media-match-ui")
+    assert mod is not None
+    assert hasattr(mod, "_regenerate_ui")
+    assert hasattr(mod, "build_resolver_menu_sections")
+    assert hasattr(mod, "dispatch_action")
+
+    # Test _load_media_match_ui with sandbox install
+    loaded = manual_search_ui._load_media_match_ui(sandbox["install"])
+    assert loaded is not None
+    assert hasattr(loaded, "_regenerate_ui")
+    assert callable(loaded._regenerate_ui)
+
+
+# 37. SUCCESS REGENERATES CANONICAL FLEX CONFIG
+def test_37_success_regenerates_canonical_flex_config(sandbox):
+    """End-to-end qualification proving successful manual search regenerates flex-v1.ini with candidate sections."""
+    mv_id = _ingest_movie(sandbox, "Spirited.Away.2001.mkv", "Spirited Away")
+
+    # Configure user-config.json so session_engine knows local_media_sources
+    cfg_dir = sandbox["home"] / ".config/openhtpc"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "user-config.json").write_text(
+        json.dumps({
+            "configuration_completed": True,
+            "local_media_sources": [str(sandbox["sources_dir"])],
+            "tmdb": {"configured": False},
+        })
+    )
+
+    # Initial flex config generation
+    flex_config = cfg_dir / "flex-v1.ini"
+    session_engine.publish_flex_config(flex_config, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    assert flex_config.is_file()
+    initial_content = flex_config.read_text(encoding="utf-8")
+    assert "Spirited Away (2001)" not in initial_content
+
+    # Mock search function that inserts a candidate into match_candidates and returns OK
+    def mock_search(db, media_version_id, title, year, home):
+        _add_candidate(db, media_version_id, 129, "Spirited Away", 2001)
+        return {"ok": True, "status": "OK", "revision": "rev_test37"}
+
+    calls = [
+        {"ok": True, "cancelled": False, "text": "Spirited Away"},
+        {"ok": True, "cancelled": False, "text": "2001"},
+    ]
+    with mock.patch.object(manual_search_ui, "invoke_text_entry", side_effect=calls):
+        with mock.patch.object(manual_search_ui, "show_confirmation_window", return_value="SEARCH"):
+            # Note: do NOT mock _load_media_match_ui! Let it load real openhtpc-media-match-ui and regenerate UI.
+            rc = manual_search_ui.orchestrate_manual_search(
+                media_version_id=mv_id,
+                home=sandbox["home"],
+                install=sandbox["install"],
+                custom_db_path=sandbox["db_file"],
+                mock_search_fn=mock_search,
+            )
+            assert rc == 0
+
+    # Verify flex-v1.ini was regenerated and contains the candidate
+    assert flex_config.is_file()
+    updated_content = flex_config.read_text(encoding="utf-8")
+    assert "Spirited Away (2001)" in updated_content
+    assert "MEDIA_MS_" in updated_content
+    assert "LANCER LA RECHERCHE" in updated_content
+
+
+# 38. POST-SEARCH NAVIGATION TRAMPOLINE
+def test_38_post_search_navigation_trampoline(sandbox):
+    """Verify resolver menu structure provides a trampoline submenu so :applyback returns to the resolver."""
+    mv_id = _ingest_movie(sandbox, "Alien.1979.mpg", "Alien")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R11223344", "gen1", {}, sandbox["media_icon"]
+        )
+
+    # Must contain main resolver section and trampoline submenu section
+    sec_names = [s.splitlines()[0] for s in sections]
+    assert "[MEDIA_R11223344]" in sec_names
+    assert "[MEDIA_MS_11223344]" in sec_names
+
+    res_sec = next(s for s in sections if s.startswith("[MEDIA_R11223344]"))
+    ms_sec = next(s for s in sections if s.startswith("[MEDIA_MS_11223344]"))
+
+    # Resolver section must use :submenu to trampoline
+    assert ":submenu MEDIA_MS_11223344" in res_sec
+    assert "RECHERCHER MANUELLEMENT" in res_sec
+    assert ":applyback" not in res_sec
+
+    # Trampoline section must use :applyback to launch manual search
+    assert "LANCER LA RECHERCHE" in ms_sec
+    assert f":applyback $HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui {mv_id}" in ms_sec
+    assert "RETOUR" in ms_sec
+    assert ":back" in ms_sec
+
+
+# 39. TRAMPOLINE LINE BUDGET
+def test_39_trampoline_line_budget(sandbox):
+    """Guarantee all generated lines in resolver and trampoline menus strictly respect the <= 198 byte limit."""
+    mv_id = _ingest_movie(sandbox, "VeryLongMovieTitleName" * 5 + ".mkv", "Long Title " * 10)
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        db.execute(
+            """
+            INSERT INTO match_candidates (
+                media_version_id, provider, external_id,
+                candidate_title, candidate_year, candidate_payload_json,
+                score, status, created_at
+            ) VALUES (?, 'tmdb_movie', '999', ?, 2026, '{}', 90.0, 'PENDING', '2026-09-13T12:00:00Z')
+            """,
+            (mv_id, "Extremely Long Candidate Movie Title With Accents and Emojis" * 3),
+        )
+        db.commit()
+
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_RABCDEF01", "gen_budget", {}, sandbox["media_icon"]
+        )
+
+    for sec in sections:
+        for line in sec.splitlines():
+            byte_len = len(line.encode("utf-8"))
+            assert byte_len <= 198, f"Line exceeds 198 bytes ({byte_len} bytes): {line!r}"
+
+
+# 40. ZERO RESULTS TRAMPOLINE NAVIGATION
+def test_40_zero_results_trampoline_navigation(sandbox):
+    """Verify zero-candidate resolver exposes trampoline submenu to allow manual search."""
+    mv_id = _ingest_movie(sandbox, "ZeroResults.mkv", "Zero Results")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R00000000", "gen0", {}, sandbox["media_icon"]
+        )
+
+    assert len(sections) == 2
+    res_sec, ms_sec = sections[0], sections[1]
+
+    # Resolver section
+    assert res_sec.startswith("[MEDIA_R00000000]")
+    assert "Aucune proposition disponible." in res_sec
+    assert "RECHERCHER MANUELLEMENT" in res_sec
+    assert ":submenu MEDIA_MS_00000000" in res_sec
+
+    # Trampoline section
+    assert ms_sec.startswith("[MEDIA_MS_00000000]")
+    assert "LANCER LA RECHERCHE" in ms_sec
+    assert f":applyback $HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui {mv_id}" in ms_sec
+    assert "RETOUR" in ms_sec
+
