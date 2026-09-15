@@ -187,8 +187,12 @@ def refresh_work_presentation(
     fetched_at = now or datetime.now(timezone.utc).isoformat()
 
     in_tx = db.in_transaction
+    sp_name = "openhtpc_presentation_refresh"
+
     if not in_tx:
         db.execute("BEGIN IMMEDIATE")
+    else:
+        db.execute(f"SAVEPOINT {sp_name}")
 
     try:
         snap_res = media_db.upsert_provider_snapshot(
@@ -223,10 +227,18 @@ def refresh_work_presentation(
 
         if not in_tx:
             db.commit()
+        else:
+            db.execute(f"RELEASE SAVEPOINT {sp_name}")
 
     except Exception as exc:
         if not in_tx:
             db.rollback()
+        else:
+            try:
+                db.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                db.execute(f"RELEASE SAVEPOINT {sp_name}")
+            except Exception:
+                pass
         return {
             "ok": False,
             "error_code": "PRESENTATION_PERSISTENCE_FAILED",

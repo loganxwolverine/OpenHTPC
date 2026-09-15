@@ -384,3 +384,76 @@ def test_cli_details(sandbox):
     out = json.loads(proc.stdout)
     assert out["error_code"] == "PROVIDER_INVALID_ID"
 
+
+def test_response_id_binding_matching(sandbox):
+    """Test A: request 129, payload id 129 -> PASS with exactly one request."""
+    call_count = 0
+
+    def mock_opener(req, timeout=8):
+        nonlocal call_count
+        call_count += 1
+        payload = dict(SPIRITED_AWAY_PAYLOAD)
+        payload["id"] = 129
+        return MockHTTPResponse(json.dumps(payload))
+
+    res = tmdb_provider.get_movie_details(129, home=sandbox["home"], opener=mock_opener)
+    assert res.status == tmdb_provider.STATUS_OK
+    assert res.movie is not None
+    assert res.movie.external_id == "129"
+    assert call_count == 1
+
+
+def test_response_id_binding_mismatch(sandbox):
+    """Test B: request 129, payload id 130 -> FAIL closed (PROVIDER_ID_MISMATCH)."""
+    call_count = 0
+
+    def mock_opener(req, timeout=8):
+        nonlocal call_count
+        call_count += 1
+        payload = dict(SPIRITED_AWAY_PAYLOAD)
+        payload["id"] = 130
+        return MockHTTPResponse(json.dumps(payload))
+
+    res = tmdb_provider.get_movie_details(129, home=sandbox["home"], opener=mock_opener)
+    assert res.status == tmdb_provider.STATUS_ID_MISMATCH
+    assert res.error_code == tmdb_provider.STATUS_ID_MISMATCH
+    assert "mismatch" in res.error_detail.lower()
+    assert res.movie is None
+    assert call_count == 1
+
+
+def test_response_id_binding_missing_id(sandbox):
+    """Test C: request 129, payload missing 'id' -> FAIL (PROVIDER_INVALID_RESPONSE)."""
+    call_count = 0
+
+    def mock_opener(req, timeout=8):
+        nonlocal call_count
+        call_count += 1
+        payload = dict(SPIRITED_AWAY_PAYLOAD)
+        del payload["id"]
+        return MockHTTPResponse(json.dumps(payload))
+
+    res = tmdb_provider.get_movie_details(129, home=sandbox["home"], opener=mock_opener)
+    assert res.status == tmdb_provider.STATUS_INVALID_RESPONSE
+    assert res.error_code == tmdb_provider.STATUS_INVALID_RESPONSE
+    assert res.movie is None
+    assert call_count == 1
+
+
+def test_response_id_binding_malformed_id(sandbox):
+    """Test D: request 129, payload malformed 'id' -> FAIL (PROVIDER_INVALID_RESPONSE)."""
+    for bad_id in ["not_a_number", None, 0, -1, True, False, 129.5]:
+        call_count = 0
+
+        def mock_opener(req, timeout=8):
+            nonlocal call_count
+            call_count += 1
+            payload = dict(SPIRITED_AWAY_PAYLOAD)
+            payload["id"] = bad_id
+            return MockHTTPResponse(json.dumps(payload))
+
+        res = tmdb_provider.get_movie_details(129, home=sandbox["home"], opener=mock_opener)
+        assert res.status == tmdb_provider.STATUS_INVALID_RESPONSE
+        assert res.error_code == tmdb_provider.STATUS_INVALID_RESPONSE
+        assert res.movie is None
+        assert call_count == 1

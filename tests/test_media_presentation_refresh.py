@@ -514,3 +514,148 @@ def test_cli_refresh(test_env):
     out = json.loads(proc.stdout)
     assert out["error_code"] == "DB_NOT_FOUND"
 
+
+def test_mismatched_provider_id_preserves_good_state(test_env):
+    """Verify mismatched provider response ID fails closed and preserves all existing state."""
+    def mock_opener_ok(req, timeout=8):
+        return MockHTTPResponse(json.dumps(SPIRITED_AWAY_FR_PAYLOAD))
+
+    mismatched_payload = dict(SPIRITED_AWAY_FR_PAYLOAD)
+    mismatched_payload["id"] = 130  # Mismatched!
+
+    def mock_opener_mismatch(req, timeout=8):
+        return MockHTTPResponse(json.dumps(mismatched_payload))
+
+    with closing(media_db.connect(test_env["db_file"])) as db:
+        # 1. Establish known-good presentation
+        res1 = media_pres.refresh_work_presentation(
+            db=db,
+            work_id=test_env["work_id"],
+            locale="fr-FR",
+            home=test_env["home"],
+            opener=mock_opener_ok,
+        )
+        assert res1["ok"] is True
+
+        snap_before = db.execute("SELECT * FROM provider_snapshots").fetchall()
+        pres_before = db.execute("SELECT * FROM work_presentations").fetchall()
+        work_before = db.execute("SELECT * FROM works").fetchall()
+        ext_before = db.execute("SELECT * FROM external_ids").fetchall()
+        mv_before = db.execute("SELECT * FROM media_versions").fetchall()
+
+        # 2. Refresh with mismatched response ID
+        res2 = media_pres.refresh_work_presentation(
+            db=db,
+            work_id=test_env["work_id"],
+            locale="fr-FR",
+            home=test_env["home"],
+            opener=mock_opener_mismatch,
+        )
+        assert res2["ok"] is False
+        assert res2["status"] == tmdb_provider.STATUS_ID_MISMATCH
+
+        # 3. Assert zero mutation across all tables
+        snap_after = db.execute("SELECT * FROM provider_snapshots").fetchall()
+        pres_after = db.execute("SELECT * FROM work_presentations").fetchall()
+        work_after = db.execute("SELECT * FROM works").fetchall()
+        ext_after = db.execute("SELECT * FROM external_ids").fetchall()
+        mv_after = db.execute("SELECT * FROM media_versions").fetchall()
+
+        assert snap_before == snap_after
+        assert pres_before == pres_after
+        assert work_before == work_after
+        assert ext_before == ext_after
+        assert mv_before == mv_after
+
+
+def test_nested_transaction_failure_rollback_and_sentinel_preserved(test_env):
+    """Verify failure inside outer transaction rolls back refresh savepoint, preserving caller sentinel."""
+    def mock_opener(req, timeout=8):
+        return MockHTTPResponse(json.dumps(SPIRITED_AWAY_FR_PAYLOAD))
+
+    with closing(media_db.connect(test_env["db_file"])) as db:
+        # Step 1: Caller begins outer transaction
+        db.execute("BEGIN")
+        assert db.in_transaction is True
+
+        # Step 2: Caller writes unrelated sentinel
+        db.execute(
+            """
+            INSERT INTO works (work_type, title, created_at, updated_at)
+            VALUES ('MOVIE', 'Sentinel Work Before Refresh', '2026-09-01T00:00:00', '2026-09-01T00:00:00')
+            """
+        )
+
+        # Step 3, 4, 5: Force upsert_work_presentation to fail inside refresh
+        def failing_upsert(*args, **kwargs):
+            raise sqlite3.OperationalError("Simulated write failure on presentation")
+
+        with mock.patch.object(media_db, "upsert_work_presentation", side_effect=failing_upsert):
+            res = media_pres.refresh_work_presentation(
+                db=db,
+                work_id=test_env["work_id"],
+                home=test_env["home"],
+                opener=mock_opener,
+            )
+
+        # Step 6: Verify refresh failed
+        assert res["ok"] is False
+        assert res["error_code"] == "PRESENTATION_PERSISTENCE_FAILED"
+
+        # Verify before caller finishes: refresh snapshot was rolled back by SAVEPOINT
+        snap_count = db.execute("SELECT COUNT(*) FROM provider_snapshots").fetchone()[0]
+        pres_count = db.execute("SELECT COUNT(*) FROM work_presentations").fetchone()[0]
+        assert snap_count == 0
+        assert pres_count == 0
+
+        # Verify caller sentinel is STILL present in uncommitted transaction!
+        sentinel_found = db.execute("SELECT id FROM works WHERE title = 'Sentinel Work Before Refresh'").fetchone()
+        assert sentinel_found is not None
+
+        # Step 7: Caller commits outer transaction
+        db.commit()
+
+    # Step 8: Reopen fresh DB connection
+    with closing(media_db.connect(test_env["db_file"])) as fresh_db:
+        # Sentinel must be committed
+        sentinel_row = fresh_db.execute("SELECT id FROM works WHERE title = 'Sentinel Work Before Refresh'").fetchone()
+        assert sentinel_row is not None
+
+        # Failed refresh changes must NOT be committed
+        assert fresh_db.execute("SELECT COUNT(*) FROM provider_snapshots").fetchone()[0] == 0
+        assert fresh_db.execute("SELECT COUNT(*) FROM work_presentations").fetchone()[0] == 0
+
+
+def test_nested_transaction_success_and_caller_rollback(test_env):
+    """Verify successful refresh inside outer transaction respects caller ROLLBACK."""
+    def mock_opener(req, timeout=8):
+        return MockHTTPResponse(json.dumps(SPIRITED_AWAY_FR_PAYLOAD))
+
+    with closing(media_db.connect(test_env["db_file"])) as db:
+        # Caller begins outer transaction
+        db.execute("BEGIN")
+        assert db.in_transaction is True
+
+        res = media_pres.refresh_work_presentation(
+            db=db,
+            work_id=test_env["work_id"],
+            locale="fr-FR",
+            home=test_env["home"],
+            opener=mock_opener,
+        )
+        assert res["ok"] is True
+
+        # Both records exist in active transaction
+        assert db.execute("SELECT COUNT(*) FROM provider_snapshots").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM work_presentations").fetchone()[0] == 1
+
+        # Transaction is still open (refresh did not commit caller transaction!)
+        assert db.in_transaction is True
+
+        # Caller rolls back
+        db.rollback()
+
+    # Reopen DB: both records must be absent
+    with closing(media_db.connect(test_env["db_file"])) as fresh_db:
+        assert fresh_db.execute("SELECT COUNT(*) FROM provider_snapshots").fetchone()[0] == 0
+        assert fresh_db.execute("SELECT COUNT(*) FROM work_presentations").fetchone()[0] == 0

@@ -53,6 +53,7 @@ STATUS_HTTP_ERROR = "PROVIDER_HTTP_ERROR"
 STATUS_INVALID_RESPONSE = "PROVIDER_INVALID_RESPONSE"
 STATUS_INVALID_ID = "PROVIDER_INVALID_ID"
 STATUS_NOT_FOUND = "PROVIDER_NOT_FOUND"
+STATUS_ID_MISMATCH = "PROVIDER_ID_MISMATCH"
 
 
 def sanitize_text(text: str, token: str | None = None) -> str:
@@ -587,7 +588,28 @@ def get_movie_details(
                 http_status=http_status,
             )
 
-        movie_id = str(payload.get("id") or valid_id)
+        raw_payload_id = payload.get("id")
+        payload_id = validate_tmdb_id(raw_payload_id)
+        if payload_id is None:
+            return MovieDetailsResult(
+                status=STATUS_INVALID_RESPONSE,
+                movie=None,
+                error_code=STATUS_INVALID_RESPONSE,
+                error_detail=f"TMDb response missing or invalid 'id': {raw_payload_id!r}",
+                http_status=http_status,
+                raw_payload=payload,
+            )
+        if payload_id != valid_id:
+            return MovieDetailsResult(
+                status=STATUS_ID_MISMATCH,
+                movie=None,
+                error_code=STATUS_ID_MISMATCH,
+                error_detail=f"TMDb response ID mismatch: requested {valid_id}, got {payload_id}",
+                http_status=http_status,
+                raw_payload=payload,
+            )
+
+        movie_id = str(payload_id)
         title = str(payload.get("title") or "").strip()
         orig_title = str(payload.get("original_title") or "").strip() or None
         rel_date = str(payload.get("release_date") or "").strip() or None
