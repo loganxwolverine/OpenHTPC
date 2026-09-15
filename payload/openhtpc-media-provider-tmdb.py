@@ -38,6 +38,7 @@ DEFAULT_TIMEOUT_SECONDS = 8
 MAX_NORMALIZED_RESULTS = 10
 DEFAULT_LANGUAGE = "fr-FR"
 SEARCH_MOVIE_URL = "https://api.themoviedb.org/3/search/movie"
+MOVIE_DETAILS_URL_TEMPLATE = "https://api.themoviedb.org/3/movie/{tmdb_id}"
 
 # Error taxonomy
 STATUS_OK = "PROVIDER_OK"
@@ -50,6 +51,8 @@ STATUS_OFFLINE = "PROVIDER_OFFLINE"
 STATUS_TIMEOUT = "PROVIDER_TIMEOUT"
 STATUS_HTTP_ERROR = "PROVIDER_HTTP_ERROR"
 STATUS_INVALID_RESPONSE = "PROVIDER_INVALID_RESPONSE"
+STATUS_INVALID_ID = "PROVIDER_INVALID_ID"
+STATUS_NOT_FOUND = "PROVIDER_NOT_FOUND"
 
 
 def sanitize_text(text: str, token: str | None = None) -> str:
@@ -388,6 +391,323 @@ def search_movies(
         )
 
 
+def validate_tmdb_id(tmdb_id: Any) -> int | None:
+    """Validate TMDb ID: positive integer or digits-only string representing int > 0.
+
+    Rejects None, bool, negative numbers, 0, non-numeric strings, floats.
+    """
+    if tmdb_id is None or isinstance(tmdb_id, bool):
+        return None
+    if isinstance(tmdb_id, int):
+        return tmdb_id if tmdb_id > 0 else None
+    if isinstance(tmdb_id, str):
+        s = tmdb_id.strip()
+        if s.isdigit():
+            val = int(s)
+            return val if val > 0 else None
+        return None
+    return None
+
+
+def normalize_genre_names(raw_genres: Any) -> list[str]:
+    """Extract and normalize genre names from TMDb genres list.
+
+    Extracts name from dicts (e.g. {'id': 16, 'name': 'Animation'}) or strings,
+    strips whitespace, discards empty strings, deduplicates preserving order.
+    """
+    if not isinstance(raw_genres, (list, tuple)):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw_genres:
+        name: str | None = None
+        if isinstance(item, dict):
+            raw_name = item.get("name")
+            if isinstance(raw_name, str):
+                name = raw_name
+        elif isinstance(item, str):
+            name = item
+        if name:
+            stripped = name.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                result.append(stripped)
+    return result
+
+
+class MovieDetails:
+    __slots__ = (
+        "external_id",
+        "title",
+        "original_title",
+        "release_date",
+        "runtime_minutes",
+        "overview",
+        "genres",
+        "poster_path",
+        "backdrop_path",
+        "locale",
+        "raw_payload",
+    )
+
+    def __init__(
+        self,
+        external_id: str | int,
+        title: str,
+        original_title: str | None = None,
+        release_date: str | None = None,
+        runtime_minutes: int | None = None,
+        overview: str | None = None,
+        genres: list[str] | None = None,
+        poster_path: str | None = None,
+        backdrop_path: str | None = None,
+        locale: str = DEFAULT_LANGUAGE,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.external_id = str(external_id).strip()
+        self.title = str(title or "").strip()
+        self.original_title = str(original_title).strip() if original_title else None
+        self.release_date = str(release_date).strip() if release_date else None
+        self.runtime_minutes = (
+            int(runtime_minutes)
+            if runtime_minutes is not None and not isinstance(runtime_minutes, bool)
+            else None
+        )
+        self.overview = str(overview).strip() if overview else None
+        self.genres = list(genres) if genres else []
+        self.poster_path = str(poster_path).strip() if poster_path else None
+        self.backdrop_path = str(backdrop_path).strip() if backdrop_path else None
+        self.locale = str(locale or DEFAULT_LANGUAGE).strip()
+        self.raw_payload = raw_payload if raw_payload is not None else {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "external_id": self.external_id,
+            "title": self.title,
+            "original_title": self.original_title,
+            "release_date": self.release_date,
+            "runtime_minutes": self.runtime_minutes,
+            "overview": self.overview,
+            "genres": self.genres,
+            "poster_path": self.poster_path,
+            "backdrop_path": self.backdrop_path,
+            "locale": self.locale,
+        }
+
+
+class MovieDetailsResult:
+    __slots__ = ("status", "movie", "error_code", "error_detail", "http_status", "raw_payload")
+
+    def __init__(
+        self,
+        status: str,
+        movie: MovieDetails | None = None,
+        error_code: str | None = None,
+        error_detail: str | None = None,
+        http_status: int | None = None,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.status = status
+        self.movie = movie
+        self.error_code = error_code
+        self.error_detail = error_detail
+        self.http_status = http_status
+        self.raw_payload = raw_payload
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "movie": self.movie.to_dict() if self.movie else None,
+            "error_code": self.error_code,
+            "error_detail": self.error_detail,
+            "http_status": self.http_status,
+        }
+
+
+def get_movie_details(
+    tmdb_id: int | str,
+    language: str = DEFAULT_LANGUAGE,
+    home: Path | None = None,
+    opener=urllib.request.urlopen,
+) -> MovieDetailsResult:
+    """Fetch movie details from TMDb by ID.
+
+    Performs exactly ONE HTTP GET request to /3/movie/{tmdb_id}?language={language}.
+    Zero retries. Secret redaction applied to diagnostics.
+    """
+    valid_id = validate_tmdb_id(tmdb_id)
+    if valid_id is None:
+        return MovieDetailsResult(
+            status=STATUS_INVALID_ID,
+            movie=None,
+            error_code=STATUS_INVALID_ID,
+            error_detail=f"Invalid TMDb movie ID: {tmdb_id!r}",
+        )
+
+    token, err_code, err_detail = load_credential(home=home)
+    if not token:
+        return MovieDetailsResult(
+            status=err_code or STATUS_TOKEN_MISSING,
+            movie=None,
+            error_code=err_code,
+            error_detail=err_detail,
+        )
+
+    is_v4 = token.startswith("ey")
+    req_lang = (language or DEFAULT_LANGUAGE).strip() or DEFAULT_LANGUAGE
+    params = [("language", req_lang)]
+    if not is_v4:
+        params.append(("api_key", token))
+
+    query_str = urllib.parse.urlencode(params)
+    base_url = MOVIE_DETAILS_URL_TEMPLATE.format(tmdb_id=valid_id)
+    full_url = f"{base_url}?{query_str}"
+
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "OpenHTPC/1.2.0",
+    }
+    if is_v4:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(full_url, headers=headers)
+
+    try:
+        with opener(req, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
+            raw_bytes = response.read()
+            http_status = getattr(response, "status", 200)
+
+        payload = json.loads(raw_bytes.decode("utf-8"))
+        if not isinstance(payload, dict):
+            return MovieDetailsResult(
+                status=STATUS_INVALID_RESPONSE,
+                movie=None,
+                error_code=STATUS_INVALID_RESPONSE,
+                error_detail="Invalid payload structure from TMDb: root is not an object",
+                http_status=http_status,
+            )
+
+        movie_id = str(payload.get("id") or valid_id)
+        title = str(payload.get("title") or "").strip()
+        orig_title = str(payload.get("original_title") or "").strip() or None
+        rel_date = str(payload.get("release_date") or "").strip() or None
+        overview = str(payload.get("overview") or "").strip() or None
+        poster_path = str(payload.get("poster_path") or "").strip() or None
+        backdrop_path = str(payload.get("backdrop_path") or "").strip() or None
+
+        raw_runtime = payload.get("runtime")
+        runtime_minutes: int | None = None
+        if raw_runtime is not None and not isinstance(raw_runtime, bool):
+            try:
+                rt = int(raw_runtime)
+                if rt >= 0:
+                    runtime_minutes = rt
+            except (ValueError, TypeError):
+                runtime_minutes = None
+
+        genres = normalize_genre_names(payload.get("genres"))
+
+        details = MovieDetails(
+            external_id=movie_id,
+            title=title,
+            original_title=orig_title,
+            release_date=rel_date,
+            runtime_minutes=runtime_minutes,
+            overview=overview,
+            genres=genres,
+            poster_path=poster_path,
+            backdrop_path=backdrop_path,
+            locale=req_lang,
+            raw_payload=payload,
+        )
+
+        return MovieDetailsResult(
+            status=STATUS_OK,
+            movie=details,
+            http_status=http_status,
+            raw_payload=payload,
+        )
+
+    except urllib.error.HTTPError as exc:
+        code = exc.code
+        if code == 404:
+            return MovieDetailsResult(
+                status=STATUS_NOT_FOUND,
+                movie=None,
+                error_code=STATUS_NOT_FOUND,
+                error_detail=f"HTTP 404 Not Found (TMDb movie {valid_id} does not exist)",
+                http_status=code,
+            )
+        elif code in (401, 403):
+            return MovieDetailsResult(
+                status=STATUS_AUTH_FAILED,
+                movie=None,
+                error_code=STATUS_AUTH_FAILED,
+                error_detail=f"HTTP {code} Unauthorized / Forbidden",
+                http_status=code,
+            )
+        elif code == 429:
+            return MovieDetailsResult(
+                status=STATUS_RATE_LIMITED,
+                movie=None,
+                error_code=STATUS_RATE_LIMITED,
+                error_detail="HTTP 429 Rate Limited",
+                http_status=code,
+            )
+        else:
+            return MovieDetailsResult(
+                status=STATUS_HTTP_ERROR,
+                movie=None,
+                error_code=STATUS_HTTP_ERROR,
+                error_detail=f"HTTP {code}",
+                http_status=code,
+            )
+
+    except (TimeoutError, socket.timeout):
+        return MovieDetailsResult(
+            status=STATUS_TIMEOUT,
+            movie=None,
+            error_code=STATUS_TIMEOUT,
+            error_detail="Connection or read timed out",
+        )
+
+    except urllib.error.URLError as exc:
+        reason_str = str(exc.reason) if hasattr(exc, "reason") else str(exc)
+        if "timed out" in reason_str.lower():
+            return MovieDetailsResult(
+                status=STATUS_TIMEOUT,
+                movie=None,
+                error_code=STATUS_TIMEOUT,
+                error_detail="Connection or read timed out",
+            )
+        clean_reason = sanitize_text(reason_str, token)
+        clean_reason = re.sub(r"https?://\S+", "[URL_REDACTED]", clean_reason)
+        return MovieDetailsResult(
+            status=STATUS_OFFLINE,
+            movie=None,
+            error_code=STATUS_OFFLINE,
+            error_detail=f"Network unreachable: {clean_reason}",
+        )
+
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return MovieDetailsResult(
+            status=STATUS_INVALID_RESPONSE,
+            movie=None,
+            error_code=STATUS_INVALID_RESPONSE,
+            error_detail="Malformed JSON in TMDb response",
+        )
+
+    except Exception as exc:
+        clean_exc = sanitize_text(str(exc), token)
+        clean_exc = re.sub(r"https?://\S+", "[URL_REDACTED]", clean_exc)
+        return MovieDetailsResult(
+            status=STATUS_OFFLINE,
+            movie=None,
+            error_code=STATUS_OFFLINE,
+            error_detail=f"Transport failure: {type(exc).__name__}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="OpenHTPC TMDb Movie Provider Adapter (DEV5B1)")
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -397,6 +717,11 @@ def main(argv: list[str] | None = None) -> int:
     search_p.add_argument("--year", type=int, default=None, help="Optional 4-digit release year")
     search_p.add_argument("--language", default=DEFAULT_LANGUAGE, help="Locale / language (default: fr-FR)")
     search_p.add_argument("--home", type=Path, default=None, help="OpenHTPC user home directory")
+
+    details_p = subparsers.add_parser("details", help="Get TMDb movie details")
+    details_p.add_argument("--id", "--tmdb-id", dest="tmdb_id", required=True, help="TMDb movie ID (positive integer)")
+    details_p.add_argument("--language", default=DEFAULT_LANGUAGE, help="Locale / language (default: fr-FR)")
+    details_p.add_argument("--home", type=Path, default=None, help="OpenHTPC user home directory")
 
     args = parser.parse_args(argv)
 
@@ -409,6 +734,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result.to_dict(), indent=2))
         return 0 if result.status in (STATUS_OK, STATUS_OK_NO_RESULTS) else 1
+
+    if args.action == "details":
+        res = get_movie_details(
+            tmdb_id=args.tmdb_id,
+            language=args.language,
+            home=args.home,
+        )
+        print(json.dumps(res.to_dict(), indent=2))
+        return 0 if res.status == STATUS_OK else 1
 
     return 2
 

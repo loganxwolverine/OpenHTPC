@@ -153,6 +153,7 @@ openhtpc-media-manual-search-ui
 openhtpc-media-match.py
 openhtpc-media-match-ui
 openhtpc-media-picker
+openhtpc-media-presentation.py
 openhtpc-media-probe.py
 openhtpc-media-provider-tmdb.py
 openhtpc-media-remove
