@@ -827,6 +827,10 @@ def test_34_long_title_display_bounded_query_unchanged(sandbox):
 
 # 35. QUERY NOT PERSISTED TO CANONICAL DB
 def test_35_query_not_persisted_to_canonical_db(sandbox):
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        version_before = media_db.get_schema_version(db)
+        assert version_before == 3
+
     mv_id = _ingest_movie(sandbox, "NoPersist.mkv", "Initial Title")
     calls = [
         {"ok": True, "cancelled": False, "text": "Query Never Saved In Schema"},
@@ -845,9 +849,8 @@ def test_35_query_not_persisted_to_canonical_db(sandbox):
                 )
 
     with closing(media_db.connect(sandbox["db_file"])) as db:
-        # Schema version compatibility (v2 qualified, v3 introduced in DEV6A1)
-        ver = media_db.get_schema_version(db)
-        assert ver in (2, 3)
+        version_after = media_db.get_schema_version(db)
+        assert version_after == version_before
         # Verify no search query columns in media_versions
         cols = [r[1] for r in db.execute("PRAGMA table_info(media_versions)").fetchall()]
         assert "search_query" not in cols

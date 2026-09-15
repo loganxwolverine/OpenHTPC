@@ -1137,9 +1137,22 @@ def test_54_xdg_isolation(sandbox):
     assert str(config_path).startswith(str(sandbox["home"]))
 
 
-def test_55_no_schema_change():
-    """55. Schema version compatibility: v2 qualified, v3 introduced in DEV6A1."""
-    assert media_db.SCHEMA_VERSION in (2, 3)
+def test_55_no_schema_change(sandbox):
+    """55. Living-room resolver UI generation does not change database schema."""
+    assert media_db.SCHEMA_VERSION == 3
+
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        version_before = media_db.get_schema_version(db)
+        assert version_before == 3
+
+    _ingest_movie(sandbox, "SchemaCheck.mkv")
+    session_engine.media_menu_sections(
+        sandbox["home"], [sandbox["sources_dir"]], sandbox["media_icon"], "gen55"
+    )
+
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        version_after = media_db.get_schema_version(db)
+        assert version_after == version_before
 
 
 def test_56_no_personal_media_references():
