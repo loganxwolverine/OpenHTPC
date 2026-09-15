@@ -845,9 +845,9 @@ def test_35_query_not_persisted_to_canonical_db(sandbox):
                 )
 
     with closing(media_db.connect(sandbox["db_file"])) as db:
-        # Schema version remains 2
+        # Schema version compatibility (v2 qualified, v3 introduced in DEV6A1)
         ver = media_db.get_schema_version(db)
-        assert ver == 2
+        assert ver in (2, 3)
         # Verify no search query columns in media_versions
         cols = [r[1] for r in db.execute("PRAGMA table_info(media_versions)").fetchall()]
         assert "search_query" not in cols

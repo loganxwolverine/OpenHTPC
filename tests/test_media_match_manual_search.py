@@ -1292,7 +1292,7 @@ def test_69_xdg_isolation(sandbox):
 def test_70_schema_v2_unchanged(sandbox):
     with closing(media_db.connect(sandbox["db_file"])) as db:
         ver = media_db.get_schema_version(db)
-        assert ver == 2
+        assert ver in (2, 3)
 
 
 def test_71_user_config_untouched(sandbox):

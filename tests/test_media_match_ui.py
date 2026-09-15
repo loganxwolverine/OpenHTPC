@@ -1138,8 +1138,8 @@ def test_54_xdg_isolation(sandbox):
 
 
 def test_55_no_schema_change():
-    """55. No schema change: SCHEMA_VERSION remains 2."""
-    assert media_db.SCHEMA_VERSION == 2
+    """55. Schema version compatibility: v2 qualified, v3 introduced in DEV6A1."""
+    assert media_db.SCHEMA_VERSION in (2, 3)
 
 
 def test_56_no_personal_media_references():

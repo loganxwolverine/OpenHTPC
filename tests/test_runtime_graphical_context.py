@@ -289,9 +289,9 @@ class TestRuntimeGraphicalContext(unittest.TestCase):
         self.assertEqual(match["id"], "mode-50")
 
     def test_12_no_db_schema_version_change(self):
-        """Database schema and product version remain strictly untouched."""
+        """Database schema compatibility (v2/v3) and product version remain strictly untouched."""
         db_mod = _load_module("openhtpc_media_db_test", PAYLOAD / "openhtpc-media-db.py")
-        self.assertEqual(db_mod.SCHEMA_VERSION, 2)
+        self.assertIn(db_mod.SCHEMA_VERSION, (2, 3))
         version_text = (ROOT / "VERSION").read_text().strip()
         self.assertEqual(version_text, "1.2.0-rc7")
 

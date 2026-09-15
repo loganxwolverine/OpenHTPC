@@ -71,7 +71,11 @@ SSH_OP_TIMEOUT = 120
 
 # Known test profiles
 TEST_PROFILES: dict[str, list[str]] = {
-    "media-db": ["tests/test_media_db_foundation.py"],
+    "media-db": [
+        "tests/test_media_db_foundation.py",
+        "tests/test_media_presentation_db.py",
+    ],
+    "media-presentation": ["tests/test_media_presentation_db.py"],
     "media-probe": ["tests/test_media_probe.py"],
     "media-ingest": ["tests/test_media_ingest.py"],
     "media-scan": ["tests/test_media_scan.py"],
@@ -86,6 +90,7 @@ TEST_PROFILES: dict[str, list[str]] = {
     ],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
+        "tests/test_media_presentation_db.py",
         "tests/test_media_probe.py",
         "tests/test_media_ingest.py",
         "tests/test_media_scan.py",

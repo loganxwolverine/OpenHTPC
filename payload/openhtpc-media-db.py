@@ -4,11 +4,22 @@
 #
 # Part of the OPENHTPC project.
 # Original project by Steve Dehanne.
-"""Persistent media knowledge, schema v2. Initialization is explicit only.
+"""Persistent media knowledge, schema v3. Initialization is explicit only.
 
 Callers own returned connections and must close them. FILE identity is the
 source-relative pair when both values are known; canonical_path is diagnostic.
 No scanning, identification, configuration, or playback integration lives here.
+
+Identity vs Presentation distinction:
+  works.original_title
+    = identity-time clue/value retained by current qualified identity contract.
+  work_presentations.display_original_title
+    = presentation value derived from selected provider snapshot.
+
+Artwork storage policy:
+  ARTWORK_STORAGE_CLASS = REPRODUCIBLE_CACHE
+  Posters and backdrops are reproducible cache assets stored outside SQLite;
+  canonical presentation records never contain local artwork paths.
 """
 from __future__ import annotations
 
@@ -20,8 +31,10 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+ARTWORK_STORAGE_CLASS = "REPRODUCIBLE_CACHE"
 SCHEMA = """
 CREATE TABLE schema_info (
  version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT
@@ -100,13 +113,42 @@ CREATE TABLE match_candidates (
  candidate_year INTEGER, candidate_payload_json TEXT, score REAL NOT NULL,
  status TEXT NOT NULL DEFAULT 'PENDING', created_at TEXT NOT NULL
 );
+CREATE TABLE provider_snapshots (
+ id INTEGER PRIMARY KEY,
+ external_id_id INTEGER NOT NULL REFERENCES external_ids(id) ON DELETE CASCADE,
+ snapshot_kind TEXT NOT NULL,
+ locale TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ fetched_at TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(external_id_id, snapshot_kind, locale)
+);
+CREATE TABLE work_presentations (
+ id INTEGER PRIMARY KEY,
+ work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+ locale TEXT NOT NULL,
+ source_snapshot_id INTEGER REFERENCES provider_snapshots(id) ON DELETE SET NULL,
+ display_title TEXT NOT NULL,
+ display_original_title TEXT,
+ release_date TEXT,
+ runtime_minutes INTEGER CHECK(runtime_minutes IS NULL OR runtime_minutes >= 0),
+ overview TEXT,
+ genres_json TEXT,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(work_id, locale)
+);
 CREATE INDEX external_ids_work ON external_ids(work_id);
 CREATE INDEX media_versions_work ON media_versions(work_id);
 CREATE INDEX resources_version ON resources(media_version_id);
 CREATE INDEX match_candidates_version ON match_candidates(media_version_id);
+CREATE INDEX provider_snapshots_external_id ON provider_snapshots(external_id_id);
+CREATE INDEX work_presentations_work ON work_presentations(work_id);
 """
 TABLES = ('schema_info', 'works', 'external_ids', 'media_versions', 'resources',
-          'video_streams', 'audio_streams', 'subtitle_streams', 'match_candidates')
+          'video_streams', 'audio_streams', 'subtitle_streams', 'match_candidates',
+          'provider_snapshots', 'work_presentations')
 
 
 def database_path(*, environ=None, home=None) -> Path:
@@ -148,13 +190,15 @@ def connect(path=None, *, create=False) -> sqlite3.Connection:
 
 
 def get_schema_version(db) -> int | None:
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_info'").fetchone():
+    if not _schema_objects(db):
         return None
     rows = db.execute('SELECT version FROM schema_info ORDER BY version').fetchall()
     versions = [r[0] for r in rows]
     if versions == [1]:
         return 1
-    if versions in ([SCHEMA_VERSION], [1, SCHEMA_VERSION]):
+    if versions in ([2], [1, 2]):
+        return 2
+    if versions in ([SCHEMA_VERSION], [2, SCHEMA_VERSION], [1, SCHEMA_VERSION], [1, 2, SCHEMA_VERSION]):
         return SCHEMA_VERSION
     raise sqlite3.DatabaseError('Unsupported schema history')
 
@@ -166,7 +210,7 @@ def _migrate_v1_to_v2(db: sqlite3.Connection) -> None:
     avg_frame_rate, r_frame_rate, is_forced to video_streams, and
     is_forced to audio_streams.
     """
-    if get_schema_version(db) == 2:
+    if get_schema_version(db) in (2, 3):
         return
     if get_schema_version(db) != 1:
         raise sqlite3.DatabaseError(f'Cannot migrate schema from version {get_schema_version(db)} to 2')
@@ -184,6 +228,62 @@ def _migrate_v1_to_v2(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE audio_streams ADD COLUMN is_forced INTEGER NULL CHECK(is_forced IS NULL OR is_forced IN (0,1))")
         db.execute("INSERT INTO schema_info (version, applied_at, description) VALUES (?, ?, ?)",
                    (2, datetime.now(timezone.utc).isoformat(), 'Media Foundation schema v2'))
+        if not in_tx:
+            db.commit()
+    except Exception:
+        if not in_tx:
+            db.rollback()
+        raise
+
+
+def _migrate_v2_to_v3(db: sqlite3.Connection) -> None:
+    """Migrate database from schema v2 to schema v3.
+
+    Strictly additive: creates provider_snapshots and work_presentations tables
+    and their associated indexes.
+    """
+    if get_schema_version(db) == 3:
+        return
+    if get_schema_version(db) != 2:
+        raise sqlite3.DatabaseError(f'Cannot migrate schema from version {get_schema_version(db)} to 3')
+    in_tx = db.in_transaction
+    if not in_tx:
+        db.execute('BEGIN IMMEDIATE')
+    try:
+        db.execute("""
+        CREATE TABLE provider_snapshots (
+         id INTEGER PRIMARY KEY,
+         external_id_id INTEGER NOT NULL REFERENCES external_ids(id) ON DELETE CASCADE,
+         snapshot_kind TEXT NOT NULL,
+         locale TEXT NOT NULL,
+         payload_json TEXT NOT NULL,
+         fetched_at TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL,
+         UNIQUE(external_id_id, snapshot_kind, locale)
+        )
+        """)
+        db.execute("CREATE INDEX provider_snapshots_external_id ON provider_snapshots(external_id_id)")
+        db.execute("""
+        CREATE TABLE work_presentations (
+         id INTEGER PRIMARY KEY,
+         work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+         locale TEXT NOT NULL,
+         source_snapshot_id INTEGER REFERENCES provider_snapshots(id) ON DELETE SET NULL,
+         display_title TEXT NOT NULL,
+         display_original_title TEXT,
+         release_date TEXT,
+         runtime_minutes INTEGER CHECK(runtime_minutes IS NULL OR runtime_minutes >= 0),
+         overview TEXT,
+         genres_json TEXT,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL,
+         UNIQUE(work_id, locale)
+        )
+        """)
+        db.execute("CREATE INDEX work_presentations_work ON work_presentations(work_id)")
+        db.execute("INSERT INTO schema_info (version, applied_at, description) VALUES (?, ?, ?)",
+                   (3, datetime.now(timezone.utc).isoformat(), 'Media Foundation schema v3'))
         if not in_tx:
             db.commit()
     except Exception:
@@ -221,7 +321,7 @@ def _verify_schema(db):
 
 
 def initialize(path=None) -> Path:
-    """Atomically install v2 once, migrate v1, or validate without rewriting history.
+    """Atomically install v3 once, migrate v1/v2, or validate without rewriting history.
 
     Unknown/partial schemas are rejected; future migrations need explicit code.
     BEGIN IMMEDIATE serializes concurrent initializers before inspecting schema.
@@ -236,10 +336,14 @@ def initialize(path=None) -> Path:
                         db.execute(statement)
                 db.execute('INSERT INTO schema_info VALUES (?, ?, ?)', (
                     SCHEMA_VERSION, datetime.now(timezone.utc).isoformat(),
-                    'Media Foundation schema v2'))
+                    'Media Foundation schema v3'))
             else:
-                if get_schema_version(db) == 1:
+                ver = get_schema_version(db)
+                if ver == 1:
                     _migrate_v1_to_v2(db)
+                    _migrate_v2_to_v3(db)
+                elif ver == 2:
+                    _migrate_v2_to_v3(db)
             _verify_schema(db)
     return path
 
@@ -258,10 +362,484 @@ def check_integrity(db) -> dict:
 
 
 def stats(db) -> dict:
-    """Return bounded counts for the v1 tables."""
+    """Return bounded counts for the v3 tables."""
     _verify_schema(db)
     return {table: db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
             for table in TABLES}
+
+
+class PresentationRecord(dict):
+    """Dictionary representing a presentation or snapshot record.
+
+    Provides transparent equality checks:
+      record == "NOT_FOUND"  -> True if record is a NOT_FOUND error
+      record == None         -> True if record is a NOT_FOUND error
+      bool(record)           -> False if record has "ok": False
+    """
+
+    def __eq__(self, other: Any) -> bool:
+        if other is None and not self.get("ok", True):
+            return True
+        if other == "NOT_FOUND" and self.get("error") == "NOT_FOUND":
+            return True
+        return super().__eq__(other)
+
+    def __bool__(self) -> bool:
+        return bool(self.get("ok", True))
+
+
+def normalize_genres(genres: list[Any] | tuple[Any, ...] | str | None) -> str:
+    """Normalize presentation genres to a deterministic JSON array of strings.
+
+    - Strings only
+    - Strips whitespace
+    - Discards empty strings
+    - Preserves order
+    - Deduplicates deterministically
+    - Returns JSON array string
+    """
+    if genres is None:
+        return "[]"
+    if isinstance(genres, str):
+        s = genres.strip()
+        if not s:
+            return "[]"
+        try:
+            parsed = json.loads(s)
+            if not isinstance(parsed, list):
+                raise ValueError("genres JSON must be an array")
+            items = parsed
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid genres JSON: {genres}")
+    elif isinstance(genres, (list, tuple)):
+        items = list(genres)
+    else:
+        raise ValueError("genres must be a list, tuple, JSON array string, or None")
+
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for g in items:
+        if not isinstance(g, str):
+            raise ValueError(f"Genre item must be a string, got {type(g).__name__}")
+        trimmed = g.strip()
+        if trimmed and trimmed not in seen:
+            seen.add(trimmed)
+            cleaned.append(trimmed)
+
+    return json.dumps(cleaned, ensure_ascii=False, separators=(',', ':'))
+
+
+def canonicalize_payload_json(payload: str | dict | list) -> str:
+    """Validate and canonically serialize provider snapshot payload JSON."""
+    if isinstance(payload, (dict, list)):
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    if isinstance(payload, str):
+        parsed = json.loads(payload)
+        return json.dumps(parsed, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    raise ValueError(f"payload_json must be a JSON string, dict, or list, got {type(payload).__name__}")
+
+
+def upsert_provider_snapshot(
+    db: sqlite3.Connection,
+    external_id_id: int,
+    snapshot_kind: str,
+    locale: str,
+    payload_json: str | dict | list,
+    fetched_at: str | datetime | None = None,
+    *,
+    raise_on_error: bool = False,
+) -> dict[str, Any]:
+    """Upsert a provider snapshot for an external ID, kind, and locale.
+
+    Validates external_id exists, canonicalizes payload_json, and preserves row ID
+    on update. Does NOT mutate works or external_ids.
+    """
+    if not isinstance(external_id_id, int) or isinstance(external_id_id, bool) or external_id_id <= 0:
+        if raise_on_error:
+            raise ValueError(f"Invalid external_id_id: {external_id_id}")
+        return {"ok": False, "error": "INVALID_EXTERNAL_ID", "message": f"Invalid external_id_id: {external_id_id}"}
+
+    ext = db.execute("SELECT id FROM external_ids WHERE id = ?", (external_id_id,)).fetchone()
+    if ext is None:
+        if raise_on_error:
+            raise ValueError(f"external_id {external_id_id} not found")
+        return {"ok": False, "error": "EXTERNAL_ID_NOT_FOUND", "message": f"external_id {external_id_id} not found"}
+
+    kind_clean = str(snapshot_kind or "").strip()
+    if not kind_clean:
+        if raise_on_error:
+            raise ValueError("snapshot_kind must not be empty")
+        return {"ok": False, "error": "INVALID_SNAPSHOT_KIND", "message": "snapshot_kind must not be empty"}
+
+    locale_clean = str(locale or "").strip()
+    if not locale_clean:
+        if raise_on_error:
+            raise ValueError("locale must not be empty")
+        return {"ok": False, "error": "INVALID_LOCALE", "message": "locale must not be empty"}
+
+    try:
+        canon_json = canonicalize_payload_json(payload_json)
+    except Exception as exc:
+        if raise_on_error:
+            raise ValueError(f"Invalid payload JSON: {exc}") from exc
+        return {"ok": False, "error": "INVALID_PAYLOAD_JSON", "message": f"Invalid payload JSON: {exc}"}
+
+    if fetched_at is None:
+        fetched_at_str = datetime.now(timezone.utc).isoformat()
+    elif isinstance(fetched_at, datetime):
+        fetched_at_str = fetched_at.astimezone(timezone.utc).isoformat()
+    elif isinstance(fetched_at, str) and fetched_at.strip():
+        fetched_at_str = fetched_at.strip()
+    else:
+        if raise_on_error:
+            raise ValueError(f"Invalid fetched_at: {fetched_at}")
+        return {"ok": False, "error": "INVALID_FETCHED_AT", "message": f"Invalid fetched_at: {fetched_at}"}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    existing = db.execute(
+        "SELECT id, created_at FROM provider_snapshots WHERE external_id_id = ? AND snapshot_kind = ? AND locale = ?",
+        (external_id_id, kind_clean, locale_clean),
+    ).fetchone()
+
+    in_tx = db.in_transaction
+    if not in_tx:
+        db.execute("BEGIN IMMEDIATE")
+    try:
+        if existing is not None:
+            snapshot_id, created_at = existing[0], existing[1]
+            db.execute(
+                """
+                UPDATE provider_snapshots
+                SET payload_json = ?, fetched_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (canon_json, fetched_at_str, now_iso, snapshot_id),
+            )
+            is_update = True
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO provider_snapshots (
+                    external_id_id, snapshot_kind, locale, payload_json, fetched_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (external_id_id, kind_clean, locale_clean, canon_json, fetched_at_str, now_iso, now_iso),
+            )
+            snapshot_id = cur.lastrowid
+            created_at = now_iso
+            is_update = False
+
+        if not in_tx:
+            db.commit()
+    except Exception:
+        if not in_tx:
+            db.rollback()
+        raise
+
+    return {
+        "ok": True,
+        "id": snapshot_id,
+        "external_id_id": external_id_id,
+        "snapshot_kind": kind_clean,
+        "locale": locale_clean,
+        "payload_json": canon_json,
+        "fetched_at": fetched_at_str,
+        "created_at": created_at,
+        "updated_at": now_iso,
+        "is_update": is_update,
+    }
+
+
+def get_provider_snapshot(
+    db: sqlite3.Connection,
+    snapshot_id_or_external_id_id: int,
+    snapshot_kind: str | None = None,
+    locale: str | None = None,
+) -> PresentationRecord:
+    """Retrieve provider snapshot record by snapshot ID or by (external_id_id, snapshot_kind, locale).
+
+    Returns PresentationRecord with ok=True on success, or ok=False with error="NOT_FOUND".
+    """
+    if snapshot_kind is None and locale is None:
+        row = db.execute(
+            """
+            SELECT id, external_id_id, snapshot_kind, locale, payload_json, fetched_at, created_at, updated_at
+            FROM provider_snapshots
+            WHERE id = ?
+            """,
+            (snapshot_id_or_external_id_id,),
+        ).fetchone()
+    else:
+        row = db.execute(
+            """
+            SELECT id, external_id_id, snapshot_kind, locale, payload_json, fetched_at, created_at, updated_at
+            FROM provider_snapshots
+            WHERE external_id_id = ? AND snapshot_kind = ? AND locale = ?
+            """,
+            (snapshot_id_or_external_id_id, str(snapshot_kind).strip(), str(locale).strip()),
+        ).fetchone()
+
+    if row is None:
+        return PresentationRecord({
+            "ok": False,
+            "error": "NOT_FOUND",
+            "message": "provider_snapshot not found",
+        })
+
+    payload_json = row[4]
+    try:
+        payload = json.loads(payload_json)
+    except Exception:
+        payload = {}
+
+    return PresentationRecord({
+        "ok": True,
+        "id": row[0],
+        "external_id_id": row[1],
+        "snapshot_kind": row[2],
+        "locale": row[3],
+        "payload_json": payload_json,
+        "payload": payload,
+        "fetched_at": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
+    })
+
+
+def upsert_work_presentation(
+    db: sqlite3.Connection,
+    work_id: int,
+    locale: str,
+    display_title: str,
+    display_original_title: str | None = None,
+    release_date: str | None = None,
+    runtime_minutes: int | None = None,
+    overview: str | None = None,
+    genres: list[Any] | tuple[Any, ...] | str | None = None,
+    source_snapshot_id: int | None = None,
+    *,
+    raise_on_error: bool = False,
+) -> dict[str, Any]:
+    """Upsert normalized presentation for a work and locale.
+
+    Validates work exists, checks source_snapshot provenance if supplied,
+    normalizes genres to deterministic JSON, and preserves row ID on update.
+    Does NOT mutate works, external_ids, or media_versions.
+    """
+    if not isinstance(work_id, int) or isinstance(work_id, bool) or work_id <= 0:
+        if raise_on_error:
+            raise ValueError(f"Invalid work_id: {work_id}")
+        return {"ok": False, "error": "INVALID_WORK_ID", "message": f"Invalid work_id: {work_id}"}
+
+    w_chk = db.execute("SELECT id FROM works WHERE id = ?", (work_id,)).fetchone()
+    if w_chk is None:
+        if raise_on_error:
+            raise ValueError(f"work {work_id} not found")
+        return {"ok": False, "error": "WORK_NOT_FOUND", "message": f"work {work_id} not found"}
+
+    locale_clean = str(locale or "").strip()
+    if not locale_clean:
+        if raise_on_error:
+            raise ValueError("locale must not be empty")
+        return {"ok": False, "error": "INVALID_LOCALE", "message": "locale must not be empty"}
+
+    title_clean = str(display_title or "").strip()
+    if not title_clean:
+        if raise_on_error:
+            raise ValueError("display_title must not be empty")
+        return {"ok": False, "error": "INVALID_DISPLAY_TITLE", "message": "display_title must not be empty"}
+
+    if runtime_minutes is not None:
+        if not isinstance(runtime_minutes, int) or isinstance(runtime_minutes, bool) or runtime_minutes < 0:
+            if raise_on_error:
+                raise ValueError(f"Invalid runtime_minutes: {runtime_minutes}")
+            return {"ok": False, "error": "INVALID_RUNTIME_MINUTES", "message": f"Invalid runtime_minutes: {runtime_minutes}"}
+
+    # Provenance consistency validation (Section 15)
+    if source_snapshot_id is not None:
+        if not isinstance(source_snapshot_id, int) or isinstance(source_snapshot_id, bool) or source_snapshot_id <= 0:
+            if raise_on_error:
+                raise ValueError(f"Invalid source_snapshot_id: {source_snapshot_id}")
+            return {"ok": False, "error": "INVALID_SOURCE_SNAPSHOT_ID", "message": f"Invalid source_snapshot_id: {source_snapshot_id}"}
+
+        snap_row = db.execute(
+            """
+            SELECT ps.id, e.work_id
+            FROM provider_snapshots ps
+            JOIN external_ids e ON e.id = ps.external_id_id
+            WHERE ps.id = ?
+            """,
+            (source_snapshot_id,),
+        ).fetchone()
+
+        if snap_row is None:
+            if raise_on_error:
+                raise ValueError(f"source_snapshot {source_snapshot_id} not found")
+            return {"ok": False, "error": "SNAPSHOT_NOT_FOUND", "message": f"source_snapshot {source_snapshot_id} not found"}
+
+        snap_work_id = snap_row[1]
+        if snap_work_id != work_id:
+            if raise_on_error:
+                raise ValueError(f"PRESENTATION_SOURCE_WORK_MISMATCH: snapshot belongs to work {snap_work_id}, not {work_id}")
+            return {
+                "ok": False,
+                "error": "PRESENTATION_SOURCE_WORK_MISMATCH",
+                "message": f"Source snapshot {source_snapshot_id} belongs to work {snap_work_id}, not {work_id}",
+                "work_id": work_id,
+                "snapshot_work_id": snap_work_id,
+            }
+
+    try:
+        genres_json = normalize_genres(genres)
+    except Exception as exc:
+        if raise_on_error:
+            raise ValueError(f"Invalid genres: {exc}") from exc
+        return {"ok": False, "error": "INVALID_GENRES", "message": f"Invalid genres: {exc}"}
+
+    orig_clean = str(display_original_title).strip() if display_original_title else None
+    rel_clean = str(release_date).strip() if release_date else None
+    over_clean = str(overview).strip() if overview else None
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    existing = db.execute(
+        "SELECT id, created_at FROM work_presentations WHERE work_id = ? AND locale = ?",
+        (work_id, locale_clean),
+    ).fetchone()
+
+    in_tx = db.in_transaction
+    if not in_tx:
+        db.execute("BEGIN IMMEDIATE")
+    try:
+        if existing is not None:
+            pres_id, created_at = existing[0], existing[1]
+            db.execute(
+                """
+                UPDATE work_presentations
+                SET source_snapshot_id = ?,
+                    display_title = ?,
+                    display_original_title = ?,
+                    release_date = ?,
+                    runtime_minutes = ?,
+                    overview = ?,
+                    genres_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    source_snapshot_id,
+                    title_clean,
+                    orig_clean,
+                    rel_clean,
+                    runtime_minutes,
+                    over_clean,
+                    genres_json,
+                    now_iso,
+                    pres_id,
+                ),
+            )
+            is_update = True
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO work_presentations (
+                    work_id, locale, source_snapshot_id, display_title, display_original_title,
+                    release_date, runtime_minutes, overview, genres_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    work_id,
+                    locale_clean,
+                    source_snapshot_id,
+                    title_clean,
+                    orig_clean,
+                    rel_clean,
+                    runtime_minutes,
+                    over_clean,
+                    genres_json,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            pres_id = cur.lastrowid
+            created_at = now_iso
+            is_update = False
+
+        if not in_tx:
+            db.commit()
+    except Exception:
+        if not in_tx:
+            db.rollback()
+        raise
+
+    return {
+        "ok": True,
+        "id": pres_id,
+        "work_id": work_id,
+        "locale": locale_clean,
+        "source_snapshot_id": source_snapshot_id,
+        "display_title": title_clean,
+        "display_original_title": orig_clean,
+        "release_date": rel_clean,
+        "runtime_minutes": runtime_minutes,
+        "overview": over_clean,
+        "genres_json": genres_json,
+        "genres": json.loads(genres_json),
+        "created_at": created_at,
+        "updated_at": now_iso,
+        "is_update": is_update,
+    }
+
+
+def get_work_presentation(
+    db: sqlite3.Connection,
+    work_id: int,
+    locale: str,
+) -> PresentationRecord:
+    """Retrieve normalized presentation record for a work and locale.
+
+    Returns PresentationRecord with ok=True on success, or ok=False with error="NOT_FOUND".
+    """
+    row = db.execute(
+        """
+        SELECT id, work_id, locale, source_snapshot_id, display_title, display_original_title,
+               release_date, runtime_minutes, overview, genres_json, created_at, updated_at
+        FROM work_presentations
+        WHERE work_id = ? AND locale = ?
+        """,
+        (work_id, str(locale).strip()),
+    ).fetchone()
+
+    if row is None:
+        return PresentationRecord({
+            "ok": False,
+            "error": "NOT_FOUND",
+            "message": f"work_presentation not found for work_id={work_id}, locale={locale}",
+        })
+
+    g_json = row[9] or "[]"
+    try:
+        genres = json.loads(g_json)
+    except Exception:
+        genres = []
+
+    return PresentationRecord({
+        "ok": True,
+        "id": row[0],
+        "work_id": row[1],
+        "locale": row[2],
+        "source_snapshot_id": row[3],
+        "display_title": row[4],
+        "display_original_title": row[5],
+        "release_date": row[6],
+        "runtime_minutes": row[7],
+        "overview": row[8],
+        "genres_json": g_json,
+        "genres": genres,
+        "created_at": row[10],
+        "updated_at": row[11],
+    })
 
 
 def main(argv=None) -> int:
