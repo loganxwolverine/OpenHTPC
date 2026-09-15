@@ -91,6 +91,7 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_text_entry.py",
         "tests/test_media_manual_search_ui.py",
     ],
+    "media-flex-poster": ["tests/test_media_flex_poster.py"],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_presentation_db.py",
@@ -102,6 +103,7 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_media_provider_tmdb_details.py",
         "tests/test_media_presentation_refresh.py",
         "tests/test_media_artwork_cache.py",
+        "tests/test_media_flex_poster.py",
         "tests/test_media_match_human_resolution.py",
         "tests/test_media_match_ui.py",
         "tests/test_media_match_manual_search.py",

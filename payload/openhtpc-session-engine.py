@@ -16,6 +16,7 @@ import importlib.machinery
 import re
 import shlex
 import sys
+import time
 
 _optical_spec = importlib.util.spec_from_file_location("openhtpc_optical_presentation", pathlib.Path(__file__).with_name("openhtpc-optical.py"))
 _optical_model = importlib.util.module_from_spec(_optical_spec); _optical_spec.loader.exec_module(_optical_model)
@@ -291,6 +292,90 @@ def write_media_model_state(home: pathlib.Path, generation: str, sources: list[d
     return target
 
 
+_POSTER_TOKEN_RE = re.compile(r"^/[A-Za-z0-9_-]+\.jpg$")
+_MAX_POSTER_TOKEN_CHARS = 128
+_MAX_POSTER_BYTES = 5_000_000
+
+
+def _canonical_poster_path(poster_path: str, home: pathlib.Path) -> pathlib.Path | None:
+    """Resolve canonical cache path for a validated TMDb movie poster token."""
+    if not isinstance(poster_path, str) or len(poster_path) > _MAX_POSTER_TOKEN_CHARS or not _POSTER_TOKEN_RE.fullmatch(poster_path):
+        return None
+    material = f"tmdb_movie|poster|w500|{poster_path}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return home / ".cache/openhtpc/media/artwork/tmdb_movie/poster/w500" / f"{digest}.jpg"
+
+
+def _project_work_poster(home: pathlib.Path, work_id: int, payload_json: str | None, uid: int) -> pathlib.Path | None:
+    """Safely project a verified cached poster to an ephemeral short symlink in /tmp.
+
+    Stale symlinks from previous presentations are unlinked.
+    Non-symlink objects at the alias path are never blindly overwritten.
+    Returns the short symlink Path if valid, or None (fallback to generic icon).
+    """
+    if type(work_id) is not int or work_id <= 0:
+        return None
+    alias_path = pathlib.Path(f"/tmp/ohtpc-{uid}-p{work_id}.jpg")
+
+    def _cleanup_stale_alias() -> None:
+        if alias_path.is_symlink():
+            try:
+                alias_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    if payload_json is None:
+        _cleanup_stale_alias()
+        return None
+
+    try:
+        payload = json.loads(payload_json)
+    except Exception:
+        _cleanup_stale_alias()
+        return None
+
+    if not isinstance(payload, dict):
+        _cleanup_stale_alias()
+        return None
+
+    token = payload.get("poster_path")
+    canonical_target = _canonical_poster_path(token, home)
+    if canonical_target is None:
+        _cleanup_stale_alias()
+        return None
+
+    try:
+        if canonical_target.is_symlink() or not canonical_target.is_file():
+            _cleanup_stale_alias()
+            return None
+        st = canonical_target.stat()
+        if not (0 < st.st_size <= _MAX_POSTER_BYTES):
+            _cleanup_stale_alias()
+            return None
+    except OSError:
+        _cleanup_stale_alias()
+        return None
+
+    # Defense against unsafe pre-existing non-symlink object at alias path
+    if alias_path.exists(follow_symlinks=False) and not alias_path.is_symlink():
+        return None
+
+    # Atomic symlink update
+    temp_alias = pathlib.Path(f"/tmp/.ohtpc-{uid}-p{work_id}-{os.getpid()}-{time.time_ns()}.tmp")
+    try:
+        temp_alias.symlink_to(canonical_target)
+        os.replace(temp_alias, alias_path)
+        return alias_path
+    except OSError:
+        try:
+            if temp_alias.is_symlink() or temp_alias.exists(follow_symlinks=False):
+                temp_alias.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _cleanup_stale_alias()
+        return None
+
+
 def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: pathlib.Path, generation: str = "test-generation", manifest_target: pathlib.Path | None = None) -> tuple[str, str]:
     """Build a bounded complete media graph before the persistent Flex starts."""
     sections: list[str] = []
@@ -326,7 +411,9 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     # Preload identity map from media.db if present (single read-only pass)
     media_db_path = home / ".local/share/openhtpc/media/media.db"
     identity_map: dict[tuple[str, str], dict[str, Any]] = {}
+    work_posters: dict[int, pathlib.Path] = {}
     if media_db_path.is_file():
+        pres_map: dict[int, str] = {}
         try:
             import sqlite3
             with sqlite3.connect(f"file:{media_db_path}?mode=ro", uri=True) as db:
@@ -350,8 +437,32 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "year": r[7],
                         "original_title": r[8],
                     }
+
+                # DEV6B2: Batch presentation lookup for fr-FR movie posters
+                # Provenance chain: work_presentations -> provider_snapshots -> external_ids
+                pres_rows = db.execute(
+                    """
+                    SELECT wp.work_id, ps.payload_json
+                    FROM work_presentations wp
+                    JOIN provider_snapshots ps ON ps.id = wp.source_snapshot_id
+                    JOIN external_ids e ON e.id = ps.external_id_id
+                    WHERE wp.locale = 'fr-FR'
+                      AND ps.snapshot_kind = 'MOVIE_DETAILS'
+                      AND ps.locale = 'fr-FR'
+                      AND e.provider = 'tmdb_movie'
+                      AND e.work_id = wp.work_id
+                    """
+                ).fetchall()
+                pres_map = {r[0]: r[1] for r in pres_rows}
         except Exception:
             identity_map = {}
+            pres_map = {}
+
+        distinct_work_ids = {info["work_id"] for info in identity_map.values() if info.get("work_id") is not None}
+        for wid in distinct_work_ids:
+            poster_link = _project_work_poster(home, wid, pres_map.get(wid), uid)
+            if poster_link is not None:
+                work_posters[wid] = poster_link
 
     # Load UI helper for resolver menu construction
     match_ui = None
@@ -407,6 +518,11 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         ident = identity_map.get((source_id, relative.as_posix()))
                         mv_id = ident.get("media_version_id") if ident else None
                         state = ident.get("identification_state") if ident else "UNMATCHED"
+                        work_id = ident.get("work_id") if ident else None
+
+                        item_icon = work_posters.get(work_id) if work_id is not None else None
+                        if item_icon is None:
+                            item_icon = entry_icon
 
                         if state == "AUTO_MATCHED":
                             context_title = "CONFIRMER / CHANGER L’IDENTIFICATION"
@@ -442,7 +558,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                             ])
                             sections.append(f"[{res_menu}]\n{no_cand_body}")
 
-                        entries.append((f"{title}  ·  {ext[1:].upper()}", entry_icon, command, context_cmd, context_title))
+                        entries.append((f"{title}  ·  {ext[1:].upper()}", item_icon, command, context_cmd, context_title))
             except OSError:
                 continue
         if resolved == source_root.resolve():

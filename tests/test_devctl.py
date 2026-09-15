@@ -44,6 +44,12 @@ def test_media_artwork_profile_is_in_media_foundation():
     assert artwork in devctl.TEST_PROFILES["media-foundation"]
 
 
+def test_media_flex_poster_profile_is_in_media_foundation():
+    poster = "tests/test_media_flex_poster.py"
+    assert devctl.TEST_PROFILES["media-flex-poster"] == [poster]
+    assert poster in devctl.TEST_PROFILES["media-foundation"]
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _fake_completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
