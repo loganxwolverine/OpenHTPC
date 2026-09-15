@@ -38,6 +38,12 @@ devctl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(devctl)
 
 
+def test_media_artwork_profile_is_in_media_foundation():
+    artwork = "tests/test_media_artwork_cache.py"
+    assert devctl.TEST_PROFILES["media-artwork"] == [artwork]
+    assert artwork in devctl.TEST_PROFILES["media-foundation"]
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _fake_completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
