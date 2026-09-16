@@ -483,6 +483,40 @@ def _chunk_synopsis(overview: str, max_row_bytes: int = 120, max_rows: int = 2) 
     return rows if rows else ["Aucun synopsis disponible."]
 
 
+def _chunk_synopsis_properties(overview: str, max_chunk_bytes: int = 135, max_chunks: int = 16) -> list[str]:
+    """Split overview text into word-bounded chunks suitable for Synopsis1..N INI properties."""
+    cleaned = ini_value(overview.replace("\n", " ").replace("\r", " ")).strip()
+    if not cleaned:
+        return ["Aucun synopsis disponible."]
+    words = cleaned.split()
+    chunks: list[str] = []
+    current_words: list[str] = []
+    current_bytes = 0
+    for w in words:
+        w_bytes = len(w.encode("utf-8"))
+        if w_bytes > max_chunk_bytes:
+            if current_words:
+                chunks.append(" ".join(current_words))
+                current_words = []
+                current_bytes = 0
+            chunks.append(w[:max_chunk_bytes // 2])
+            continue
+        extra = 1 if current_words else 0
+        if current_bytes + extra + w_bytes <= max_chunk_bytes:
+            current_words.append(w)
+            current_bytes += extra + w_bytes
+        else:
+            if current_words:
+                chunks.append(" ".join(current_words))
+            current_words = [w]
+            current_bytes = w_bytes
+        if len(chunks) >= max_chunks:
+            break
+    if current_words and len(chunks) < max_chunks:
+        chunks.append(" ".join(current_words))
+    return chunks if chunks else ["Aucun synopsis disponible."]
+
+
 def _build_movie_detail_section(
     section_id: str,
     token: str,
@@ -494,12 +528,12 @@ def _build_movie_detail_section(
     entry_icon: pathlib.Path,
     res_menu: str,
 ) -> str:
-    """Construct one hermetic movie detail submenu [MEDIA_D...] section."""
-    entries: list[str] = []
+    """Construct one hermetic native movie detail [MEDIA_D...] section."""
+    lines: list[str] = [
+        f"[{section_id}]",
+        "Layout=MovieDetail",
+    ]
     play_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-play {token}"
-
-    # 1. Primary Play Action
-    entries.append(bounded_flex_entry(1, "LIRE LE FILM", item_icon, play_cmd))
 
     # Determine presentation validity
     is_unmatched = (ident is None) or (ident.get("work_id") is None) or (ident.get("identification_state") == "UNMATCHED")
@@ -520,7 +554,10 @@ def _build_movie_detail_section(
         if overview_val is not None and not isinstance(overview_val, str):
             is_malformed = True
 
-    # 2. Title / Original Title row
+    # 1. Poster property
+    lines.append(f"Poster={item_icon}")
+
+    # 2. Title & Original Title properties
     disp_title = ""
     disp_orig = ""
     if not is_unmatched and not is_malformed and pres_info and isinstance(pres_info.get("display_title"), str) and pres_info["display_title"].strip():
@@ -534,14 +571,16 @@ def _build_movie_detail_section(
     else:
         disp_title = ini_value(stem).strip() or "Vidéo"
 
+    while len(f"Title={disp_title}".encode("utf-8")) > 155:
+        disp_title = disp_title[:-1].rstrip()
+    lines.append(f"Title={disp_title}")
+
     if disp_orig and disp_orig.casefold() != disp_title.casefold():
-        title_label = f"{disp_title} · Titre original : {disp_orig}"
-    else:
-        title_label = disp_title
+        while len(f"OriginalTitle={disp_orig}".encode("utf-8")) > 155:
+            disp_orig = disp_orig[:-1].rstrip()
+        lines.append(f"OriginalTitle={disp_orig}")
 
-    entries.append(bounded_flex_entry(2, title_label, entry_icon, ":fork true"))
-
-    # 3. Compact Metadata row
+    # 3. Metadata property
     meta_parts: list[str] = []
     if not is_unmatched and not is_malformed:
         yr = None
@@ -568,45 +607,50 @@ def _build_movie_detail_section(
         tech_ext = ext[1:].upper() if ext else "FICHIER VIDÉO"
         if not is_unmatched and ident and ident.get("year"):
             meta_label = f"{ident['year']} · {tech_ext}"
+        elif is_unmatched:
+            meta_label = "Média local non identifié"
         else:
             meta_label = tech_ext
 
-    entries.append(bounded_flex_entry(3, meta_label, entry_icon, ":fork true"))
+    while len(f"Metadata={meta_label}".encode("utf-8")) > 155:
+        meta_label = meta_label[:-1].rstrip()
+    lines.append(f"Metadata={meta_label}")
 
-    # 4. Synopsis rows (up to 2)
+    # 4. Synopsis properties (Synopsis1..N)
     if is_unmatched:
-        synopsis_chunks = ["Fichier local non identifié."]
+        raw_synopsis = "Fichier local non identifié."
     elif is_malformed:
-        synopsis_chunks = ["Présentation non disponible."]
+        raw_synopsis = "Présentation non disponible."
     elif pres_info is not None:
         overview = pres_info.get("overview")
         if isinstance(overview, str) and overview.strip():
-            synopsis_chunks = _chunk_synopsis(overview)
+            raw_synopsis = overview
         else:
-            synopsis_chunks = ["Aucun synopsis disponible."]
+            raw_synopsis = "Aucun synopsis disponible."
     elif ident and ident.get("work_id"):
-        synopsis_chunks = ["Aucun synopsis disponible."]
+        raw_synopsis = "Aucun synopsis disponible."
     else:
-        synopsis_chunks = ["Présentation non disponible."]
+        raw_synopsis = "Présentation non disponible."
 
-    idx = 4
-    for chunk in synopsis_chunks:
-        entries.append(bounded_flex_entry(idx, chunk, entry_icon, ":fork true"))
-        idx += 1
+    synopsis_chunks = _chunk_synopsis_properties(raw_synopsis, max_chunk_bytes=135, max_chunks=16)
+    for idx, chunk in enumerate(synopsis_chunks, 1):
+        lines.append(f"Synopsis{idx}={chunk}")
 
-    # 5. Identification action
+    # 5. Exactly three focusable action entries:
+    # Entry 1: LIRE LE FILM
+    lines.append(bounded_flex_entry(1, "LIRE LE FILM", item_icon, play_cmd))
+
+    # Entry 2: CHANGER L’IDENTIFICATION / IDENTIFIER LE FILM
     if is_unmatched:
         ident_label = "IDENTIFIER LE FILM"
     else:
         ident_label = "CHANGER L’IDENTIFICATION"
-    entries.append(bounded_flex_entry(idx, ident_label, entry_icon, f":submenu {res_menu}"))
-    idx += 1
+    lines.append(bounded_flex_entry(2, ident_label, entry_icon, f":submenu {res_menu}"))
 
-    # 6. RETOUR
-    entries.append(bounded_flex_entry(idx, "RETOUR", entry_icon, ":back"))
+    # Entry 3: RETOUR
+    lines.append(bounded_flex_entry(3, "RETOUR", entry_icon, ":back"))
 
-    body = "\n".join(entries)
-    return f"[{section_id}]\n{body}"
+    return "\n".join(lines)
 
 
 def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: pathlib.Path, generation: str = "test-generation", manifest_target: pathlib.Path | None = None) -> tuple[str, str]:

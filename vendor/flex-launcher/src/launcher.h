@@ -115,6 +115,11 @@ typedef enum {
     DIRECTION_RIGHT,
 } Direction;
 
+typedef enum {
+    LAYOUT_DEFAULT = 0,
+    LAYOUT_MOVIE_DETAIL = 1
+} MenuLayout;
+
 // Program states
 typedef struct {
     bool application_launching;
@@ -176,6 +181,23 @@ typedef struct menu {
     struct menu  *back;
     char         *background_path;
     SDL_Texture  *background_texture;
+    MenuLayout   layout;
+    char         *detail_poster_path;
+    SDL_Texture  *detail_poster_texture;
+    SDL_Rect     detail_poster_rect;
+    char         *detail_title;
+    SDL_Texture  *detail_title_texture;
+    SDL_Rect     detail_title_rect;
+    char         *detail_original_title;
+    SDL_Texture  *detail_original_title_texture;
+    SDL_Rect     detail_original_title_rect;
+    char         *detail_metadata;
+    SDL_Texture  *detail_metadata_texture;
+    SDL_Rect     detail_metadata_rect;
+    char         *detail_synopsis;
+    SDL_Texture  *detail_synopsis_texture;
+    SDL_Rect     detail_synopsis_rect;
+    char         *synopsis_chunks[32];
 } Menu;
 
 typedef struct gamepad {
@@ -332,3 +354,5 @@ void quit_slideshow(void);
 void set_draw_color(void);
 void quit(int status);
 void print_version(FILE *stream);
+void free_menu_detail(Menu *menu);
+void assemble_menu_synopsis(Menu *menu);

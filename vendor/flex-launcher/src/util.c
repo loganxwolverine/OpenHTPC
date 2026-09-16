@@ -432,6 +432,50 @@ int config_handler(void *user, const char *section, const char *name, const char
             return 0;
         }
 
+        if (MATCH(name, "Layout")) {
+            if (MATCH(value, "MovieDetail")) {
+                menu->layout = LAYOUT_MOVIE_DETAIL;
+            } else {
+                menu->layout = LAYOUT_DEFAULT;
+            }
+            return 0;
+        }
+
+        if (MATCH(name, "Poster")) {
+            free(menu->detail_poster_path);
+            menu->detail_poster_path = strdup(value);
+            clean_path(menu->detail_poster_path);
+            return 0;
+        }
+
+        if (MATCH(name, "Title")) {
+            free(menu->detail_title);
+            menu->detail_title = strdup(value);
+            return 0;
+        }
+
+        if (MATCH(name, "OriginalTitle")) {
+            free(menu->detail_original_title);
+            menu->detail_original_title = strdup(value);
+            return 0;
+        }
+
+        if (MATCH(name, "Metadata")) {
+            free(menu->detail_metadata);
+            menu->detail_metadata = strdup(value);
+            return 0;
+        }
+
+        if (strncmp(name, "Synopsis", 8) == 0) {
+            int idx = atoi(name + 8);
+            if (idx <= 0) idx = 1;
+            if (idx < 32) {
+                free(menu->synopsis_chunks[idx]);
+                menu->synopsis_chunks[idx] = strdup(value);
+            }
+            return 0;
+        }
+
         // Parse entry line for title, icon path, command
         char *string = (char*) value;
         char *token;
@@ -1089,12 +1133,96 @@ Menu *create_menu(const char *menu_name, size_t *num_menus)
         .highlight_position = 0,
         .rendered = false,
         .background_path = NULL,
-        .background_texture = NULL
+        .background_texture = NULL,
+        .layout = LAYOUT_DEFAULT,
+        .detail_poster_path = NULL,
+        .detail_poster_texture = NULL,
+        .detail_title = NULL,
+        .detail_title_texture = NULL,
+        .detail_original_title = NULL,
+        .detail_original_title_texture = NULL,
+        .detail_metadata = NULL,
+        .detail_metadata_texture = NULL,
+        .detail_synopsis = NULL,
+        .detail_synopsis_texture = NULL
     };
+    for (int i = 0; i < 32; i++)
+        menu->synopsis_chunks[i] = NULL;
     menu->name = strdup(menu_name);
     (*num_menus)++;
     
     return menu;
+}
+
+void free_menu_detail(Menu *menu)
+{
+    if (menu == NULL) return;
+    if (menu->detail_poster_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_poster_texture);
+        menu->detail_poster_texture = NULL;
+    }
+    if (menu->detail_title_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_title_texture);
+        menu->detail_title_texture = NULL;
+    }
+    if (menu->detail_original_title_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_original_title_texture);
+        menu->detail_original_title_texture = NULL;
+    }
+    if (menu->detail_metadata_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_metadata_texture);
+        menu->detail_metadata_texture = NULL;
+    }
+    if (menu->detail_synopsis_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_synopsis_texture);
+        menu->detail_synopsis_texture = NULL;
+    }
+    for (int i = 0; i < 32; i++) {
+        if (menu->synopsis_chunks[i] != NULL) {
+            free(menu->synopsis_chunks[i]);
+            menu->synopsis_chunks[i] = NULL;
+        }
+    }
+    free(menu->detail_poster_path);
+    menu->detail_poster_path = NULL;
+    free(menu->detail_title);
+    menu->detail_title = NULL;
+    free(menu->detail_original_title);
+    menu->detail_original_title = NULL;
+    free(menu->detail_metadata);
+    menu->detail_metadata = NULL;
+    free(menu->detail_synopsis);
+    menu->detail_synopsis = NULL;
+}
+
+void assemble_menu_synopsis(Menu *menu)
+{
+    if (menu == NULL || menu->detail_synopsis != NULL) return;
+    size_t total_len = 0;
+    for (int i = 1; i < 32; i++) {
+        if (menu->synopsis_chunks[i] != NULL) {
+            total_len += strlen(menu->synopsis_chunks[i]) + 1;
+        }
+    }
+    if (total_len > 0) {
+        menu->detail_synopsis = malloc(total_len + 1);
+        if (menu->detail_synopsis != NULL) {
+            menu->detail_synopsis[0] = '\0';
+            size_t written = 0;
+            for (int i = 1; i < 32; i++) {
+                if (menu->synopsis_chunks[i] != NULL) {
+                    if (written > 0) {
+                        strcat(menu->detail_synopsis, " ");
+                        written++;
+                    }
+                    strcat(menu->detail_synopsis, menu->synopsis_chunks[i]);
+                    written += strlen(menu->synopsis_chunks[i]);
+                    free(menu->synopsis_chunks[i]);
+                    menu->synopsis_chunks[i] = NULL;
+                }
+            }
+        }
+    }
 }
 
 // A function to advance X spaces in the entry linked list (left or right)

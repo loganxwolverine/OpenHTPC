@@ -405,6 +405,51 @@ SDL_Texture *render_text_texture(const char *text, TextInfo *info, SDL_Rect *rec
     return load_texture(surface);
 }
 
+// A function to render multi-line word-wrapped UTF-8 text into a texture
+SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, SDL_Color color, int wrap_width, int max_height, SDL_Rect *out_rect)
+{
+    if (out_rect != NULL) {
+        out_rect->w = 0;
+        out_rect->h = 0;
+    }
+    if (text == NULL || font == NULL || wrap_width <= 0)
+        return NULL;
+
+    const char *p = text;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+    if (*p == '\0')
+        return NULL;
+
+    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, p, color, (Uint32) wrap_width);
+    if (surface == NULL) {
+        log_error("Could not render wrapped text: %s", TTF_GetError());
+        return NULL;
+    }
+
+    if (max_height > 0 && surface->h > max_height) {
+        SDL_Surface *clipped = SDL_CreateRGBSurfaceWithFormat(0, surface->w, max_height, 32, SDL_PIXELFORMAT_ARGB8888);
+        if (clipped != NULL) {
+            Uint32 clear_color = SDL_MapRGBA(clipped->format, 0, 0, 0, 0);
+            SDL_FillRect(clipped, NULL, clear_color);
+            SDL_Rect src_rect = {0, 0, surface->w, max_height};
+            SDL_BlitSurface(surface, &src_rect, clipped, NULL);
+            SDL_FreeSurface(surface);
+            surface = clipped;
+        }
+    }
+
+    int final_w = surface->w;
+    int final_h = surface->h;
+    SDL_Texture *texture = load_texture(surface);
+    if (texture != NULL && out_rect != NULL) {
+        out_rect->w = final_w;
+        out_rect->h = final_h;
+    }
+    return texture;
+}
+
+
 // A function to load a font from a file
 int load_font(TextInfo *info, const char *default_font)
 {

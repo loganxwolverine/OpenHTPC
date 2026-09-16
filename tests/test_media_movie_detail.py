@@ -295,16 +295,17 @@ def test_02_detail_lire_le_film_uses_exact_existing_resource_token(env):
 # ==============================================================================
 
 def test_03_detail_page_valid_cached_poster(env):
-    """3. Valid cached poster projection appears as icon on detail Entry 1."""
+    """3. Valid cached poster projection appears as Poster property."""
     _seed_movie(env)
     _seed_presentation(env, poster_path="/poster123.jpg")
     _write_canonical_cache(env["home"], "/poster123.jpg")
     alias = env["track_alias"](1)
 
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
-    entry1 = [l for l in sections_text.splitlines() if "LIRE LE FILM" in l][0]
-    parts = entry1.split(";")
-    assert parts[1] == str(alias)
+    detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
+    lines = _get_section_lines(sections_text, detail_sec)
+    poster_line = [l for l in lines if l.startswith("Poster=")][0]
+    assert poster_line == f"Poster={alias}"
     assert alias.is_symlink()
 
 
@@ -319,10 +320,11 @@ def test_04_poster_cache_miss_fallback(env):
     alias = env["track_alias"](1)
 
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
-    entry1 = [l for l in sections_text.splitlines() if "LIRE LE FILM" in l][0]
-    parts = entry1.split(";")
-    assert str(alias) not in parts[1]
-    assert "ohtpc-" in parts[1] or str(env["media_icon"]) in parts[1]
+    detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
+    lines = _get_section_lines(sections_text, detail_sec)
+    poster_line = [l for l in lines if l.startswith("Poster=")][0]
+    assert str(alias) not in poster_line
+    assert "ohtpc-" in poster_line or str(env["media_icon"]) in poster_line
 
 
 # ==============================================================================
@@ -337,9 +339,8 @@ def test_05_correct_display_title(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    title_line = lines[1]
-    assert title_line.startswith("Entry2=The Thing (1982)")
-    assert ":fork true" in title_line
+    title_line = [l for l in lines if l.startswith("Title=")][0]
+    assert title_line == "Title=The Thing (1982)"
 
 
 # ==============================================================================
@@ -354,9 +355,9 @@ def test_06_original_title_omitted_when_identical(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    title_line = lines[1]
-    assert title_line.split(";")[0] == "Entry2=The Thing"
-    assert "Titre original" not in title_line
+    title_line = [l for l in lines if l.startswith("Title=")][0]
+    assert title_line == "Title=The Thing"
+    assert not any(l.startswith("OriginalTitle=") for l in lines)
 
 
 # ==============================================================================
@@ -371,8 +372,10 @@ def test_07_original_title_shown_when_different(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    title_line = lines[1]
-    assert title_line.split(";")[0] == "Entry2=La Chose · Titre original : The Thing"
+    title_line = [l for l in lines if l.startswith("Title=")][0]
+    orig_line = [l for l in lines if l.startswith("OriginalTitle=")][0]
+    assert title_line == "Title=La Chose"
+    assert orig_line == "OriginalTitle=The Thing"
 
 
 # ==============================================================================
@@ -396,7 +399,7 @@ def test_08_runtime_formatting(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    meta_line = lines[2]
+    meta_line = [l for l in lines if l.startswith("Metadata=")][0]
     assert "1 h 49" in meta_line
 
 
@@ -418,8 +421,8 @@ def test_09_date_year_formatting(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    meta_line = lines[2]
-    assert meta_line.startswith("Entry3=1982")
+    meta_line = [l for l in lines if l.startswith("Metadata=")][0]
+    assert "1982" in meta_line
 
 
 # ==============================================================================
@@ -441,7 +444,7 @@ def test_10_genre_formatting(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    meta_line = lines[2]
+    meta_line = [l for l in lines if l.startswith("Metadata=")][0]
     assert "Horreur, Mystère, Science-Fiction" in meta_line
 
 
@@ -458,9 +461,8 @@ def test_11_synopsis_displayed(env):
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    synopsis_line = lines[3]
+    synopsis_line = [l for l in lines if l.startswith("Synopsis1=")][0]
     assert overview in synopsis_line
-    assert ":fork true" in synopsis_line
 
 
 # ==============================================================================
@@ -468,26 +470,25 @@ def test_11_synopsis_displayed(env):
 # ==============================================================================
 
 def test_12_long_synopsis_safely_bounded(env):
-    """12. Long synopsis is chunked into at most two rows and bounded safely."""
+    """12. Long synopsis is chunked into bounded properties."""
     long_overview = (
         "Au cœur de l'Antarctique, une équipe de scientifiques découvre un vaisseau spatial "
         "enfoui sous la glace depuis des millénaires. En explorant l'épave, ils libèrent accidentellement "
         "une créature extraterrestre capable d'assimiler et d'imiter parfaitement toute forme de vie. "
         "La paranoïa s'installe alors parmi les membres de la base isolée du reste du monde."
     )
-    chunks = session_engine._chunk_synopsis(long_overview, max_row_bytes=120, max_rows=2)
-    assert 1 <= len(chunks) <= 2
-    assert all(len(c.encode("utf-8")) <= 120 for c in chunks)
-    if len(chunks) == 2:
-        assert chunks[1].endswith("…")
+    chunks = session_engine._chunk_synopsis_properties(long_overview, max_chunk_bytes=135, max_chunks=16)
+    assert 1 <= len(chunks) <= 16
+    assert all(len(c.encode("utf-8")) <= 135 for c in chunks)
 
     _seed_movie(env)
     _seed_presentation(env, overview=long_overview)
     _root, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"])
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
-    synopsis_entries = [l for l in lines if l.startswith("Entry4=") or l.startswith("Entry5=")]
+    synopsis_entries = [l for l in lines if l.startswith("Synopsis")]
     assert len(synopsis_entries) >= 1
+    assert all(len(l.encode("utf-8")) <= 160 for l in synopsis_entries)
 
 
 # ==============================================================================
@@ -529,9 +530,10 @@ def test_14_semicolon_newline_injection_sanitized(env):
     for line in lines:
         assert "\n" not in line
         assert "\r" not in line
-        parts = line.split(";")
-        # No extra fields injected into Flex entry
-        assert len(parts) in (3, 5)
+        if line.startswith("Entry"):
+            parts = line.split(";")
+            # No extra fields injected into Flex entry
+            assert len(parts) in (3, 5)
 
 
 # ==============================================================================
@@ -601,7 +603,8 @@ def test_17_unmatched_exposes_identifier_le_film(env):
 
     assert any("IDENTIFIER LE FILM" in l for l in lines)
     assert any("Fichier local non identifié." in l for l in lines)
-    assert lines[0].startswith("Entry1=LIRE LE FILM;")
+    entry1 = [l for l in lines if l.startswith("Entry1=")][0]
+    assert entry1.startswith("Entry1=LIRE LE FILM;")
 
 
 # ==============================================================================
@@ -652,8 +655,9 @@ def test_20_missing_presentation_remains_playable(env):
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
 
-    assert lines[0].startswith("Entry1=LIRE LE FILM;")
-    assert "openhtpc-play" in lines[0]
+    entry1 = [l for l in lines if l.startswith("Entry1=")][0]
+    assert entry1.startswith("Entry1=LIRE LE FILM;")
+    assert "openhtpc-play" in entry1
     assert any("Aucun synopsis disponible." in l for l in lines)
 
 
@@ -670,8 +674,9 @@ def test_21_malformed_presentation_remains_playable(env):
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
 
-    assert lines[0].startswith("Entry1=LIRE LE FILM;")
-    assert "openhtpc-play" in lines[0]
+    entry1 = [l for l in lines if l.startswith("Entry1=")][0]
+    assert entry1.startswith("Entry1=LIRE LE FILM;")
+    assert "openhtpc-play" in entry1
     assert any("Présentation non disponible." in l for l in lines)
 
 
@@ -688,8 +693,9 @@ def test_22_missing_poster_remains_playable(env):
     detail_sec = [l for l in sections_text.splitlines() if l.startswith("[MEDIA_D")][0]
     lines = _get_section_lines(sections_text, detail_sec)
 
-    assert lines[0].startswith("Entry1=LIRE LE FILM;")
-    assert "openhtpc-play" in lines[0]
+    entry1 = [l for l in lines if l.startswith("Entry1=")][0]
+    assert entry1.startswith("Entry1=LIRE LE FILM;")
+    assert "openhtpc-play" in entry1
 
 
 # ==============================================================================
@@ -796,7 +802,7 @@ def test_28_playback_lifecycle_architecture_retains_detail_current_menu(env):
 
     # In MEDIA_D, Entry 1 is synchronous openhtpc-play command (tracked by Flex lifecycle)
     detail_lines = _get_section_lines(sections_text, f"[{target_menu}]")
-    play_line = detail_lines[0]
+    play_line = [l for l in detail_lines if l.startswith("Entry1=")][0]
     assert play_line.startswith("Entry1=LIRE LE FILM;")
     assert "$HOME/.local/lib/openhtpc/openhtpc-play" in play_line
 

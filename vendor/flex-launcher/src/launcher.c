@@ -38,6 +38,7 @@ static void init_slideshow(void);
 static void init_screensaver(void);
 static void calculate_button_geometry(Entry *entry, int buttons);
 static void render_buttons(Menu *menu);
+static void free_menu_detail_textures(Menu *menu);
 static void move_left(void);
 static void move_right(void);
 static void load_submenu(const char *submenu);
@@ -57,6 +58,7 @@ static void disconnect_gamepad(int id, bool disconnect, bool remove);
 static void open_controller(Gamepad *gamepad, bool raise_error);
 static void cleanup(void);
 static bool is_media_sidebar(void);
+static bool is_movie_detail(const Menu *menu);
 static bool is_media_list(void);
 
 // Initialize default settings
@@ -385,6 +387,7 @@ static void cleanup()
     Menu *menu = config.first_menu;
     Menu *tmp_menu = NULL;
     for (size_t i = 0; i < config.num_menus; i++) {
+        free_menu_detail(menu);
         free(menu->name);
         entry = menu->first_entry;
         for(size_t j = 0; j < menu->num_entries; j++) {
@@ -441,10 +444,19 @@ static bool is_media_sidebar(void)
     );
 }
 
+static bool is_movie_detail(const Menu *menu)
+{
+    if (menu == NULL) return false;
+    if (menu->layout == LAYOUT_MOVIE_DETAIL) return true;
+    if (menu->name != NULL && strncmp(menu->name, "MEDIA_D", 7) == 0) return true;
+    return false;
+}
+
 static bool is_media_list(void)
 {
     return current_menu != NULL && current_menu->name != NULL &&
-        strncmp(current_menu->name, "MEDIA", 5) == 0;
+        strncmp(current_menu->name, "MEDIA", 5) == 0 &&
+        !is_movie_detail(current_menu);
 }
 
 static bool __attribute__((unused)) is_system_dashboard(void)
@@ -1024,7 +1036,7 @@ static void calculate_button_geometry(Entry *entry, int buttons)
         return;
     }
 
-    if (is_disc_sheet() || is_system_subpage()) {
+    if (is_disc_sheet() || is_system_subpage() || is_movie_detail(current_menu)) {
         int gap = (geo.screen_width * 15) / 1000;
         int max_w = (buttons <= 2) ? (geo.screen_width * 36) / 100 : (buttons <= 3) ? (geo.screen_width * 28) / 100 : (geo.screen_width * 22) / 100;
         int avail_w = (geo.screen_width * 88) / 100;
@@ -1045,7 +1057,7 @@ static void calculate_button_geometry(Entry *entry, int buttons)
                 int stack_y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
                 entry->text_rect.x = entry->icon_rect.x + (width - entry->text_rect.w) / 2;
                 entry->text_rect.y = stack_y + icon_size + safety_margin;
-            } else if (is_disc_action_sheet()) {
+            } else if (is_disc_action_sheet() || is_movie_detail(current_menu)) {
                 if (entry->icon != NULL) {
                     int icon_size = (geo.screen_height * 34) / 1000;
                     int icon_gap = (geo.screen_width * 6) / 1000;
@@ -1328,12 +1340,153 @@ static void render_buttons(Menu *menu)
 {
     Entry *entry;
     int h;
+
+    if (is_movie_detail(menu)) {
+        assemble_menu_synopsis(menu);
+        free_menu_detail_textures(menu);
+
+        int box_x = (geo.screen_width * 6) / 100;
+        int box_y = (geo.screen_height * 9) / 100;
+        int box_w = (geo.screen_width * 26) / 100;
+        int box_h = (geo.screen_height * 75) / 100;
+
+        if (menu->detail_poster_path != NULL && menu->detail_poster_texture == NULL) {
+            menu->detail_poster_texture = load_texture_from_file(menu->detail_poster_path);
+        }
+
+        if (menu->detail_poster_texture != NULL) {
+            int tex_w = 0, tex_h = 0;
+            if (SDL_QueryTexture(menu->detail_poster_texture, NULL, NULL, &tex_w, &tex_h) == 0 &&
+                tex_w > 0 && tex_h > 0) {
+                double src_ratio = (double) tex_w / (double) tex_h;
+                double box_ratio = (double) box_w / (double) box_h;
+                int fit_w, fit_h;
+                if (src_ratio > box_ratio) {
+                    fit_w = box_w;
+                    fit_h = (int)(box_w / src_ratio);
+                } else {
+                    fit_h = box_h;
+                    fit_w = (int)(box_h * src_ratio);
+                }
+                menu->detail_poster_rect.x = box_x + (box_w - fit_w) / 2;
+                menu->detail_poster_rect.y = box_y + (box_h - fit_h) / 2;
+                menu->detail_poster_rect.w = fit_w;
+                menu->detail_poster_rect.h = fit_h;
+            } else {
+                menu->detail_poster_rect = (SDL_Rect){ box_x, box_y, box_w, box_h };
+            }
+        } else {
+            menu->detail_poster_rect = (SDL_Rect){ box_x, box_y, box_w, box_h };
+        }
+
+        int text_x = box_x + box_w + (geo.screen_width * 4) / 100;
+        int text_max_w = (geo.screen_width * 94) / 100 - text_x;
+        int cur_y = box_y + (geo.screen_height * 15) / 1000;
+        int dock_top_y = (geo.screen_height * 86) / 100;
+
+        const char *font_path = (config.title_font_path != NULL) ? config.title_font_path : NULL;
+        int base_pt = (config.title_font_size > 0) ? (int)config.title_font_size : 28;
+
+        // 1. Title
+        if (menu->detail_title != NULL && menu->detail_title[0] != '\0') {
+            int title_pt = (int)(base_pt * 1.35);
+            TTF_Font *title_font = NULL;
+            if (font_path != NULL) title_font = TTF_OpenFont(font_path, title_pt);
+            if (title_font == NULL) title_font = title_info.font;
+
+            menu->detail_title_texture = render_text_wrapped(
+                menu->detail_title,
+                title_font,
+                (SDL_Color){255, 255, 255, 255},
+                text_max_w,
+                (geo.screen_height * 18) / 100,
+                &menu->detail_title_rect
+            );
+            menu->detail_title_rect.x = text_x;
+            menu->detail_title_rect.y = cur_y;
+            cur_y += menu->detail_title_rect.h + (geo.screen_height * 12) / 1000;
+
+            if (title_font != title_info.font) TTF_CloseFont(title_font);
+        }
+
+        // 2. Original Title
+        if (menu->detail_original_title != NULL && menu->detail_original_title[0] != '\0') {
+            int orig_pt = (int)(base_pt * 0.85);
+            if (orig_pt < 12) orig_pt = 12;
+            TTF_Font *orig_font = NULL;
+            if (font_path != NULL) orig_font = TTF_OpenFont(font_path, orig_pt);
+            if (orig_font == NULL) orig_font = title_info.font;
+
+            menu->detail_original_title_texture = render_text_wrapped(
+                menu->detail_original_title,
+                orig_font,
+                (SDL_Color){160, 160, 160, 255},
+                text_max_w,
+                (geo.screen_height * 6) / 100,
+                &menu->detail_original_title_rect
+            );
+            menu->detail_original_title_rect.x = text_x;
+            menu->detail_original_title_rect.y = cur_y;
+            cur_y += menu->detail_original_title_rect.h + (geo.screen_height * 10) / 1000;
+
+            if (orig_font != title_info.font) TTF_CloseFont(orig_font);
+        }
+
+        // 3. Metadata
+        if (menu->detail_metadata != NULL && menu->detail_metadata[0] != '\0') {
+            int meta_pt = (int)(base_pt * 0.9);
+            if (meta_pt < 12) meta_pt = 12;
+            TTF_Font *meta_font = NULL;
+            if (font_path != NULL) meta_font = TTF_OpenFont(font_path, meta_pt);
+            if (meta_font == NULL) meta_font = title_info.font;
+
+            menu->detail_metadata_texture = render_text_wrapped(
+                menu->detail_metadata,
+                meta_font,
+                (SDL_Color){190, 200, 210, 255},
+                text_max_w,
+                (geo.screen_height * 8) / 100,
+                &menu->detail_metadata_rect
+            );
+            menu->detail_metadata_rect.x = text_x;
+            menu->detail_metadata_rect.y = cur_y;
+            cur_y += menu->detail_metadata_rect.h + (geo.screen_height * 20) / 1000;
+
+            if (meta_font != title_info.font) TTF_CloseFont(meta_font);
+        }
+
+        // 4. Synopsis
+        if (menu->detail_synopsis != NULL && menu->detail_synopsis[0] != '\0') {
+            int avail_h = dock_top_y - cur_y;
+            if (avail_h > 0) {
+                int syn_pt = (int)(base_pt * 0.85);
+                if (syn_pt < 12) syn_pt = 12;
+                TTF_Font *syn_font = NULL;
+                if (font_path != NULL) syn_font = TTF_OpenFont(font_path, syn_pt);
+                if (syn_font == NULL) syn_font = title_info.font;
+
+                menu->detail_synopsis_texture = render_text_wrapped(
+                    menu->detail_synopsis,
+                    syn_font,
+                    (SDL_Color){215, 215, 215, 255},
+                    text_max_w,
+                    avail_h,
+                    &menu->detail_synopsis_rect
+                );
+                menu->detail_synopsis_rect.x = text_x;
+                menu->detail_synopsis_rect.y = cur_y;
+
+                if (syn_font != title_info.font) TTF_CloseFont(syn_font);
+            }
+        }
+    }
+
     for (entry = menu->first_entry; entry != NULL; entry = entry->next) {
         entry->icon = load_texture_from_file(entry->icon_path);
         entry->icon_selected = (entry->icon_selected_path != NULL) ? load_texture_from_file(entry->icon_selected_path) : NULL;
         if (config.titles_enabled) {
             TextInfo media_title = title_info;
-            if (menu->name != NULL && strncmp(menu->name, "MEDIA", 5) == 0) {
+            if (menu->name != NULL && strncmp(menu->name, "MEDIA", 5) == 0 && !is_movie_detail(menu)) {
                 media_title.max_width = (entry->context_cmd != NULL)
                     ? (geo.screen_width * 48) / 100
                     : (geo.screen_width * 72) / 100;
@@ -1348,7 +1501,7 @@ static void render_buttons(Menu *menu)
                 int icon_w = ((geo.screen_height * 115) / 1000 * 2) / 3;
                 media_title.max_width = card_w - icon_w - (geo.screen_width * 5) / 100;
                 media_title.oversize_mode = OVERSIZE_TRUNCATE;
-            } else if (is_menu_disc_sheet(menu) || is_menu_system_subpage(menu)) {
+            } else if (is_menu_disc_sheet(menu) || is_menu_system_subpage(menu) || is_movie_detail(menu)) {
                 int btn_count = 0;
                 for (Entry *e = menu->first_entry; e != NULL; e = e->next) {
                     if (e->cmd == NULL || strstr(e->cmd, "openhtpc-bind-disc") == NULL) btn_count++;
@@ -1358,7 +1511,7 @@ static void render_buttons(Menu *menu)
                 int avail_w = (geo.screen_width * 88) / 100;
                 int btn_w = (avail_w - (btn_count - 1) * gap) / (btn_count > 0 ? btn_count : 1);
                 if (btn_w > max_w) btn_w = max_w;
-                if (is_menu_disc_action_sheet(menu) && entry->icon != NULL) {
+                if ((is_menu_disc_action_sheet(menu) || is_movie_detail(menu)) && entry->icon != NULL) {
                     int reserved_icon = (geo.screen_height * 34) / 1000 + (geo.screen_width * 6) / 1000;
                     media_title.max_width = btn_w - (geo.screen_width * 2) / 100 - reserved_icon;
                 } else {
@@ -1382,9 +1535,35 @@ static void render_buttons(Menu *menu)
     menu->rendered = true;
 }
 
+static void free_menu_detail_textures(Menu *menu)
+{
+    if (menu == NULL) return;
+    if (menu->detail_poster_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_poster_texture);
+        menu->detail_poster_texture = NULL;
+    }
+    if (menu->detail_title_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_title_texture);
+        menu->detail_title_texture = NULL;
+    }
+    if (menu->detail_original_title_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_original_title_texture);
+        menu->detail_original_title_texture = NULL;
+    }
+    if (menu->detail_metadata_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_metadata_texture);
+        menu->detail_metadata_texture = NULL;
+    }
+    if (menu->detail_synopsis_texture != NULL) {
+        SDL_DestroyTexture(menu->detail_synopsis_texture);
+        menu->detail_synopsis_texture = NULL;
+    }
+}
+
 static void free_menu_entries(Menu *menu)
 {
     if (menu == NULL) return;
+    free_menu_detail_textures(menu);
     Entry *entry = menu->first_entry;
     while (entry != NULL) {
         Entry *next = entry->next;
@@ -1437,6 +1616,7 @@ static void reload_menu_section(Menu *menu)
                 *end = '\0';
                 if (!strcmp(p + 1, menu->name)) {
                     in_section = true;
+                    free_menu_detail(menu);
                 } else if (in_section) {
                     break;
                 }
@@ -1458,6 +1638,50 @@ static void reload_menu_section(Menu *menu)
             free(menu->background_path);
             menu->background_path = strdup(val);
             clean_path(menu->background_path);
+            continue;
+        }
+
+        if (!strcmp(key, "Layout")) {
+            if (!strcmp(val, "MovieDetail")) {
+                menu->layout = LAYOUT_MOVIE_DETAIL;
+            } else {
+                menu->layout = LAYOUT_DEFAULT;
+            }
+            continue;
+        }
+
+        if (!strcmp(key, "Poster")) {
+            free(menu->detail_poster_path);
+            menu->detail_poster_path = strdup(val);
+            clean_path(menu->detail_poster_path);
+            continue;
+        }
+
+        if (!strcmp(key, "Title")) {
+            free(menu->detail_title);
+            menu->detail_title = strdup(val);
+            continue;
+        }
+
+        if (!strcmp(key, "OriginalTitle")) {
+            free(menu->detail_original_title);
+            menu->detail_original_title = strdup(val);
+            continue;
+        }
+
+        if (!strcmp(key, "Metadata")) {
+            free(menu->detail_metadata);
+            menu->detail_metadata = strdup(val);
+            continue;
+        }
+
+        if (strncmp(key, "Synopsis", 8) == 0) {
+            int idx = atoi(key + 8);
+            if (idx <= 0) idx = 1;
+            if (idx < 32) {
+                free(menu->synopsis_chunks[idx]);
+                menu->synopsis_chunks[idx] = strdup(val);
+            }
             continue;
         }
 
@@ -1498,6 +1722,7 @@ static void reload_menu_section(Menu *menu)
         free_menu_entries(menu);
         menu->first_entry = new_first;
         menu->num_entries = count;
+        assemble_menu_synopsis(menu);
         render_buttons(menu);
         menu->root_entry = menu->first_entry;
         menu->last_selected_entry = menu->first_entry;
@@ -1975,7 +2200,7 @@ static void draw_screen()
                 }
                 cand_entry = cand_entry->next;
             }
-        } else if (is_disc_sheet() || is_system_subpage()) {
+        } else if (is_disc_sheet() || is_system_subpage() || is_movie_detail(current_menu)) {
             Entry *action = current_menu->root_entry;
             for (int i = 0; i < geo.num_buttons && action != NULL; i++) {
                 draw_home_card(&action->icon_rect, action == current_entry);
@@ -2016,8 +2241,37 @@ static void draw_screen()
             }
         }
 
+        // Draw movie detail static elements
+        if (is_movie_detail(current_menu)) {
+            if (current_menu->detail_poster_texture != NULL) {
+                SDL_Rect poster_shadow = {
+                    current_menu->detail_poster_rect.x - 4,
+                    current_menu->detail_poster_rect.y + 4,
+                    current_menu->detail_poster_rect.w + 8,
+                    current_menu->detail_poster_rect.h + 8
+                };
+                fill_rounded_rect(renderer, &poster_shadow, 14, (SDL_Color){0, 0, 0, 140});
+                SDL_RenderCopy(renderer, current_menu->detail_poster_texture, NULL, &current_menu->detail_poster_rect);
+            } else {
+                fill_rounded_rect(renderer, &current_menu->detail_poster_rect, 14, (SDL_Color){25, 25, 30, 200});
+            }
+
+            if (current_menu->detail_title_texture != NULL) {
+                SDL_RenderCopy(renderer, current_menu->detail_title_texture, NULL, &current_menu->detail_title_rect);
+            }
+            if (current_menu->detail_original_title_texture != NULL) {
+                SDL_RenderCopy(renderer, current_menu->detail_original_title_texture, NULL, &current_menu->detail_original_title_rect);
+            }
+            if (current_menu->detail_metadata_texture != NULL) {
+                SDL_RenderCopy(renderer, current_menu->detail_metadata_texture, NULL, &current_menu->detail_metadata_rect);
+            }
+            if (current_menu->detail_synopsis_texture != NULL) {
+                SDL_RenderCopy(renderer, current_menu->detail_synopsis_texture, NULL, &current_menu->detail_synopsis_rect);
+            }
+        }
+
         // Draw highlight
-        if (config.highlight && !is_home_menu() && !is_disc_sheet() && !is_system_subpage() && !is_system_root())
+        if (config.highlight && !is_home_menu() && !is_disc_sheet() && !is_system_subpage() && !is_system_root() && !is_movie_detail(current_menu))
             SDL_RenderCopy(renderer,
                 highlight->texture,
                 NULL,
@@ -2054,7 +2308,7 @@ static void draw_screen()
                 artwork_rect.y = entry->icon_rect.y + (entry->icon_rect.h - stack_height) / 2;
                 artwork_rect.w = icon_size;
                 artwork_rect.h = icon_size;
-            } else if (is_disc_action_sheet()) {
+            } else if (is_disc_action_sheet() || is_movie_detail(current_menu)) {
                 int icon_size = (geo.screen_height * 34) / 1000;
                 int icon_gap = (geo.screen_width * 6) / 1000;
                 artwork_rect.x = entry->text_rect.x - icon_gap - icon_size;

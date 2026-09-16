@@ -34,3 +34,4 @@ SDL_Texture *rasterize_svg_from_file(const char *path, int w, int h, SDL_Rect *r
 SDL_Texture *render_highlight(int width, int height, SDL_Rect *rect);
 SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *text_height);
 SDL_Texture *render_text_texture(const char *text, TextInfo *info, SDL_Rect *rect, int *text_height);
+SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, SDL_Color color, int wrap_width, int max_height, SDL_Rect *out_rect);
