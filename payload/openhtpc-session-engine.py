@@ -376,6 +376,239 @@ def _project_work_poster(home: pathlib.Path, work_id: int, payload_json: str | N
         return None
 
 
+def _extract_year(release_date: Any, fallback_year: Any = None) -> str | None:
+    """Extract 4-digit release year from date string or fallback year."""
+    if isinstance(release_date, str) and release_date.strip():
+        m = re.match(r"^\s*(\d{4})", release_date.strip())
+        if m:
+            return m.group(1)
+    if fallback_year is not None and not isinstance(fallback_year, bool):
+        try:
+            y = int(fallback_year)
+            if 1800 <= y <= 2100:
+                return str(y)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _format_runtime(runtime_minutes: Any) -> str | None:
+    """Format movie runtime in minutes to compact French couch string (e.g. 109 -> '1 h 49')."""
+    if runtime_minutes is None or isinstance(runtime_minutes, bool):
+        return None
+    try:
+        minutes = int(runtime_minutes)
+    except (ValueError, TypeError):
+        return None
+    if minutes <= 0:
+        return None
+    if minutes < 60:
+        return f"{minutes} min"
+    hours = minutes // 60
+    rem = minutes % 60
+    if rem > 0:
+        return f"{hours} h {rem:02d}"
+    return f"{hours} h"
+
+
+def _format_genres(genres_json: Any) -> str | None:
+    """Parse genres_json safely and format as comma-separated French string."""
+    if not genres_json or not isinstance(genres_json, str):
+        return None
+    try:
+        data = json.loads(genres_json)
+    except Exception:
+        return None
+    if not isinstance(data, list):
+        return None
+    cleaned: list[str] = []
+    for g in data:
+        if isinstance(g, str) and g.strip():
+            val = ini_value(g.strip()).strip()
+            if val:
+                cleaned.append(val)
+        elif isinstance(g, dict) and isinstance(g.get("name"), str) and g["name"].strip():
+            val = ini_value(g["name"].strip()).strip()
+            if val:
+                cleaned.append(val)
+    if cleaned:
+        return ", ".join(cleaned)
+    return None
+
+
+def _chunk_synopsis(overview: str, max_row_bytes: int = 120, max_rows: int = 2) -> list[str]:
+    """Break untrusted overview into up to two Flex-safe, couch-readable rows."""
+    cleaned = ini_value(overview).strip()
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return ["Aucun synopsis disponible."]
+
+    words = cleaned.split(" ")
+    rows: list[str] = []
+    current_words: list[str] = []
+
+    i = 0
+    while i < len(words) and len(rows) < max_rows:
+        word = words[i]
+        test_line = " ".join(current_words + [word]) if current_words else word
+        if len(test_line.encode("utf-8")) <= max_row_bytes:
+            current_words.append(word)
+            i += 1
+        else:
+            if current_words:
+                rows.append(" ".join(current_words))
+                current_words = []
+            else:
+                chars: list[str] = []
+                for ch in word:
+                    if len("".join(chars + [ch]).encode("utf-8")) <= max_row_bytes:
+                        chars.append(ch)
+                    else:
+                        break
+                part1 = "".join(chars)
+                rows.append(part1)
+                remaining_word = word[len(chars):]
+                words[i] = remaining_word
+
+    if current_words and len(rows) < max_rows:
+        rows.append(" ".join(current_words))
+
+    if i < len(words) and rows:
+        last = rows[-1]
+        ellipsis = "…"
+        while last and len((last + ellipsis).encode("utf-8")) > max_row_bytes:
+            last = last[:-1].rstrip()
+        rows[-1] = last + ellipsis
+
+    return rows if rows else ["Aucun synopsis disponible."]
+
+
+def _build_movie_detail_section(
+    section_id: str,
+    token: str,
+    stem: str,
+    ext: str,
+    ident: dict[str, Any] | None,
+    pres_info: dict[str, Any] | None,
+    item_icon: pathlib.Path,
+    entry_icon: pathlib.Path,
+    res_menu: str,
+) -> str:
+    """Construct one hermetic movie detail submenu [MEDIA_D...] section."""
+    entries: list[str] = []
+    play_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-play {token}"
+
+    # 1. Primary Play Action
+    entries.append(bounded_flex_entry(1, "LIRE LE FILM", item_icon, play_cmd))
+
+    # Determine presentation validity
+    is_unmatched = (ident is None) or (ident.get("work_id") is None) or (ident.get("identification_state") == "UNMATCHED")
+    is_malformed = False
+    if pres_info is not None:
+        raw_payload = pres_info.get("payload_json")
+        if raw_payload:
+            try:
+                parsed_payload = json.loads(raw_payload)
+                if not isinstance(parsed_payload, dict):
+                    is_malformed = True
+            except Exception:
+                is_malformed = True
+        disp_title_val = pres_info.get("display_title")
+        if disp_title_val is not None and not isinstance(disp_title_val, str):
+            is_malformed = True
+        overview_val = pres_info.get("overview")
+        if overview_val is not None and not isinstance(overview_val, str):
+            is_malformed = True
+
+    # 2. Title / Original Title row
+    disp_title = ""
+    disp_orig = ""
+    if not is_unmatched and not is_malformed and pres_info and isinstance(pres_info.get("display_title"), str) and pres_info["display_title"].strip():
+        disp_title = ini_value(pres_info["display_title"]).strip()
+        if isinstance(pres_info.get("display_original_title"), str):
+            disp_orig = ini_value(pres_info["display_original_title"]).strip()
+    elif not is_unmatched and ident and isinstance(ident.get("title"), str) and ident["title"].strip():
+        disp_title = ini_value(ident["title"]).strip()
+        if isinstance(ident.get("original_title"), str):
+            disp_orig = ini_value(ident["original_title"]).strip()
+    else:
+        disp_title = ini_value(stem).strip() or "Vidéo"
+
+    if disp_orig and disp_orig.casefold() != disp_title.casefold():
+        title_label = f"{disp_title} · Titre original : {disp_orig}"
+    else:
+        title_label = disp_title
+
+    entries.append(bounded_flex_entry(2, title_label, entry_icon, ":fork true"))
+
+    # 3. Compact Metadata row
+    meta_parts: list[str] = []
+    if not is_unmatched and not is_malformed:
+        yr = None
+        if pres_info and pres_info.get("release_date"):
+            yr = _extract_year(pres_info["release_date"], ident.get("year") if ident else None)
+        elif ident and ident.get("year"):
+            yr = _extract_year(None, ident["year"])
+        if yr:
+            meta_parts.append(yr)
+
+        if pres_info and pres_info.get("runtime_minutes") is not None:
+            rt = _format_runtime(pres_info["runtime_minutes"])
+            if rt:
+                meta_parts.append(rt)
+
+        if pres_info and pres_info.get("genres_json"):
+            gn = _format_genres(pres_info["genres_json"])
+            if gn:
+                meta_parts.append(gn)
+
+    if meta_parts:
+        meta_label = " · ".join(meta_parts)
+    else:
+        tech_ext = ext[1:].upper() if ext else "FICHIER VIDÉO"
+        if not is_unmatched and ident and ident.get("year"):
+            meta_label = f"{ident['year']} · {tech_ext}"
+        else:
+            meta_label = tech_ext
+
+    entries.append(bounded_flex_entry(3, meta_label, entry_icon, ":fork true"))
+
+    # 4. Synopsis rows (up to 2)
+    if is_unmatched:
+        synopsis_chunks = ["Fichier local non identifié."]
+    elif is_malformed:
+        synopsis_chunks = ["Présentation non disponible."]
+    elif pres_info is not None:
+        overview = pres_info.get("overview")
+        if isinstance(overview, str) and overview.strip():
+            synopsis_chunks = _chunk_synopsis(overview)
+        else:
+            synopsis_chunks = ["Aucun synopsis disponible."]
+    elif ident and ident.get("work_id"):
+        synopsis_chunks = ["Aucun synopsis disponible."]
+    else:
+        synopsis_chunks = ["Présentation non disponible."]
+
+    idx = 4
+    for chunk in synopsis_chunks:
+        entries.append(bounded_flex_entry(idx, chunk, entry_icon, ":fork true"))
+        idx += 1
+
+    # 5. Identification action
+    if is_unmatched:
+        ident_label = "IDENTIFIER LE FILM"
+    else:
+        ident_label = "CHANGER L’IDENTIFICATION"
+    entries.append(bounded_flex_entry(idx, ident_label, entry_icon, f":submenu {res_menu}"))
+    idx += 1
+
+    # 6. RETOUR
+    entries.append(bounded_flex_entry(idx, "RETOUR", entry_icon, ":back"))
+
+    body = "\n".join(entries)
+    return f"[{section_id}]\n{body}"
+
+
 def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: pathlib.Path, generation: str = "test-generation", manifest_target: pathlib.Path | None = None) -> tuple[str, str]:
     """Build a bounded complete media graph before the persistent Flex starts."""
     sections: list[str] = []
@@ -413,7 +646,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     identity_map: dict[tuple[str, str], dict[str, Any]] = {}
     work_posters: dict[int, pathlib.Path] = {}
     if media_db_path.is_file():
-        pres_map: dict[int, str] = {}
+        pres_map: dict[int, dict[str, Any]] = {}
         try:
             import sqlite3
             with sqlite3.connect(f"file:{media_db_path}?mode=ro", uri=True) as db:
@@ -438,11 +671,14 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "original_title": r[8],
                     }
 
-                # DEV6B2: Batch presentation lookup for fr-FR movie posters
+                # DEV6B2 / DEV6B3: Batch presentation lookup for fr-FR movie posters & details
                 # Provenance chain: work_presentations -> provider_snapshots -> external_ids
                 pres_rows = db.execute(
                     """
-                    SELECT wp.work_id, ps.payload_json
+                    SELECT wp.work_id, ps.payload_json,
+                           wp.display_title, wp.display_original_title,
+                           wp.release_date, wp.runtime_minutes,
+                           wp.overview, wp.genres_json
                     FROM work_presentations wp
                     JOIN provider_snapshots ps ON ps.id = wp.source_snapshot_id
                     JOIN external_ids e ON e.id = ps.external_id_id
@@ -453,14 +689,25 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                       AND e.work_id = wp.work_id
                     """
                 ).fetchall()
-                pres_map = {r[0]: r[1] for r in pres_rows}
+                for r in pres_rows:
+                    pres_map[r[0]] = {
+                        "payload_json": r[1],
+                        "display_title": r[2],
+                        "display_original_title": r[3],
+                        "release_date": r[4],
+                        "runtime_minutes": r[5],
+                        "overview": r[6],
+                        "genres_json": r[7],
+                    }
         except Exception:
             identity_map = {}
             pres_map = {}
 
         distinct_work_ids = {info["work_id"] for info in identity_map.values() if info.get("work_id") is not None}
         for wid in distinct_work_ids:
-            poster_link = _project_work_poster(home, wid, pres_map.get(wid), uid)
+            pres_info = pres_map.get(wid)
+            payload_json = pres_info.get("payload_json") if pres_info else None
+            poster_link = _project_work_poster(home, wid, payload_json, uid)
             if poster_link is not None:
                 work_posters[wid] = poster_link
 
@@ -558,7 +805,22 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                             ])
                             sections.append(f"[{res_menu}]\n{no_cand_body}")
 
-                        entries.append((f"{title}  ·  {ext[1:].upper()}", item_icon, command, context_cmd, context_title))
+                        detail_menu = f"MEDIA_D{item_id[:8]}"
+                        detail_sec = _build_movie_detail_section(
+                            section_id=detail_menu,
+                            token=token,
+                            stem=stem,
+                            ext=ext,
+                            ident=ident,
+                            pres_info=pres_map.get(work_id) if work_id is not None else None,
+                            item_icon=item_icon,
+                            entry_icon=entry_icon,
+                            res_menu=res_menu,
+                        )
+                        sections.append(detail_sec)
+
+                        parent_cmd = f":submenu {detail_menu}"
+                        entries.append((f"{title}  ·  {ext[1:].upper()}", item_icon, parent_cmd, context_cmd, context_title))
             except OSError:
                 continue
         if resolved == source_root.resolve():

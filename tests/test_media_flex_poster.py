@@ -579,13 +579,13 @@ def test_17_titles_unchanged(env):
     env["track_alias"](1)
 
     _r, base_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"], "gen1")
-    base_entry = [line for line in base_text.splitlines() if "openhtpc-play" in line][0]
+    base_entry = [line for line in base_text.splitlines() if "The Thing" in line][0]
     base_title = base_entry.split(";")[0].split("=", 1)[1]
 
     _seed_presentation(env, poster_path="/the_thing.jpg")
     _write_canonical_cache(env["home"], "/the_thing.jpg")
     _r, poster_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"], "gen1")
-    poster_entry = [line for line in poster_text.splitlines() if "openhtpc-play" in line][0]
+    poster_entry = [line for line in poster_text.splitlines() if "The Thing" in line][0]
     poster_title = poster_entry.split(";")[0].split("=", 1)[1]
 
     assert base_title == poster_title
@@ -604,7 +604,7 @@ def test_18_context_submenu_unchanged(env):
     env["track_alias"](1)
 
     _r, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"], "gen1")
-    entry = [line for line in sections_text.splitlines() if "openhtpc-play" in line][0]
+    entry = [line for line in sections_text.splitlines() if "The Thing" in line][0]
     parts = entry.split(";")
 
     assert len(parts) == 5
@@ -648,7 +648,7 @@ def test_20_long_ascii_title_le_198_bytes(env):
     env["track_alias"](1)
 
     _r, sections_text = session_engine.media_menu_sections(env["home"], [env["sources_dir"]], env["media_icon"], "gen1")
-    entry = [line for line in sections_text.splitlines() if "openhtpc-play" in line][0]
+    entry = [line for line in sections_text.splitlines() if "  ·  MKV" in line][0]
 
     byte_len = len(entry.encode("utf-8"))
     assert byte_len <= 198, f"Entry line exceeds 198 bytes ({byte_len} bytes): {entry}"
@@ -729,7 +729,10 @@ def test_23_same_work_used_by_multiple_media_versions(env):
 
     entries = [line for line in sections_text.splitlines() if line.startswith("Entry")]
     poster_entries = [e for e in entries if str(alias) in e]
-    assert len(poster_entries) == 2
+    # In DEV6B3, both parent row and detail LIRE LE FILM use the poster alias (2 versions * 2 = 4)
+    assert len(poster_entries) == 4
+    parent_poster_entries = [e for e in poster_entries if ":submenu MEDIA_D" in e]
+    assert len(parent_poster_entries) == 2
     assert alias.is_symlink()
     assert alias.resolve() == cache_target.resolve()
 

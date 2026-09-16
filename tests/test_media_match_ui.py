@@ -976,15 +976,15 @@ def test_42_no_provider_call_on_media_browsing(sandbox):
 # ==============================================================================
 
 def test_43_primary_play_command_unchanged(sandbox):
-    """43. Primary Play command unchanged."""
+    """43. Primary Play command preserved on movie detail page."""
     _ingest_movie(sandbox, "PlayCmd.mkv")
     _, content = session_engine.media_menu_sections(
         sandbox["home"], [sandbox["sources_dir"]], sandbox["media_icon"], "gen43"
     )
-    for line in content.splitlines():
-        if line.startswith("Entry") and "PlayCmd" in line:
-            parts = line.split(";")
-            assert parts[2].startswith("$HOME/.local/lib/openhtpc/openhtpc-play mact_")
+    play_lines = [line for line in content.splitlines() if "LIRE LE FILM" in line]
+    assert len(play_lines) == 1
+    parts = play_lines[0].split(";")
+    assert parts[2].startswith("$HOME/.local/lib/openhtpc/openhtpc-play mact_")
 
 
 def test_44_media_dispatcher_unchanged(sandbox):
