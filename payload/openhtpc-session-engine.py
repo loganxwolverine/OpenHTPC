@@ -800,8 +800,8 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         relative = child_path.relative_to(source_root)
                         item_id = media_item_id(source_id, relative, "file")
                         token = media_action_token(generation, item_id)
-                        actions[token] = {"page_id": name, "item_type": "file", "source_id": source_id, "relative_path": relative.as_posix(), "semantic_id": item_id}
-                        command = f"$HOME/.local/lib/openhtpc/openhtpc-play {token}"
+                        detail_menu = f"MEDIA_D{item_id[:8]}"
+                        actions[token] = {"page_id": detail_menu, "parent_page_id": name, "item_type": "file", "source_id": source_id, "relative_path": relative.as_posix(), "semantic_id": item_id}
                         stem = os.path.splitext(item.name)[0]
                         title = ini_value(stem)
                         if len(title) > 72: title = title[:69].rstrip() + "…"

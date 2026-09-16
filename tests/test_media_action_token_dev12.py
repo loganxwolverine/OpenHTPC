@@ -25,7 +25,7 @@ class MediaActionBinding(unittest.TestCase):
   model=self.generate("media-current");actions=self.actions(model);self.assertEqual(set(actions),{"Classics/Alerte.mkv","Modern/Nested/300 Rise of an Empire (2014).mkv"})
   pages=set()
   for token,item in actions.values():
-   self.assertRegex(item["page_id"],r"^MEDIA_[0-9a-f]{16}$");self.set_page(item["page_id"]);self.assertEqual(play.load_media_action(self.home,token),item);pages.add(item["page_id"])
+   self.assertRegex(item["page_id"],r"^MEDIA_D[0-9a-f]{8}$");self.assertRegex(item.get("parent_page_id",""),r"^MEDIA_[0-9a-f]{16}$");self.set_page(item["page_id"]);self.assertEqual(play.load_media_action(self.home,token),item);pages.add(item["page_id"])
   self.assertEqual(len(pages),2)
  def test_optical_only_regeneration_preserves_active_media_generation_and_tokens(self):
   first=self.generate("media-stable");first_actions=self.actions(first)

@@ -72,7 +72,11 @@ def load_media_action(home:pathlib.Path,token:str)->dict:
     page_path=home/".local/state/openhtpc/media-actions/current-page"
     try:current_page=page_path.read_text(encoding="utf-8").strip()
     except OSError as exc:raise ValueError("ACTION_MANIFEST_MISSING") from exc
-    if not current_page or action.get("page_id")!=current_page:raise ValueError("STALE_PAGE")
+    valid_pages = {action.get("page_id")}
+    parent_page = action.get("parent_page_id")
+    if isinstance(parent_page, str) and parent_page:
+        valid_pages.add(parent_page)
+    if not current_page or current_page not in valid_pages:raise ValueError("STALE_PAGE")
     required=("page_id","item_type","source_id","relative_path","semantic_id")
     if not all(isinstance(action.get(key),str) and action[key] for key in required):
         raise ValueError("INVALID_ACTION_IDENTITY")
@@ -251,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             trusted=load_media_action(home,token)
             expected_source=trusted["source_id"];generation=trusted["page_id"];relative_arg=trusted["relative_path"];item_id=trusted["semantic_id"];item_type=trusted["item_type"];media_arg=relative_arg
-            update_action_state(home,model_generation=generation,source_id=expected_source,item_id=item_id,item_type=item_type,action_token_valid=True,generation_valid=True,item_identity_valid=True,source_identity_valid=True,manifest_present=True,page_id_match=True,token_found=True,error_class="NONE")
+            update_action_state(home,model_generation=generation,source_id=expected_source,item_id=item_id,item_type=item_type,current_page=generation,action_token_valid=True,generation_valid=True,item_identity_valid=True,source_identity_valid=True,manifest_present=True,page_id_match=True,token_found=True,error_class="NONE")
             runtime_event(home,install,"MEDIA_ITEM_ACTIVATED",item_type=item_type,model_generation=generation,semantic_id=item_id,token_present=True,manifest_present=True,page_id_match=True,token_found=True,source_identity_valid=True)
             runtime_event(home,install,"ACTION_TOKEN_RESOLVED",item_type=item_type,page_id=generation)
         except ValueError as exc:

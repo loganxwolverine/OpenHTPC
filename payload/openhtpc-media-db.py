@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from typing import Any
 
 SCHEMA_VERSION = 3
@@ -180,8 +181,16 @@ def connect(path=None, *, create=False) -> sqlite3.Connection:
     try:
         db.execute('PRAGMA busy_timeout = 5000')
         db.execute('PRAGMA foreign_keys = ON')
-        if db.execute('PRAGMA journal_mode = WAL').fetchone()[0] != 'wal':
-            raise sqlite3.DatabaseError('WAL unavailable')
+        for attempt in range(10):
+            try:
+                if db.execute('PRAGMA journal_mode = WAL').fetchone()[0] != 'wal':
+                    raise sqlite3.DatabaseError('WAL unavailable')
+                break
+            except sqlite3.OperationalError as exc:
+                if 'locked' in str(exc) and attempt < 9:
+                    time.sleep(0.05)
+                    continue
+                raise
         db.execute('PRAGMA synchronous = NORMAL')
         return db
     except Exception:
