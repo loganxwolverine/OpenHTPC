@@ -1,5 +1,16 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 8 — 1.2.0-rc8
+
+- Implements Media Foundation persistent SQLite database with schema v3 (WAL mode, transactional consistency).
+- Introduces normalized media probe and incremental filesystem scanner.
+- Adds heuristic movie matcher and living-room interactive identity resolver within Flex Launcher.
+- Implements on-screen manual movie search with full keyboard entry and safe navigation trampoline.
+- Adds TMDb provider adapter for localized metadata snapshots and content-addressed poster cache.
+- Displays cached movie posters in Flex Launcher via atomic short symlink projections in /tmp.
+- Enforces strict zero-network invariant for living-room browsing, poster display, and media playback.
+- Hardens runtime graphical context detection and Wayland/X11 socket validation for headless environments.
+
 # OPENHTPC 1.2.0 Release Candidate 7 — 1.2.0-rc7
 
 - Adds automatic display frame-rate matching for local media, DVD, and protected optical playback.

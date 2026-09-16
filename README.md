@@ -6,10 +6,10 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.2.0 RC7
+# OPENHTPC 1.2.0 RC8
 
-Version: `1.2.0-rc7`
-Build: `public-release-1.2.0-rc7`
+Version: `1.2.0-rc8`
+Build: `public-release-1.2.0-rc8`
 Status: **Release Candidate / prerelease — physical validation pending**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
@@ -23,21 +23,23 @@ optical stabilization required after the RC1 and RC2 physical gates closed
 NO-GO. RC4 added PipeWire HDMI HD passthrough sink preparation, RC5 added
 effective PipeWire IEC958 SPA parameter verification, and RC6 recovered MEDIA
 bitstream passthrough by sharing dynamic PipeWire IEC958 sink preparation with
-local media playback. RC7 adds automatic frame-rate matching, dynamic display
+local media playback. RC7 added automatic frame-rate matching, dynamic display
 settings synchronization, and protected optical / local playback display resync
-audio stability.
+audio stability. RC8 introduces the Media Foundation persistent database,
+normalized media probe, living-room movie matcher and resolver, on-screen manual
+search, and cached poster rendering in Flex Launcher.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.2.0-RC7.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0-RC8.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.2.0-RC7.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.2.0-RC8.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
