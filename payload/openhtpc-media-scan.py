@@ -236,6 +236,13 @@ VIDEO_EXTENSIONS: frozenset[str] = _media_types.VIDEO_EXTENSIONS if _media_types
 })
 
 
+DISC_STRUCTURE_DIRS: frozenset[str] = frozenset({
+    "bdmv",
+    "certificate",
+    "video_ts",
+})
+
+
 def is_supported_media_extension(name: str) -> bool:
     """Case-insensitive check against authoritative VIDEO_EXTENSIONS."""
     mt = _load_media_types()
@@ -276,6 +283,8 @@ def enumerate_source_candidates(source_root: Path) -> tuple[dict[str, CandidateF
             try:
                 # 1. Directory handling (never follow directory symlinks)
                 if entry.is_dir(follow_symlinks=False):
+                    if entry.name.casefold() in DISC_STRUCTURE_DIRS:
+                        continue
                     err = _walk(Path(entry.path))
                     if err:
                         return err

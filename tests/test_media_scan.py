@@ -1103,3 +1103,323 @@ def test_31_real_c1_pal_dvd_benchmark_scan(sandbox_env):
         assert v_stream[1] == 720
         assert v_stream[2] == 576
         assert v_stream[3] == "progressive"
+
+
+# ─── 32–52. DEV6B4 Real Library Scanner Safety: Optical Disc Structure Pruning ────
+
+def test_32_ordinary_root_mkv_enumerated(tmp_path):
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"dummy_content")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "movie.mkv" in cands
+    assert cands["movie.mkv"].file_size == len(b"dummy_content")
+
+
+def test_33_deep_nested_mkv_enumerated(tmp_path):
+    sub = tmp_path / "a" / "b" / "c" / "d"
+    sub.mkdir(parents=True)
+    f = sub / "deep_movie.mkv"
+    f.write_bytes(b"dummy_content")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "a/b/c/d/deep_movie.mkv" in cands
+
+
+def test_34_standalone_m2ts_outside_disc_structure_enumerated(tmp_path):
+    sub = tmp_path / "HomeMovies"
+    sub.mkdir(parents=True)
+    f = sub / "Vacation.m2ts"
+    f.write_bytes(b"dummy_content")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "HomeMovies/Vacation.m2ts" in cands
+
+
+def test_35_bdmv_stream_m2ts_ignored(tmp_path):
+    stream_dir = tmp_path / "BDMV" / "STREAM"
+    stream_dir.mkdir(parents=True)
+    (stream_dir / "00000.m2ts").write_bytes(b"stream0")
+    (stream_dir / "00001.m2ts").write_bytes(b"stream1")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_36_nested_bdmv_subtree_ignored(tmp_path):
+    movie_dir = tmp_path / "UHD" / "Hokum"
+    bdmv_dir = movie_dir / "BDMV"
+    (bdmv_dir / "STREAM").mkdir(parents=True)
+    (bdmv_dir / "PLAYLIST").mkdir(parents=True)
+    (bdmv_dir / "CLIPINF").mkdir(parents=True)
+    (bdmv_dir / "STREAM" / "00000.m2ts").write_bytes(b"video")
+    (bdmv_dir / "index.bdmv").write_bytes(b"index")
+    (bdmv_dir / "MovieObject.bdmv").write_bytes(b"movieobj")
+
+    # Also an ordinary movie alongside
+    (tmp_path / "UHD" / "LegitimateMovie.mkv").write_bytes(b"legit")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "UHD/LegitimateMovie.mkv" in cands
+    assert not any("Hokum" in k or "BDMV" in k for k in cands)
+
+
+def test_37_certificate_subtree_ignored(tmp_path):
+    cert_dir = tmp_path / "UHD" / "Hokum" / "CERTIFICATE" / "BACKUP"
+    cert_dir.mkdir(parents=True)
+    (cert_dir / "id.bdmv").write_bytes(b"cert_data")
+    (cert_dir / "helper.m2ts").write_bytes(b"cert_helper")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_38_video_ts_vob_ignored(tmp_path):
+    v_dir = tmp_path / "VIDEO_TS"
+    v_dir.mkdir(parents=True)
+    (v_dir / "VIDEO_TS.VOB").write_bytes(b"vob0")
+    (v_dir / "VTS_01_1.VOB").write_bytes(b"vob1")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_39_nested_video_ts_subtree_ignored(tmp_path):
+    v_dir = tmp_path / "DVD" / "MyDisc" / "VIDEO_TS"
+    v_dir.mkdir(parents=True)
+    (v_dir / "VIDEO_TS.IFO").write_bytes(b"ifo")
+    (v_dir / "VIDEO_TS.VOB").write_bytes(b"vob0")
+    (v_dir / "VTS_01_0.VOB").write_bytes(b"vob1")
+    (v_dir / "VTS_01_1.VOB").write_bytes(b"vob2")
+
+    (tmp_path / "DVD" / "StandaloneDVD.vob").write_bytes(b"loose_vob")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "DVD/StandaloneDVD.vob" in cands
+    assert not any("MyDisc" in k or "VIDEO_TS" in k for k in cands)
+
+
+def test_40_case_insensitive_bdmv_pruning(tmp_path):
+    (tmp_path / "D1" / "BDMV" / "STREAM").mkdir(parents=True)
+    (tmp_path / "D1" / "BDMV" / "STREAM" / "00000.m2ts").write_bytes(b"1")
+
+    (tmp_path / "D2" / "bdmv" / "stream").mkdir(parents=True)
+    (tmp_path / "D2" / "bdmv" / "stream" / "00000.m2ts").write_bytes(b"2")
+
+    (tmp_path / "D3" / "Bdmv" / "Stream").mkdir(parents=True)
+    (tmp_path / "D3" / "Bdmv" / "Stream" / "00000.m2ts").write_bytes(b"3")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_41_case_insensitive_certificate_pruning(tmp_path):
+    (tmp_path / "D1" / "CERTIFICATE").mkdir(parents=True)
+    (tmp_path / "D1" / "CERTIFICATE" / "app.m2ts").write_bytes(b"1")
+
+    (tmp_path / "D2" / "certificate").mkdir(parents=True)
+    (tmp_path / "D2" / "certificate" / "app.m2ts").write_bytes(b"2")
+
+    (tmp_path / "D3" / "Certificate").mkdir(parents=True)
+    (tmp_path / "D3" / "Certificate" / "app.m2ts").write_bytes(b"3")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_42_case_insensitive_video_ts_pruning(tmp_path):
+    (tmp_path / "D1" / "VIDEO_TS").mkdir(parents=True)
+    (tmp_path / "D1" / "VIDEO_TS" / "VTS_01_1.VOB").write_bytes(b"1")
+
+    (tmp_path / "D2" / "video_ts").mkdir(parents=True)
+    (tmp_path / "D2" / "video_ts" / "VTS_01_1.vob").write_bytes(b"2")
+
+    (tmp_path / "D3" / "Video_Ts").mkdir(parents=True)
+    (tmp_path / "D3" / "Video_Ts" / "VTS_01_1.VOB").write_bytes(b"3")
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert len(cands) == 0
+
+
+def test_43_long_filename_preserved(tmp_path):
+    long_stem = "UHD.Project.Hail.Mary.2026.MULTi.2160p.DV.HDR.WEB-DL.AAC.2.0.H265-BOUC.VERY_LONG_NAME_TEST_STRING_PRESERVATION_1234567890"
+    f = tmp_path / f"{long_stem}.mkv"
+    f.write_bytes(b"data")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert f"{long_stem}.mkv" in cands
+
+
+def test_44_accented_utf8_filename_preserved(tmp_path):
+    name1 = "Les poupées russes (2005) VOF 1080p BluRay DTS-HD MA 5.1 x265-k7.mkv"
+    name2 = "Histoires de fantômes chinois 3.mkv"
+    (tmp_path / "Bluray").mkdir(parents=True)
+    (tmp_path / "Bluray" / name1).write_bytes(b"poupeies")
+    (tmp_path / "UHD").mkdir(parents=True)
+    (tmp_path / "UHD" / name2).write_bytes(b"fantomes")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert f"Bluray/{name1}" in cands
+    assert f"UHD/{name2}" in cands
+
+
+def test_45_filename_containing_bdmv_outside_bdmv_not_skipped(tmp_path):
+    sub = tmp_path / "Documentaries"
+    sub.mkdir(parents=True)
+    f = sub / "About.BDMV.Documentary.mkv"
+    f.write_bytes(b"doc_content")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "Documentaries/About.BDMV.Documentary.mkv" in cands
+
+
+def test_46_filename_containing_certificate_not_skipped(tmp_path):
+    sub = tmp_path / "Movies"
+    sub.mkdir(parents=True)
+    f = sub / "Birth.Certificate.mp4"
+    f.write_bytes(b"movie_content")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "Movies/Birth.Certificate.mp4" in cands
+
+
+def test_47_filename_containing_video_ts_not_skipped(tmp_path):
+    sub = tmp_path / "Movies"
+    sub.mkdir(parents=True)
+    f = sub / "My.VIDEO_TS.Documentary.mkv"
+    f.write_bytes(b"vts_doc")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "Movies/My.VIDEO_TS.Documentary.mkv" in cands
+
+
+def test_48_source_id_unchanged(tmp_path):
+    p = tmp_path / "source_root"
+    p.mkdir()
+    expected = hashlib.blake2s(os.fsencode(p.resolve()), digest_size=8).hexdigest()
+    actual = media_scan.compute_source_id(p)
+    assert actual == expected
+
+
+def test_49_relative_path_unchanged(tmp_path):
+    sub = tmp_path / "dir1" / "dir2"
+    sub.mkdir(parents=True)
+    f = sub / "test.mkv"
+    f.write_bytes(b"data")
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    assert "dir1/dir2/test.mkv" in cands
+    assert cands["dir1/dir2/test.mkv"].relative_path == "dir1/dir2/test.mkv"
+
+
+def test_50_directory_symlink_behavior_unchanged(tmp_path):
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "movie.mkv").write_bytes(b"data")
+
+    sym_dir = tmp_path / "sym_dir"
+    sym_dir.symlink_to(real_dir, target_is_directory=True)
+
+    cands, err = media_scan.enumerate_source_candidates(tmp_path)
+    assert err is None
+    # real_dir/movie.mkv is found
+    assert "real_dir/movie.mkv" in cands
+    # sym_dir is rejected by directory symlink policy
+    assert not any(k.startswith("sym_dir/") for k in cands)
+
+
+def test_51_zero_network_during_scan(sandbox_env, monkeypatch):
+    # Enforce network prohibition
+    import socket
+    import urllib.request
+
+    def _fail_network(*args, **kwargs):
+        raise AssertionError("NETWORK CALL ATTEMPTED DURING SCAN")
+
+    monkeypatch.setattr(socket, "socket", _fail_network)
+    monkeypatch.setattr(urllib.request, "urlopen", _fail_network)
+
+    root = sandbox_env["media_root"]
+    (root / "TestMovie.mkv").write_bytes(b"content")
+
+    res = media_scan.scan_source(
+        source_id=sandbox_env["source_id"],
+        db_path=sandbox_env["db_path"],
+        home=sandbox_env["home"],
+        probe_func=_mock_descriptor,
+    )
+    assert res["ok"] is True
+    assert res["outcome"] == "COMPLETE"
+    assert res["new"] == 1
+
+
+def test_52_real_library_model_structural_filter(sandbox_env):
+    root = sandbox_env["media_root"]
+
+    # 1. Bluray/Dark Knight.mkv
+    bluray = root / "Bluray"
+    bluray.mkdir(parents=True)
+    (bluray / "Dark Knight.mkv").write_bytes(b"dk")
+
+    # 2. UHD/Movie.mkv
+    uhd = root / "UHD"
+    uhd.mkdir(parents=True)
+    (uhd / "Movie.mkv").write_bytes(b"movie")
+
+    # 3. UHD/LooseTransport/Concert.m2ts
+    loose = uhd / "LooseTransport"
+    loose.mkdir(parents=True)
+    (loose / "Concert.m2ts").write_bytes(b"concert")
+
+    # 4. UHD/DiscFolder/BDMV/...
+    bdmv_dir = uhd / "DiscFolder" / "BDMV"
+    (bdmv_dir / "STREAM").mkdir(parents=True)
+    (bdmv_dir / "PLAYLIST").mkdir(parents=True)
+    (bdmv_dir / "CLIPINF").mkdir(parents=True)
+    (bdmv_dir / "STREAM" / "00000.m2ts").write_bytes(b"chunk0")
+    (bdmv_dir / "STREAM" / "00001.m2ts").write_bytes(b"chunk1")
+
+    # 5. DVD/DiscFolder/VIDEO_TS/...
+    vts_dir = root / "DVD" / "DiscFolder" / "VIDEO_TS"
+    vts_dir.mkdir(parents=True)
+    (vts_dir / "VIDEO_TS.VOB").write_bytes(b"vts_menu")
+    (vts_dir / "VTS_01_0.VOB").write_bytes(b"vts_feature0")
+    (vts_dir / "VTS_01_1.VOB").write_bytes(b"vts_feature1")
+
+    # Phase A candidate enumeration check
+    cands, err = media_scan.enumerate_source_candidates(root)
+    assert err is None
+    assert "Bluray/Dark Knight.mkv" in cands
+    assert "UHD/Movie.mkv" in cands
+    assert "UHD/LooseTransport/Concert.m2ts" in cands
+    assert len(cands) == 3
+
+    assert not any("BDMV" in k for k in cands)
+    assert not any("VIDEO_TS" in k for k in cands)
+
+    # Full scan execution check
+    res = media_scan.scan_source(
+        source_id=sandbox_env["source_id"],
+        db_path=sandbox_env["db_path"],
+        home=sandbox_env["home"],
+        probe_func=_mock_descriptor,
+    )
+    assert res["ok"] is True
+    assert res["outcome"] == "COMPLETE"
+    assert res["new"] == 3
+    assert res["failed"] == 0
+
+    with closing(media_db.connect(sandbox_env["db_path"])) as db:
+        rows = db.execute("SELECT relative_path FROM resources ORDER BY relative_path").fetchall()
+        paths = [r[0] for r in rows]
+        assert paths == [
+            "Bluray/Dark Knight.mkv",
+            "UHD/LooseTransport/Concert.m2ts",
+            "UHD/Movie.mkv",
+        ]
