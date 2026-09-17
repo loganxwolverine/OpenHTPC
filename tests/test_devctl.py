@@ -56,6 +56,12 @@ def test_media_movie_detail_profile_is_in_media_foundation():
     assert detail in devctl.TEST_PROFILES["media-foundation"]
 
 
+def test_media_enrich_profile_is_in_media_foundation():
+    enrich = "tests/test_media_enrich.py"
+    assert devctl.TEST_PROFILES["media-enrich"] == [enrich]
+    assert enrich in devctl.TEST_PROFILES["media-foundation"]
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _fake_completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
