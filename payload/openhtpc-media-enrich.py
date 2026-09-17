@@ -4,7 +4,7 @@
 #
 # Part of the OPENHTPC project.
 # Original project by Steve Dehanne.
-"""OpenHTPC Media Batch Enrichment Orchestrator (DEV6C1).
+"""OpenHTPC Media Batch Enrichment Orchestrator (DEV6C1 / DEV6C1B).
 
 Explicit-only batch metadata enrichment for Media Foundation.
 Reuses existing qualified primitives without duplicating algorithms:
@@ -19,9 +19,11 @@ Safety Invariants:
   - Source scoping is mandatory (--source-id or --source-root).
   - --plan is strict dry-run: read-only DB (mode=ro), 0 DB writes, 0 network, 0 cache writes.
   - USER_MATCHED and match_locked=1 identities are strictly immutable; never rematched.
+  - Incremental retry policy (DEV6C1B): items with persisted candidates are preserved without repeated queries unless --refresh-candidates is explicitly requested.
   - Title without year: AUTO_ACCEPT is FORBIDDEN; candidate suggestions may be persisted.
   - Technical streams (video_streams, audio_streams, subtitle_streams), resources, and schema_info are never mutated.
   - ISO resources (resource_kind = 'ISO') are ignored (DEV6C_ISO_BEHAVIOR = IGNORE_OUT_OF_SCOPE).
+  - Missing resources (availability_status = 'MISSING') are skipped without provider queries.
   - Resumable: transactions committed per item; failure is item-local.
   - Sequential execution only: no async, no threads.
 """
@@ -209,7 +211,7 @@ def get_source_items(
       - Deterministic ordering: media_version_id ASC.
       - Limit applies strictly to selected media_version items.
     """
-    # 1. Inspect all available file media_versions for this source
+    # 1. Inspect all file media_versions for this source
     rows = db.execute(
         """
         SELECT mv.id AS media_version_id,
@@ -221,13 +223,13 @@ def get_source_items(
                mv.duration_seconds,
                r.id AS resource_id,
                r.relative_path,
-               r.canonical_path
+               r.canonical_path,
+               r.availability_status
         FROM media_versions mv
         JOIN resources r ON r.media_version_id = mv.id
         WHERE r.source_id = ?
           AND r.resource_kind = 'FILE'
-          AND r.availability_status = 'AVAILABLE'
-        ORDER BY mv.id ASC
+        ORDER BY mv.id ASC, (CASE WHEN r.availability_status = 'AVAILABLE' THEN 0 ELSE 1 END) ASC
         """,
         (source_id,),
     ).fetchall()
@@ -251,12 +253,15 @@ def get_source_items(
             "resource_id": row[7],
             "relative_path": row[8],
             "canonical_path": row[9],
+            "availability_status": row[10],
         })
 
     # Summary counts for the entire source
     source_stats = {
         "total_media": len(all_source_items),
-        "unmatched": sum(1 for item in all_source_items if item["identification_state"] == "UNMATCHED"),
+        "available_media": sum(1 for item in all_source_items if item["availability_status"] == "AVAILABLE"),
+        "missing_media": sum(1 for item in all_source_items if item["availability_status"] == "MISSING"),
+        "unmatched": sum(1 for item in all_source_items if item["identification_state"] == "UNMATCHED" and item["availability_status"] == "AVAILABLE"),
         "already_identified": sum(1 for item in all_source_items if item["identification_state"] in ("AUTO_MATCHED", "USER_MATCHED")),
         "user_matched": sum(1 for item in all_source_items if item["identification_state"] == "USER_MATCHED"),
         "auto_matched": sum(1 for item in all_source_items if item["identification_state"] == "AUTO_MATCHED"),
@@ -290,6 +295,7 @@ def plan_source(
     *,
     media_version_ids: list[int] | None = None,
     limit: int | None = None,
+    refresh_candidates: bool = False,
     locale: str = "fr-FR",
     home: Path | None = None,
 ) -> dict[str, Any]:
@@ -329,24 +335,47 @@ def plan_source(
         extracted_year = clues.year_clue
         proj_query = media_match.create_provider_query(clues)
 
+        avail_status = item.get("availability_status", "AVAILABLE")
         ident_state = item["identification_state"]
         is_locked = item["match_locked"] == 1
 
-        if is_locked:
+        if avail_status != "AVAILABLE":
+            search_eligibility = "MISSING_SKIPPED"
+            eligibility_reason = "RESOURCE_MISSING"
+        elif is_locked:
+            search_eligibility = "ALREADY_IDENTIFIED"
             eligibility_reason = "IDENTITY_LOCKED"
         elif ident_state == "USER_MATCHED":
+            search_eligibility = "ALREADY_IDENTIFIED"
             eligibility_reason = "ALREADY_USER_MATCHED"
         elif ident_state == "AUTO_MATCHED":
+            search_eligibility = "ALREADY_IDENTIFIED"
             eligibility_reason = "ALREADY_AUTO_MATCHED"
         elif not clean_title:
             parse_failure += 1
+            search_eligibility = "PARSE_FAILURE"
             eligibility_reason = "PARSE_FAILURE"
-        elif extracted_year is None:
-            title_without_year += 1
-            eligibility_reason = "NO_YEAR_CLUE_CONSERVATIVE_GATE"
         else:
-            title_and_year += 1
-            eligibility_reason = "ELIGIBLE_FOR_AUTO_MATCH"
+            cand_count = db.execute(
+                "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status IN ('PENDING', 'REJECTED')",
+                (item["media_version_id"],),
+            ).fetchone()[0]
+
+            if cand_count > 0:
+                if refresh_candidates:
+                    search_eligibility = "REFRESH_REQUESTED"
+                    eligibility_reason = "REFRESH_REQUESTED"
+                else:
+                    search_eligibility = "CANDIDATES_PRESENT"
+                    eligibility_reason = "CANDIDATES_ALREADY_PERSISTED"
+            else:
+                search_eligibility = "NEVER_SEARCHED"
+                if extracted_year is None:
+                    title_without_year += 1
+                    eligibility_reason = "NO_YEAR_CLUE_CONSERVATIVE_GATE"
+                else:
+                    title_and_year += 1
+                    eligibility_reason = "ELIGIBLE_FOR_AUTO_MATCH"
 
         plan_items.append({
             "media_version_id": item["media_version_id"],
@@ -355,6 +384,7 @@ def plan_source(
             "extracted_year": extracted_year,
             "projected_query": proj_query,
             "eligibility_reason": eligibility_reason,
+            "search_eligibility": search_eligibility,
             "identification_state": ident_state,
             "work_id": item["work_id"],
         })
@@ -385,6 +415,11 @@ def plan_source(
         "posters_missing": 0,
         "poster_failed": 0,
         "already_complete": 0,
+        "refresh_candidates": refresh_candidates,
+        "never_searched": sum(1 for it in plan_items if it["search_eligibility"] == "NEVER_SEARCHED"),
+        "candidates_present": sum(1 for it in plan_items if it["search_eligibility"] == "CANDIDATES_PRESENT"),
+        "refresh_requested": sum(1 for it in plan_items if it["search_eligibility"] == "REFRESH_REQUESTED"),
+        "missing_skipped": sum(1 for it in plan_items if it["search_eligibility"] == "MISSING_SKIPPED"),
         "items": plan_items,
     }
 
@@ -395,6 +430,7 @@ def enrich_source(
     *,
     media_version_ids: list[int] | None = None,
     limit: int | None = None,
+    refresh_candidates: bool = False,
     locale: str = "fr-FR",
     home: Path | None = None,
     opener: Any = None,
@@ -453,6 +489,7 @@ def enrich_source(
         work_id = item["work_id"]
         is_locked = item["match_locked"] == 1
         duration_sec = item["duration_seconds"]
+        avail_status = item.get("availability_status", "AVAILABLE")
 
         clues = media_match.extract_movie_clues(rel_path)
         clean_title = clues.title_clue
@@ -464,6 +501,22 @@ def enrich_source(
         presentation_status = "SKIPPED"
         poster_status = "SKIPPED"
         failure_reason = None
+
+        if avail_status != "AVAILABLE":
+            item_reports.append({
+                "media_version_id": item_id,
+                "relative_path": rel_path,
+                "clean_title": clean_title,
+                "extracted_year": extracted_year,
+                "search_status": "SKIPPED",
+                "match_status": ident_state,
+                "work_id": work_id,
+                "external_id": external_id,
+                "presentation_status": "SKIPPED",
+                "poster_status": "SKIPPED",
+                "failure_reason": "RESOURCE_MISSING",
+            })
+            continue
 
         # Resolve existing external_id if work exists
         if work_id is not None:
@@ -487,89 +540,100 @@ def enrich_source(
                 match_status = "UNMATCHED"
                 failure_reason = "PARSE_FAILURE"
             else:
-                searched += 1
-                if rate_limit_sleep > 0.0:
-                    time.sleep(rate_limit_sleep)
+                cand_count = db.execute(
+                    "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status IN ('PENDING', 'REJECTED')",
+                    (item_id,),
+                ).fetchone()[0]
 
-                search_res = tmdb_provider.search_movies(
-                    title=clean_title,
-                    year=extracted_year,
-                    language=locale,
-                    home=home,
-                    opener=opener or urllib.request.urlopen,
-                )
-
-                if search_res.status == tmdb_provider.STATUS_OK_NO_RESULTS:
-                    no_result += 1
+                if cand_count > 0 and not refresh_candidates:
                     unresolved += 1
-                    search_status = "NO_RESULTS"
+                    search_status = "CANDIDATES_PRESERVED"
                     match_status = "UNMATCHED"
-                    failure_reason = "NO_RESULTS"
-                    # Clear stale pending candidates
-                    db.execute(
-                        "DELETE FROM match_candidates WHERE media_version_id = ? AND status = 'PENDING'",
-                        (item_id,),
-                    )
-                    db.commit()
-                elif search_res.status != tmdb_provider.STATUS_OK:
-                    provider_failed += 1
-                    unresolved += 1
-                    search_status = "PROVIDER_FAILED"
-                    match_status = "UNMATCHED"
-                    failure_reason = search_res.error_code or search_res.status
-                    outcome = "PARTIAL"
+                    failure_reason = "CANDIDATES_ALREADY_PERSISTED"
                 else:
-                    # Search succeeded with candidates
-                    search_status = "OK"
-                    scored = media_match.evaluate_candidate_list(
-                        candidates=search_res.candidates,
-                        title_clue=clean_title,
-                        year_clue=extracted_year,
-                        duration_seconds=duration_sec,
-                    )
-                    # Persist top 5 candidates
-                    media_match.persist_candidates(db, item_id, scored, limit=5)
+                    searched += 1
+                    if rate_limit_sleep > 0.0:
+                        time.sleep(rate_limit_sleep)
 
-                    if extracted_year is None:
-                        # Section 7: Yearless items — AUTO_ACCEPT is FORBIDDEN
+                    search_res = tmdb_provider.search_movies(
+                        title=clean_title,
+                        year=extracted_year,
+                        language=locale,
+                        home=home,
+                        opener=opener or urllib.request.urlopen,
+                    )
+
+                    if search_res.status == tmdb_provider.STATUS_OK_NO_RESULTS:
+                        no_result += 1
                         unresolved += 1
+                        search_status = "NO_RESULTS"
                         match_status = "UNMATCHED"
-                        failure_reason = "NO_YEAR_CLUE_CONSERVATIVE_GATE"
+                        failure_reason = "NO_RESULTS"
+                        # Clear stale pending candidates
+                        db.execute(
+                            "DELETE FROM match_candidates WHERE media_version_id = ? AND status = 'PENDING'",
+                            (item_id,),
+                        )
                         db.commit()
+                    elif search_res.status != tmdb_provider.STATUS_OK:
+                        provider_failed += 1
+                        unresolved += 1
+                        search_status = "PROVIDER_FAILED"
+                        match_status = "UNMATCHED"
+                        failure_reason = search_res.error_code or search_res.status
+                        outcome = "PARTIAL"
                     else:
-                        is_eligible, top_cand, top_score, reason = media_match.check_auto_match_eligibility(
-                            scored_candidates=scored,
+                        # Search succeeded with candidates
+                        search_status = "OK"
+                        scored = media_match.evaluate_candidate_list(
+                            candidates=search_res.candidates,
                             title_clue=clean_title,
                             year_clue=extracted_year,
+                            duration_seconds=duration_sec,
                         )
+                        # Persist top 5 candidates
+                        media_match.persist_candidates(db, item_id, scored, limit=5)
 
-                        if not is_eligible:
+                        if extracted_year is None:
+                            # Section 7: Yearless items — AUTO_ACCEPT is FORBIDDEN
                             unresolved += 1
                             match_status = "UNMATCHED"
-                            failure_reason = reason
+                            failure_reason = "NO_YEAR_CLUE_CONSERVATIVE_GATE"
                             db.commit()
                         else:
-                            # Eligible for conservative auto-match
-                            accept_res = media_match.accept_candidate(
-                                db,
-                                item_id,
-                                top_cand,
-                                score=top_score,
-                                mode="AUTO",
-                                method=reason,
+                            is_eligible, top_cand, top_score, reason = media_match.check_auto_match_eligibility(
+                                scored_candidates=scored,
+                                title_clue=clean_title,
+                                year_clue=extracted_year,
                             )
-                            if not accept_res.get("ok"):
+
+                            if not is_eligible:
                                 unresolved += 1
                                 match_status = "UNMATCHED"
-                                failure_reason = accept_res.get("error")
-                                outcome = "PARTIAL"
+                                failure_reason = reason
                                 db.commit()
                             else:
-                                auto_matched_count += 1
-                                match_status = "AUTO_MATCHED"
-                                work_id = accept_res["work_id"]
-                                external_id = accept_res["external_id"]
-                                db.commit()
+                                # Eligible for conservative auto-match
+                                accept_res = media_match.accept_candidate(
+                                    db,
+                                    item_id,
+                                    top_cand,
+                                    score=top_score,
+                                    mode="AUTO",
+                                    method=reason,
+                                )
+                                if not accept_res.get("ok"):
+                                    unresolved += 1
+                                    match_status = "UNMATCHED"
+                                    failure_reason = accept_res.get("error")
+                                    outcome = "PARTIAL"
+                                    db.commit()
+                                else:
+                                    auto_matched_count += 1
+                                    match_status = "AUTO_MATCHED"
+                                    work_id = accept_res["work_id"]
+                                    external_id = accept_res["external_id"]
+                                    db.commit()
 
         # ─── PHASE 4: Presentation ──────────────────────────────────────────
         pres_existed_before = False
@@ -670,6 +734,9 @@ def enrich_source(
         "posters_missing": posters_missing,
         "poster_failed": poster_failed,
         "already_complete": already_complete,
+        "refresh_candidates": refresh_candidates,
+        "candidates_preserved": sum(1 for it in item_reports if it.get("search_status") == "CANDIDATES_PRESERVED"),
+        "missing_skipped": sum(1 for it in item_reports if it.get("search_status") == "SKIPPED" and it.get("failure_reason") == "RESOURCE_MISSING"),
         "items": item_reports,
     }
 
@@ -681,6 +748,7 @@ def run_batch_enrichment(
     plan: bool = False,
     media_version_ids: list[int] | None = None,
     limit: int | None = None,
+    refresh_candidates: bool = False,
     locale: str = "fr-FR",
     home: Path | None = None,
     db_path: Path | str | None = None,
@@ -721,6 +789,7 @@ def run_batch_enrichment(
                 canonical_source_id,
                 media_version_ids=media_version_ids,
                 limit=limit,
+                refresh_candidates=refresh_candidates,
                 locale=locale,
                 home=home,
             )
@@ -730,6 +799,7 @@ def run_batch_enrichment(
                 canonical_source_id,
                 media_version_ids=media_version_ids,
                 limit=limit,
+                refresh_candidates=refresh_candidates,
                 locale=locale,
                 home=home,
                 opener=opener,
@@ -743,6 +813,7 @@ def run_batch_enrichment(
                 canonical_source_id,
                 media_version_ids=media_version_ids,
                 limit=limit,
+                refresh_candidates=refresh_candidates,
                 locale=locale,
                 home=home,
             )
@@ -753,6 +824,7 @@ def run_batch_enrichment(
                 canonical_source_id,
                 media_version_ids=media_version_ids,
                 limit=limit,
+                refresh_candidates=refresh_candidates,
                 locale=locale,
                 home=home,
                 opener=opener,
@@ -784,6 +856,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="plan",
         action="store_true",
         help="Dry-run plan mode: strictly read-only SQLite, 0 network, 0 DB writes",
+    )
+    op_group.add_argument(
+        "--refresh-candidates",
+        dest="refresh_candidates",
+        action="store_true",
+        help="Re-query provider search for unresolved items with existing candidates",
     )
     op_group.add_argument(
         "--limit",
@@ -845,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
         plan=args.plan,
         media_version_ids=args.media_version_ids,
         limit=args.limit,
+        refresh_candidates=args.refresh_candidates,
         locale=args.locale,
         home=home_path,
         db_path=args.db,

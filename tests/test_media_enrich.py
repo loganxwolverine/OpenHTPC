@@ -737,8 +737,13 @@ def test_20_repeat_unresolved_lookup_does_not_create_bad_duplicates(env: EnrichT
     opener = MockOpener({
         "search/movie": _default_search_handler(550, "Inception", 2010),
     })
+    # Run 1: initial search persists candidate
     media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
-    media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    # Run 2: incremental skip preserves candidate
+    res2 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res2["candidates_preserved"] == 1
+    # Run 3: explicit refresh re-queries and replaces PENDING candidates
+    media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener, refresh_candidates=True)
 
     with closing(env.connect()) as conn:
         count = conn.execute("SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ?", (mv_id,)).fetchone()[0]
@@ -1158,3 +1163,406 @@ def test_38_cli_main_plan_and_execute(env: EnrichTestEnv, capsys):
         "--home", str(env.home),
     ])
     assert rc_err == 1
+
+
+# ─── TEST GROUPS 39–53: DEV6C1B INCREMENTAL ENRICHMENT RETRY POLICY ─────────
+
+def test_39_never_searched_unmatched_searches(env: EnrichTestEnv):
+    """1. Never-searched unmatched item triggers provider search."""
+    mv_id = env.add_media("Inception (2010).mkv")
+    opener = MockOpener({
+        "search/movie": _default_search_handler(550, "Inception", 2010),
+        "movie/550": _default_details_handler(550, "Inception", 2010),
+    })
+    res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res["searched"] == 1
+    assert len(opener.requests) > 0
+
+
+def test_40_unmatched_with_persisted_candidates_does_not_search_again(env: EnrichTestEnv):
+    """2. Unmatched item with persisted candidates is preserved and skipped."""
+    mv_id = env.add_media("Inception.mkv")
+    with closing(env.connect()) as conn:
+        conn.execute(
+            """
+            INSERT INTO match_candidates (
+                media_version_id, provider, external_id, candidate_title,
+                candidate_year, candidate_payload_json, score, status, created_at
+            ) VALUES (?, 'tmdb_movie', '550', 'Inception', 2010, '{}', 75.0, 'PENDING', ?)
+            """,
+            (mv_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+
+    opener = MockOpener({
+        "search/movie": _default_search_handler(550, "Inception", 2010),
+    })
+    res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res["searched"] == 0
+    assert res["candidates_preserved"] == 1
+    assert len(opener.requests) == 0
+
+
+def test_41_explicit_refresh_researches_persisted_unresolved_item(env: EnrichTestEnv):
+    """3. Explicit refresh re-queries provider for item with persisted candidates."""
+    mv_id = env.add_media("Inception.mkv")
+    with closing(env.connect()) as conn:
+        conn.execute(
+            """
+            INSERT INTO match_candidates (
+                media_version_id, provider, external_id, candidate_title,
+                candidate_year, candidate_payload_json, score, status, created_at
+            ) VALUES (?, 'tmdb_movie', '550', 'Inception', 2010, '{}', 75.0, 'PENDING', ?)
+            """,
+            (mv_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+
+    opener = MockOpener({
+        "search/movie": _default_search_handler(550, "Inception", 2010),
+    })
+    res = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        db_path=env.db_path,
+        home=env.home,
+        opener=opener,
+        refresh_candidates=True,
+    )
+    assert res["searched"] == 1
+    assert len(opener.requests) == 1
+
+
+def test_42_media_version_id_plus_refresh_touches_only_selected_media(env: EnrichTestEnv):
+    """4. --media-version-id with --refresh-candidates scopes strictly to selected media."""
+    mv1 = env.add_media("Inception.mkv")
+    mv2 = env.add_media("Avatar.mkv")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with closing(env.connect()) as conn:
+        conn.execute(
+            "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', '550', 'Inception', 75.0, 'PENDING', ?)",
+            (mv1, now_iso),
+        )
+        conn.execute(
+            "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', '19995', 'Avatar', 75.0, 'PENDING', ?)",
+            (mv2, now_iso),
+        )
+        conn.commit()
+
+    opener = MockOpener({
+        "search/movie?query=Inception": _default_search_handler(550, "Inception", 2010),
+        "search/movie?query=Avatar": _default_search_handler(19995, "Avatar", 2009),
+    })
+    res = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        media_version_ids=[mv1],
+        refresh_candidates=True,
+        db_path=env.db_path,
+        home=env.home,
+        opener=opener,
+    )
+    assert res["considered"] == 1
+    assert res["searched"] == 1
+    assert len(opener.requests) == 1
+    assert "Inception" in opener.requests[0]
+
+
+def test_43_yearless_unresolved_does_not_repeatedly_query_provider(env: EnrichTestEnv):
+    """5. Yearless unresolved movie does not repeatedly query provider on second enrich."""
+    mv_id = env.add_media("Dark Knight.mkv")
+    opener = MockOpener({
+        "search/movie": _default_search_handler(155, "Dark Knight", 2008),
+    })
+    # Run 1: First explicit enrich searches and persists candidate suggestions
+    res1 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res1["searched"] == 1
+    assert len(opener.requests) == 1
+
+    # Run 2: Second enrich without refresh does NOT query provider
+    res2 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res2["searched"] == 0
+    assert res2["candidates_preserved"] == 1
+    assert len(opener.requests) == 1  # unchanged
+
+    # Run 3: Explicit refresh queries again
+    res3 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener, refresh_candidates=True)
+    assert res3["searched"] == 1
+    assert len(opener.requests) == 2
+
+
+def test_44_identified_item_never_searched(env: EnrichTestEnv):
+    """6. USER_MATCHED and AUTO_MATCHED items are never searched, even with refresh_candidates."""
+    wid = env.add_work("Inception", 2010, 550)
+    mv1 = env.add_media("Inception (2010).mkv", identification_state="USER_MATCHED", work_id=wid, match_locked=1)
+    mv2 = env.add_media("Avatar (2009).mkv", identification_state="AUTO_MATCHED", work_id=wid)
+
+    opener = MockOpener({
+        "search/movie": _default_search_handler(550, "Inception", 2010),
+        "movie/550": _default_details_handler(550, "Inception", 2010),
+    })
+    res = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        refresh_candidates=True,
+        db_path=env.db_path,
+        home=env.home,
+        opener=opener,
+    )
+    assert res["searched"] == 0
+    # No search requests were made
+    assert all("search/movie" not in req for req in opener.requests)
+
+
+def test_45_missing_item_never_searched(env: EnrichTestEnv):
+    """7. Resource with availability_status='MISSING' is never searched."""
+    mv_id = env.add_media("Lost Movie (2020).mkv", availability_status="MISSING")
+    opener = MockOpener({
+        "search/movie": _default_search_handler(999, "Lost Movie", 2020),
+    })
+    # Execute enrich
+    res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res["searched"] == 0
+    assert res["missing_skipped"] == 1
+    assert len(opener.requests) == 0
+
+    # Plan mode reports MISSING_SKIPPED
+    plan_res = media_enrich.run_batch_enrichment(source_id=env.source_id, plan=True, db_path=env.db_path, home=env.home)
+    assert plan_res["missing_skipped"] == 1
+    assert plan_res["items"][0]["search_eligibility"] == "MISSING_SKIPPED"
+
+
+def test_46_new_movie_in_established_library_triggers_only_its_needed_search(env: EnrichTestEnv):
+    """8. Adding 1 new movie to established library triggers only needed searches."""
+    opener_map: dict[str, Any] = {}
+
+    # 10 AUTO_MATCHED items
+    for i in range(10):
+        wid = env.add_work(f"Movie {i}", 2000 + i, 1000 + i)
+        env.add_media(f"Movie {i} ({2000 + i}).mkv", identification_state="AUTO_MATCHED", work_id=wid)
+        with closing(env.connect()) as conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "INSERT INTO work_presentations (work_id, locale, display_title, created_at, updated_at) VALUES (?, 'fr-FR', ?, ?, ?)",
+                (wid, f"Movie {i}", now_iso, now_iso),
+            )
+            conn.commit()
+
+    # 3 UNMATCHED with persisted candidates
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for i in range(3):
+        mv_u = env.add_media(f"Unresolved {i}.mkv")
+        with closing(env.connect()) as conn:
+            conn.execute(
+                "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', ?, ?, 70.0, 'PENDING', ?)",
+                (mv_u, str(2000 + i), f"Unresolved {i}", now_iso),
+            )
+            conn.commit()
+
+    # 1 UNMATCHED without candidates (retryable provider-failed item)
+    mv_retry = env.add_media("Failed (2015).mkv")
+    opener_map["search/movie?query=Failed"] = _default_search_handler(3001, "Failed", 2015)
+    opener_map["movie/3001"] = _default_details_handler(3001, "Failed", 2015)
+
+    # 1 NEW UNMATCHED movie
+    mv_new = env.add_media("New Movie (2024).mkv")
+    opener_map["search/movie?query=New+Movie"] = _default_search_handler(4001, "New Movie", 2024)
+    opener_map["movie/4001"] = _default_details_handler(4001, "New Movie", 2024)
+
+    opener = MockOpener(opener_map)
+
+    res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    # Exactly 2 searched: mv_new and mv_retry (both had 0 candidates)
+    assert res["searched"] == 2
+    assert res["candidates_preserved"] == 3
+    search_calls = [r for r in opener.requests if "search/movie" in r]
+    assert len(search_calls) == 2
+
+
+def test_47_candidate_persistence_unchanged_when_skipped(env: EnrichTestEnv):
+    """9. Persisted candidates remain completely unchanged when search is skipped."""
+    mv_id = env.add_media("Inception.mkv")
+    fixed_time = "2026-01-01T12:00:00+00:00"
+    with closing(env.connect()) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO match_candidates (
+                media_version_id, provider, external_id, candidate_title,
+                candidate_year, candidate_payload_json, score, status, created_at
+            ) VALUES (?, 'tmdb_movie', '550', 'Inception', 2010, '{"key": "val"}', 77.5, 'PENDING', ?)
+            """,
+            (mv_id, fixed_time),
+        )
+        cand_id = cur.lastrowid
+        conn.commit()
+
+    opener = MockOpener({})
+    res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res["candidates_preserved"] == 1
+
+    with closing(env.connect()) as conn:
+        row = conn.execute("SELECT id, candidate_title, score, status, created_at, candidate_payload_json FROM match_candidates WHERE id = ?", (cand_id,)).fetchone()
+        assert row[0] == cand_id
+        assert row[1] == "Inception"
+        assert row[2] == 77.5
+        assert row[3] == "PENDING"
+        assert row[4] == fixed_time
+        assert row[5] == '{"key": "val"}'
+
+
+def test_48_plan_correctly_reports_search_eligibility(env: EnrichTestEnv):
+    """10. Plan mode reports exact conceptual search_eligibility for all states."""
+    wid = env.add_work("Known", 2000, 100)
+    # A: USER_MATCHED
+    mv_a = env.add_media("UserMatched (2000).mkv", identification_state="USER_MATCHED", work_id=wid)
+    # B: AUTO_MATCHED
+    mv_b = env.add_media("AutoMatched (2001).mkv", identification_state="AUTO_MATCHED", work_id=wid)
+    # C: UNMATCHED with persisted candidates
+    mv_c = env.add_media("WithCandidates.mkv")
+    with closing(env.connect()) as conn:
+        conn.execute(
+            "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', '200', 'WithCandidates', 70.0, 'PENDING', ?)",
+            (mv_c, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    # D: UNMATCHED without candidates
+    mv_d = env.add_media("NeverSearched (2022).mkv")
+    # E: MISSING resource
+    mv_e = env.add_media("MissingFile (2023).mkv", availability_status="MISSING")
+    # F: Unparseable (release group token only -> empty title clue)
+    mv_f = env.add_media("-ROVERS.mkv")
+
+    # Plan without refresh
+    plan_normal = media_enrich.run_batch_enrichment(source_id=env.source_id, plan=True, db_path=env.db_path, home=env.home)
+    eligibility_map = {it["media_version_id"]: it["search_eligibility"] for it in plan_normal["items"]}
+    assert eligibility_map[mv_a] == "ALREADY_IDENTIFIED"
+    assert eligibility_map[mv_b] == "ALREADY_IDENTIFIED"
+    assert eligibility_map[mv_c] == "CANDIDATES_PRESENT"
+    assert eligibility_map[mv_d] == "NEVER_SEARCHED"
+    assert eligibility_map[mv_e] == "MISSING_SKIPPED"
+    assert eligibility_map[mv_f] == "PARSE_FAILURE"
+
+    # Plan with refresh_candidates=True
+    plan_refresh = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        plan=True,
+        refresh_candidates=True,
+        db_path=env.db_path,
+        home=env.home,
+    )
+    eligibility_refresh_map = {it["media_version_id"]: it["search_eligibility"] for it in plan_refresh["items"]}
+    assert eligibility_refresh_map[mv_c] == "REFRESH_REQUESTED"
+    assert eligibility_refresh_map[mv_a] == "ALREADY_IDENTIFIED"
+
+
+def test_49_plan_zero_network(env: EnrichTestEnv):
+    """11. Plan mode makes strictly zero network provider calls."""
+    env.add_media("Inception (2010).mkv")
+    env.add_media("Avatar.mkv")
+    opener = MockOpener({})
+    res = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        plan=True,
+        db_path=env.db_path,
+        home=env.home,
+        opener=opener,
+    )
+    assert res["ok"] is True
+    assert len(opener.requests) == 0
+
+
+def test_50_plan_zero_writes(env: EnrichTestEnv):
+    """12. Plan mode executes strictly read-only with zero database writes."""
+    env.add_media("Inception (2010).mkv")
+    mtime_before = env.db_path.stat().st_mtime_ns
+    with closing(media_enrich.connect_db(env.db_path, read_only=True, home=env.home)) as ro_conn:
+        res = media_enrich.plan_source(ro_conn, env.source_id)
+        assert res["ok"] is True
+    assert env.db_path.stat().st_mtime_ns == mtime_before
+
+
+def test_51_no_regression_source_isolation(env: EnrichTestEnv):
+    """13. Multi-source isolation is strictly preserved with --refresh-candidates."""
+    sid2 = hashlib.blake2s(b"/media/source2", digest_size=8).hexdigest()
+    mv1 = env.add_media("Inception.mkv", source_id=env.source_id)
+    mv2 = env.add_media("Avatar.mkv", source_id=sid2)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with closing(env.connect()) as conn:
+        conn.execute(
+            "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', '550', 'Inception', 70.0, 'PENDING', ?)",
+            (mv1, now_iso),
+        )
+        conn.execute(
+            "INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) VALUES (?, 'tmdb_movie', '19995', 'Avatar', 70.0, 'PENDING', ?)",
+            (mv2, now_iso),
+        )
+        conn.commit()
+
+    opener = MockOpener({
+        "search/movie": _default_search_handler(550, "Inception", 2010),
+    })
+    res = media_enrich.run_batch_enrichment(
+        source_id=env.source_id,
+        refresh_candidates=True,
+        db_path=env.db_path,
+        home=env.home,
+        opener=opener,
+    )
+    assert res["considered"] == 1
+    assert res["items"][0]["media_version_id"] == mv1
+
+    with closing(env.connect()) as conn:
+        c2 = conn.execute("SELECT candidate_title FROM match_candidates WHERE media_version_id = ?", (mv2,)).fetchall()
+        assert len(c2) == 1
+        assert c2[0][0] == "Avatar"
+
+
+def test_52_db_idempotence_preserved(env: EnrichTestEnv):
+    """14. Database idempotence is strictly preserved across multiple runs."""
+    env.add_media("Inception (2010).mkv")
+    env.add_media("Dark Knight.mkv")
+
+    opener = MockOpener({
+        "search/movie?query=Inception": _default_search_handler(550, "Inception", 2010),
+        "search/movie?query=Dark+Knight": _default_search_handler(155, "Dark Knight", 2008),
+        "movie/550": _default_details_handler(550, "Inception", 2010),
+    })
+    media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+
+    def _snapshot(conn: sqlite3.Connection) -> dict[str, list[tuple]]:
+        return {
+            "works": conn.execute("SELECT * FROM works ORDER BY id").fetchall(),
+            "external_ids": conn.execute("SELECT id, work_id, provider, external_id FROM external_ids ORDER BY id").fetchall(),
+            "work_presentations": conn.execute("SELECT id, work_id, locale, display_title FROM work_presentations ORDER BY id").fetchall(),
+            "match_candidates": conn.execute("SELECT id, media_version_id, provider, external_id, status FROM match_candidates ORDER BY id").fetchall(),
+        }
+
+    with closing(env.connect()) as conn:
+        snap1 = _snapshot(conn)
+
+    media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+
+    with closing(env.connect()) as conn:
+        snap2 = _snapshot(conn)
+
+    assert snap1 == snap2
+
+
+def test_53_network_idempotence(env: EnrichTestEnv):
+    """15. Strict network idempotence: second enrich run makes zero HTTP requests."""
+    env.add_media("Inception (2010).mkv")
+    env.add_media("Dark Knight.mkv")
+
+    opener = MockOpener({
+        "search/movie?query=Inception": _default_search_handler(550, "Inception", 2010),
+        "search/movie?query=Dark+Knight": _default_search_handler(155, "Dark Knight", 2008),
+        "movie/550": _default_details_handler(550, "Inception", 2010),
+    })
+    res1 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res1["ok"] is True
+    assert len(opener.requests) > 0
+
+    opener.requests.clear()
+
+    res2 = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
+    assert res2["ok"] is True
+    assert res2["searched"] == 0
+    assert len(opener.requests) == 0
