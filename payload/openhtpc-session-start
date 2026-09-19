@@ -19,6 +19,67 @@ die() { printf '[OPENHTPC] %s\n' "$*" >&2; exit 3; }
 
 [[ -r $ENGINE ]] || die "Moteur de session absent : $ENGINE"
 
+if [[ $# -gt 0 && ${1:-} != --check-only ]]; then
+    die "Usage : openhtpc-session-start [--check-only]"
+fi
+
+# Read-only pre-flight verification path (never mutates config, manifests, or state)
+if [[ ${1:-} == --check-only ]]; then
+    result="$({ python3 - "$ENGINE" "$OPENHTPC_HOME" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("openhtpc_session_engine", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+home = pathlib.Path(sys.argv[2])
+try:
+    state = module.evaluate(home)
+except module.GateError as exc:
+    print(f"BLOCKED|{exc.gate}|{exc.reason}|{exc}")
+    raise SystemExit(3)
+print("PASS|all|READY|Hardware, viabilité, runtime et configuration : PASS")
+PY
+} 2>&1)" || rc=$?
+    rc=${rc:-0}
+    if [[ $rc -ne 0 ]]; then
+        IFS='|' read -r _ gate reason message <<<"$result"
+        die "Gate ${gate:-inconnu} refusé (${reason:-ERREUR}) : ${message:-$result}"
+    fi
+    printf '[OPENHTPC] %s\n' "${result##*|}"
+    exit 0
+fi
+
+# Appliance mode sleep inhibition before acquiring persistent session lock
+if command -v systemd-inhibit >/dev/null 2>&1 && [[ -z ${OPENHTPC_INHIBITED:-} ]]; then
+    export OPENHTPC_INHIBITED=1
+    exec systemd-inhibit --what=idle --who="OPENHTPC" --why="OPENHTPC appliance mode active" --mode=block "$0" "$@"
+fi
+
+[[ -x $FLEX ]] || die "Flex intégré absent : $FLEX"
+mkdir -p "$STATE_DIR"
+
+# Authoritative session lock acquisition: MUST occur before ANY config generation or session mutation
+if [[ ${OPENHTPC_SESSION_ACTIVE:-0} != 1 ]]; then
+    exec 8>"$SESSION_LOCK"
+    if ! flock -n 8; then
+        [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event START_ALREADY_ACTIVE
+        printf '[OPENHTPC] Une session OPENHTPC est déjà active.\n'
+        exit 0
+    fi
+    export OPENHTPC_SESSION_ACTIVE=1 OPENHTPC_SESSION_LOCK_FD=8
+    export OPENHTPC_SESSION_ID="session-$(date -u +%Y%m%dT%H%M%S)-$$"
+    python3 - "$SESSION_STATE" "$OPENHTPC_SESSION_ID" <<'PY'
+import json,os,pathlib,sys,tempfile
+target=pathlib.Path(sys.argv[1]); target.parent.mkdir(parents=True,exist_ok=True)
+fd,tmp=tempfile.mkstemp(prefix=target.name+'.',dir=target.parent)
+with os.fdopen(fd,'w') as stream: json.dump({'schema':1,'state':'RUNNING','session_id':sys.argv[2],'owner_pid':os.getppid()},stream); stream.write('\n'); stream.flush(); os.fsync(stream.fileno())
+os.chmod(tmp,0o600); os.replace(tmp,target)
+PY
+    [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event SESSION_START
+fi
+
 # Propagate live graphical session context if launched from headless/SSH/TTY
 resolved_graphical_env="$(python3 - "$OPENHTPC_HOME" "$INSTALL_DIR" <<'PY'
 import importlib.util, os, pathlib, sys
@@ -55,12 +116,12 @@ if [[ -n "$resolved_graphical_env" ]]; then
     done <<< "$resolved_graphical_env"
 fi
 
-if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" && ${1:-} != --check-only ]]; then
-    mkdir -p "$STATE_DIR"
+if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" ]]; then
     [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event GRAPHICAL_SESSION_UNAVAILABLE
     die "Échec du démarrage : session graphique indisponible (OPENHTPC_GRAPHICAL_SESSION_UNAVAILABLE)"
 fi
 
+# Perform session evaluation and generate initial flex config UNDER AUTHORITATIVE LOCK
 result="$({ python3 - "$ENGINE" "$OPENHTPC_HOME" "$FLEX_CONFIG" <<'PY'
 import importlib.util
 import pathlib
@@ -75,7 +136,9 @@ try:
 except module.GateError as exc:
     print(f"BLOCKED|{exc.gate}|{exc.reason}|{exc}")
     raise SystemExit(3)
-module.write_flex_config(pathlib.Path(sys.argv[3]), home, state["sources"])
+config_path = pathlib.Path(sys.argv[3])
+module.write_flex_config(config_path, home, state["sources"])
+module.activate_media_manifest(config_path, home)
 print("PASS|all|READY|Hardware, viabilité, runtime et configuration : PASS")
 PY
 } 2>&1)" || rc=$?
@@ -93,34 +156,7 @@ if [[ $rc -ne 0 ]]; then
 fi
 
 printf '[OPENHTPC] %s\n' "${result##*|}"
-if [[ ${1:-} == --check-only ]]; then
-    exit 0
-fi
-[[ $# -eq 0 ]] || die "Usage : openhtpc-session-start [--check-only]"
-if command -v systemd-inhibit >/dev/null 2>&1 && [[ -z ${OPENHTPC_INHIBITED:-} ]]; then
-    export OPENHTPC_INHIBITED=1
-    exec systemd-inhibit --what=idle --who="OPENHTPC" --why="OPENHTPC appliance mode active" --mode=block "$0" "$@"
-fi
-[[ -x $FLEX ]] || die "Flex intégré absent : $FLEX"
-mkdir -p "$STATE_DIR"
-if [[ ${OPENHTPC_SESSION_ACTIVE:-0} != 1 ]]; then
-    exec 8>"$SESSION_LOCK"
-    if ! flock -n 8; then
-        [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event START_ALREADY_ACTIVE
-        printf '[OPENHTPC] Une session OPENHTPC est déjà active.\n'
-        exit 0
-    fi
-    export OPENHTPC_SESSION_ACTIVE=1 OPENHTPC_SESSION_LOCK_FD=8
-    export OPENHTPC_SESSION_ID="session-$(date -u +%Y%m%dT%H%M%S)-$$"
-    python3 - "$SESSION_STATE" "$OPENHTPC_SESSION_ID" <<'PY'
-import json,os,pathlib,sys,tempfile
-target=pathlib.Path(sys.argv[1]); target.parent.mkdir(parents=True,exist_ok=True)
-fd,tmp=tempfile.mkstemp(prefix=target.name+'.',dir=target.parent)
-with os.fdopen(fd,'w') as stream: json.dump({'schema':1,'state':'RUNNING','session_id':sys.argv[2],'owner_pid':os.getppid()},stream); stream.write('\n'); stream.flush(); os.fsync(stream.fileno())
-os.chmod(tmp,0o600); os.replace(tmp,target)
-PY
-    [[ ! -x $RUNTIME ]] || "$RUNTIME" log --component session --event SESSION_START
-fi
+
 [[ ! -x $INSTALL_DIR/openhtpc-appliance-mode ]] || "$INSTALL_DIR/openhtpc-appliance-mode" enter
 if [[ -x $OPTICAL_MONITOR && -z ${OPENHTPC_MONITOR_STARTED:-} ]]; then
     "$OPTICAL_MONITOR" >/dev/null 2>&1 &
