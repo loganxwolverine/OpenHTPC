@@ -261,6 +261,38 @@ class EnrichTestEnv:
             conn.commit()
             return wid
 
+    def add_search_state(
+        self,
+        media_version_id: int,
+        *,
+        provider: str = "tmdb_movie",
+        search_status: str = "CANDIDATES",
+        query_title: str | None = None,
+        query_year: int | None = None,
+        locale: str = "fr-FR",
+        failure_reason: str | None = None,
+    ) -> None:
+        with closing(self.connect()) as conn:
+            sig = media_db.compute_query_signature(
+                provider,
+                media_type="movie",
+                locale=locale,
+                title=query_title,
+                year=query_year,
+            )
+            media_db.upsert_media_version_search(
+                conn,
+                media_version_id=media_version_id,
+                provider=provider,
+                query_signature=sig,
+                search_status=search_status,
+                failure_reason=failure_reason,
+                query_title=query_title,
+                query_year=query_year,
+                query_locale=locale,
+            )
+            conn.commit()
+
 
 @pytest.fixture
 def env(tmp_path: Path) -> EnrichTestEnv:
@@ -1122,8 +1154,8 @@ def test_36_iso_remains_out_of_scope(env: EnrichTestEnv):
         assert iso_state == "UNMATCHED"
 
 
-def test_37_schema_remains_3(env: EnrichTestEnv):
-    """Schema version in schema_info remains strictly 3."""
+def test_37_schema_remains_4(env: EnrichTestEnv):
+    """Schema version in schema_info remains strictly 4."""
     env.add_media("Inception (2010).mkv")
     opener = MockOpener({
         "search/movie": _default_search_handler(550, "Inception", 2010),
@@ -1133,7 +1165,7 @@ def test_37_schema_remains_3(env: EnrichTestEnv):
 
     with closing(env.connect()) as conn:
         ver = conn.execute("SELECT version FROM schema_info").fetchone()[0]
-        assert ver == 3
+        assert ver == 4
 
 
 # ─── TEST GROUP 38: CLI ENTRYPOINT ───────────────────────────────────────────
@@ -1193,6 +1225,7 @@ def test_40_unmatched_with_persisted_candidates_does_not_search_again(env: Enric
             (mv_id, datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
+    env.add_search_state(mv_id, query_title="Inception", search_status="CANDIDATES")
 
     opener = MockOpener({
         "search/movie": _default_search_handler(550, "Inception", 2010),
@@ -1355,9 +1388,11 @@ def test_46_new_movie_in_established_library_triggers_only_its_needed_search(env
                 (mv_u, str(2000 + i), f"Unresolved {i}", now_iso),
             )
             conn.commit()
+        env.add_search_state(mv_u, query_title=f"Unresolved {i}", search_status="CANDIDATES")
 
     # 1 UNMATCHED without candidates (retryable provider-failed item)
     mv_retry = env.add_media("Failed (2015).mkv")
+    env.add_search_state(mv_retry, query_title="Failed", query_year=2015, search_status="FAILED", failure_reason="PROVIDER_TIMEOUT")
     opener_map["search/movie?query=Failed"] = _default_search_handler(3001, "Failed", 2015)
     opener_map["movie/3001"] = _default_details_handler(3001, "Failed", 2015)
 
@@ -1392,6 +1427,7 @@ def test_47_candidate_persistence_unchanged_when_skipped(env: EnrichTestEnv):
         )
         cand_id = cur.lastrowid
         conn.commit()
+    env.add_search_state(mv_id, query_title="Inception", search_status="CANDIDATES")
 
     opener = MockOpener({})
     res = media_enrich.run_batch_enrichment(source_id=env.source_id, db_path=env.db_path, home=env.home, opener=opener)
@@ -1422,6 +1458,7 @@ def test_48_plan_correctly_reports_search_eligibility(env: EnrichTestEnv):
             (mv_c, datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
+    env.add_search_state(mv_c, query_title="WithCandidates", search_status="CANDIDATES")
     # D: UNMATCHED without candidates
     mv_d = env.add_media("NeverSearched (2022).mkv")
     # E: MISSING resource
@@ -1434,7 +1471,7 @@ def test_48_plan_correctly_reports_search_eligibility(env: EnrichTestEnv):
     eligibility_map = {it["media_version_id"]: it["search_eligibility"] for it in plan_normal["items"]}
     assert eligibility_map[mv_a] == "ALREADY_IDENTIFIED"
     assert eligibility_map[mv_b] == "ALREADY_IDENTIFIED"
-    assert eligibility_map[mv_c] == "CANDIDATES_PRESENT"
+    assert eligibility_map[mv_c] == "CANDIDATES_CURRENT"
     assert eligibility_map[mv_d] == "NEVER_SEARCHED"
     assert eligibility_map[mv_e] == "MISSING_SKIPPED"
     assert eligibility_map[mv_f] == "PARSE_FAILURE"

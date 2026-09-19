@@ -1139,11 +1139,11 @@ def test_54_xdg_isolation(sandbox):
 
 def test_55_no_schema_change(sandbox):
     """55. Living-room resolver UI generation does not change database schema."""
-    assert media_db.SCHEMA_VERSION == 3
+    assert media_db.SCHEMA_VERSION == 4
 
     with closing(media_db.connect(sandbox["db_file"])) as db:
         version_before = media_db.get_schema_version(db)
-        assert version_before == 3
+        assert version_before == 4
 
     _ingest_movie(sandbox, "SchemaCheck.mkv")
     session_engine.media_menu_sections(

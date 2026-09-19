@@ -1290,10 +1290,10 @@ def test_69_xdg_isolation(sandbox):
 
 
 def test_70_schema_v2_unchanged(sandbox):
-    """70. Manual search does not mutate database schema (remains authoritative v3)."""
+    """70. Manual search does not mutate database schema (remains authoritative v4)."""
     with closing(media_db.connect(sandbox["db_file"])) as db:
         version_before = media_db.get_schema_version(db)
-        assert version_before == 3
+        assert version_before == 4
 
         mv_id = _seed_media_version(sandbox)
         payload = _make_tmdb_response([{"id": 1, "title": "Movie", "release_date": "2020-01-01"}])

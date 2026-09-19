@@ -829,7 +829,7 @@ def test_34_long_title_display_bounded_query_unchanged(sandbox):
 def test_35_query_not_persisted_to_canonical_db(sandbox):
     with closing(media_db.connect(sandbox["db_file"])) as db:
         version_before = media_db.get_schema_version(db)
-        assert version_before == 3
+        assert version_before == 4
 
     mv_id = _ingest_movie(sandbox, "NoPersist.mkv", "Initial Title")
     calls = [

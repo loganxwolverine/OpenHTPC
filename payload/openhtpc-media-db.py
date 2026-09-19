@@ -4,7 +4,7 @@
 #
 # Part of the OPENHTPC project.
 # Original project by Steve Dehanne.
-"""Persistent media knowledge, schema v3. Initialization is explicit only.
+"""Persistent media knowledge, schema v4. Initialization is explicit only.
 
 Callers own returned connections and must close them. FILE identity is the
 source-relative pair when both values are known; canonical_path is diagnostic.
@@ -26,15 +26,17 @@ from __future__ import annotations
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 import time
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 ARTWORK_STORAGE_CLASS = "REPRODUCIBLE_CACHE"
 SCHEMA = """
 CREATE TABLE schema_info (
@@ -140,16 +142,31 @@ CREATE TABLE work_presentations (
  updated_at TEXT NOT NULL,
  UNIQUE(work_id, locale)
 );
+CREATE TABLE media_version_searches (
+ id INTEGER PRIMARY KEY,
+ media_version_id INTEGER NOT NULL REFERENCES media_versions(id) ON DELETE CASCADE,
+ provider TEXT NOT NULL,
+ query_title TEXT,
+ query_year INTEGER,
+ query_locale TEXT NOT NULL DEFAULT 'fr-FR',
+ query_media_type TEXT NOT NULL DEFAULT 'movie',
+ query_signature TEXT NOT NULL,
+ search_status TEXT NOT NULL CHECK(search_status IN ('CANDIDATES','NO_RESULT','FAILED')),
+ failure_reason TEXT,
+ searched_at TEXT NOT NULL,
+ UNIQUE(media_version_id, provider)
+);
 CREATE INDEX external_ids_work ON external_ids(work_id);
 CREATE INDEX media_versions_work ON media_versions(work_id);
 CREATE INDEX resources_version ON resources(media_version_id);
 CREATE INDEX match_candidates_version ON match_candidates(media_version_id);
 CREATE INDEX provider_snapshots_external_id ON provider_snapshots(external_id_id);
 CREATE INDEX work_presentations_work ON work_presentations(work_id);
+CREATE INDEX media_version_searches_version ON media_version_searches(media_version_id);
 """
 TABLES = ('schema_info', 'works', 'external_ids', 'media_versions', 'resources',
           'video_streams', 'audio_streams', 'subtitle_streams', 'match_candidates',
-          'provider_snapshots', 'work_presentations')
+          'provider_snapshots', 'work_presentations', 'media_version_searches')
 
 
 def database_path(*, environ=None, home=None) -> Path:
@@ -207,7 +224,12 @@ def get_schema_version(db) -> int | None:
         return 1
     if versions in ([2], [1, 2]):
         return 2
-    if versions in ([SCHEMA_VERSION], [2, SCHEMA_VERSION], [1, SCHEMA_VERSION], [1, 2, SCHEMA_VERSION]):
+    if versions in ([3], [2, 3], [1, 3], [1, 2, 3]):
+        return 3
+    if versions in ([SCHEMA_VERSION],
+                    [3, SCHEMA_VERSION], [2, SCHEMA_VERSION], [1, SCHEMA_VERSION],
+                    [2, 3, SCHEMA_VERSION], [1, 3, SCHEMA_VERSION], [1, 2, SCHEMA_VERSION],
+                    [1, 2, 3, SCHEMA_VERSION]):
         return SCHEMA_VERSION
     raise sqlite3.DatabaseError('Unsupported schema history')
 
@@ -219,7 +241,7 @@ def _migrate_v1_to_v2(db: sqlite3.Connection) -> None:
     avg_frame_rate, r_frame_rate, is_forced to video_streams, and
     is_forced to audio_streams.
     """
-    if get_schema_version(db) in (2, 3):
+    if get_schema_version(db) in (2, 3, 4):
         return
     if get_schema_version(db) != 1:
         raise sqlite3.DatabaseError(f'Cannot migrate schema from version {get_schema_version(db)} to 2')
@@ -251,7 +273,7 @@ def _migrate_v2_to_v3(db: sqlite3.Connection) -> None:
     Strictly additive: creates provider_snapshots and work_presentations tables
     and their associated indexes.
     """
-    if get_schema_version(db) == 3:
+    if get_schema_version(db) in (3, 4):
         return
     if get_schema_version(db) != 2:
         raise sqlite3.DatabaseError(f'Cannot migrate schema from version {get_schema_version(db)} to 3')
@@ -301,6 +323,47 @@ def _migrate_v2_to_v3(db: sqlite3.Connection) -> None:
         raise
 
 
+def _migrate_v3_to_v4(db: sqlite3.Connection) -> None:
+    """Migrate database from schema v3 to schema v4.
+
+    Strictly additive: creates media_version_searches table and its associated
+    index.
+    """
+    if get_schema_version(db) == 4:
+        return
+    if get_schema_version(db) != 3:
+        raise sqlite3.DatabaseError(f'Cannot migrate schema from version {get_schema_version(db)} to 4')
+    in_tx = db.in_transaction
+    if not in_tx:
+        db.execute('BEGIN IMMEDIATE')
+    try:
+        db.execute("""
+        CREATE TABLE media_version_searches (
+         id INTEGER PRIMARY KEY,
+         media_version_id INTEGER NOT NULL REFERENCES media_versions(id) ON DELETE CASCADE,
+         provider TEXT NOT NULL,
+         query_title TEXT,
+         query_year INTEGER,
+         query_locale TEXT NOT NULL DEFAULT 'fr-FR',
+         query_media_type TEXT NOT NULL DEFAULT 'movie',
+         query_signature TEXT NOT NULL,
+         search_status TEXT NOT NULL CHECK(search_status IN ('CANDIDATES','NO_RESULT','FAILED')),
+         failure_reason TEXT,
+         searched_at TEXT NOT NULL,
+         UNIQUE(media_version_id, provider)
+        )
+        """)
+        db.execute("CREATE INDEX media_version_searches_version ON media_version_searches(media_version_id)")
+        db.execute("INSERT INTO schema_info (version, applied_at, description) VALUES (?, ?, ?)",
+                   (4, datetime.now(timezone.utc).isoformat(), 'Media Foundation schema v4'))
+        if not in_tx:
+            db.commit()
+    except Exception:
+        if not in_tx:
+            db.rollback()
+        raise
+
+
 def _schema_objects(db):
     return db.execute("SELECT type, name, tbl_name, sql FROM sqlite_master "
                       "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").fetchall()
@@ -330,7 +393,7 @@ def _verify_schema(db):
 
 
 def initialize(path=None) -> Path:
-    """Atomically install v3 once, migrate v1/v2, or validate without rewriting history.
+    """Atomically install v4 once, migrate v1/v2/v3, or validate without rewriting history.
 
     Unknown/partial schemas are rejected; future migrations need explicit code.
     BEGIN IMMEDIATE serializes concurrent initializers before inspecting schema.
@@ -345,14 +408,18 @@ def initialize(path=None) -> Path:
                         db.execute(statement)
                 db.execute('INSERT INTO schema_info VALUES (?, ?, ?)', (
                     SCHEMA_VERSION, datetime.now(timezone.utc).isoformat(),
-                    'Media Foundation schema v3'))
+                    'Media Foundation schema v4'))
             else:
                 ver = get_schema_version(db)
                 if ver == 1:
                     _migrate_v1_to_v2(db)
                     _migrate_v2_to_v3(db)
+                    _migrate_v3_to_v4(db)
                 elif ver == 2:
                     _migrate_v2_to_v3(db)
+                    _migrate_v3_to_v4(db)
+                elif ver == 3:
+                    _migrate_v3_to_v4(db)
             _verify_schema(db)
     return path
 
@@ -849,6 +916,209 @@ def get_work_presentation(
         "created_at": row[10],
         "updated_at": row[11],
     })
+
+
+VALID_SEARCH_STATUSES = frozenset({'CANDIDATES', 'NO_RESULT', 'FAILED'})
+
+
+def normalize_title(text: str | None) -> str:
+    """Comparison normalization for titles.
+
+    Lowercases, strips punctuation, and collapses whitespace.
+    """
+    if not text:
+        return ""
+    s = str(text).casefold()
+    s = re.sub(r"[^\w\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def compute_query_signature(
+    provider: str,
+    media_type: str = "movie",
+    locale: str = "fr-FR",
+    title: str | None = None,
+    year: int | None = None,
+) -> str:
+    """Compute deterministic SHA-256 signature for provider search query.
+
+    Accounts for:
+      - provider (lowercased, stripped)
+      - media_type (lowercased, stripped)
+      - locale (stripped)
+      - normalized search title
+      - extracted year (int or None)
+    """
+    norm_provider = str(provider or "").strip().lower()
+    norm_media_type = str(media_type or "movie").strip().lower()
+    norm_locale = str(locale or "fr-FR").strip()
+    norm_title = normalize_title(title)
+    norm_year = int(year) if year is not None else None
+
+    canonical_payload = {
+        "locale": norm_locale,
+        "media_type": norm_media_type,
+        "normalized_title": norm_title,
+        "provider": norm_provider,
+        "year": norm_year,
+    }
+    canonical_bytes = json.dumps(canonical_payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
+def upsert_media_version_search(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    provider: str,
+    query_signature: str,
+    search_status: str,
+    failure_reason: str | None = None,
+    searched_at: str | datetime | None = None,
+    query_title: str | None = None,
+    query_year: int | None = None,
+    query_locale: str = "fr-FR",
+    query_media_type: str = "movie",
+    *,
+    raise_on_error: bool = False,
+) -> dict[str, Any]:
+    """Upsert durable search state for a media_version and provider.
+
+    Guarantees provider-scoping, deterministic query signature binding,
+    and transaction atomicity.
+    """
+    if not isinstance(media_version_id, int) or isinstance(media_version_id, bool) or media_version_id <= 0:
+        raise ValueError(f"Invalid media_version_id: {media_version_id}")
+
+    mv = db.execute("SELECT id FROM media_versions WHERE id = ?", (media_version_id,)).fetchone()
+    if mv is None:
+        raise ValueError(f"media_version {media_version_id} not found")
+
+    provider_clean = str(provider or "").strip().lower()
+    if not provider_clean:
+        raise ValueError("provider must not be empty")
+
+    sig_clean = str(query_signature or "").strip().lower()
+    if not sig_clean:
+        raise ValueError("query_signature must not be empty")
+
+    status_clean = str(search_status or "").strip().upper()
+    if status_clean not in VALID_SEARCH_STATUSES:
+        raise ValueError(f"Invalid search_status: {search_status}")
+
+    if searched_at is None:
+        searched_at_str = datetime.now(timezone.utc).isoformat()
+    elif isinstance(searched_at, datetime):
+        searched_at_str = searched_at.astimezone(timezone.utc).isoformat()
+    elif isinstance(searched_at, str) and searched_at.strip():
+        searched_at_str = searched_at.strip()
+    else:
+        raise ValueError(f"Invalid searched_at: {searched_at}")
+
+    failure_clean = str(failure_reason).strip()[:500] if failure_reason is not None else None
+    title_clean = str(query_title).strip() if query_title is not None else None
+    year_int = int(query_year) if query_year is not None else None
+    locale_clean = str(query_locale or "fr-FR").strip()
+    media_type_clean = str(query_media_type or "movie").strip().lower()
+
+    existing = db.execute(
+        "SELECT id FROM media_version_searches WHERE media_version_id = ? AND provider = ?",
+        (media_version_id, provider_clean),
+    ).fetchone()
+
+    in_tx = db.in_transaction
+    if not in_tx:
+        db.execute("BEGIN IMMEDIATE")
+    try:
+        if existing is not None:
+            row_id = existing[0]
+            db.execute(
+                """
+                UPDATE media_version_searches
+                SET query_title = ?,
+                    query_year = ?,
+                    query_locale = ?,
+                    query_media_type = ?,
+                    query_signature = ?,
+                    search_status = ?,
+                    failure_reason = ?,
+                    searched_at = ?
+                WHERE id = ?
+                """,
+                (title_clean, year_int, locale_clean, media_type_clean, sig_clean, status_clean, failure_clean, searched_at_str, row_id),
+            )
+            is_update = True
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO media_version_searches (
+                    media_version_id, provider, query_title, query_year,
+                    query_locale, query_media_type, query_signature,
+                    search_status, failure_reason, searched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (media_version_id, provider_clean, title_clean, year_int, locale_clean, media_type_clean, sig_clean, status_clean, failure_clean, searched_at_str),
+            )
+            row_id = cur.lastrowid
+            is_update = False
+
+        if not in_tx:
+            db.commit()
+    except Exception:
+        if not in_tx:
+            db.rollback()
+        raise
+
+    return {
+        "ok": True,
+        "id": row_id,
+        "media_version_id": media_version_id,
+        "provider": provider_clean,
+        "query_title": title_clean,
+        "query_year": year_int,
+        "query_locale": locale_clean,
+        "query_media_type": media_type_clean,
+        "query_signature": sig_clean,
+        "search_status": status_clean,
+        "failure_reason": failure_clean,
+        "searched_at": searched_at_str,
+        "is_update": is_update,
+    }
+
+
+def get_media_version_search(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    provider: str,
+) -> dict[str, Any] | None:
+    """Retrieve search state record for a media_version and provider.
+
+    Returns dict on success, or None if no search state exists.
+    """
+    row = db.execute(
+        """
+        SELECT id, media_version_id, provider, query_title, query_year,
+               query_locale, query_media_type, query_signature, search_status,
+               failure_reason, searched_at
+        FROM media_version_searches
+        WHERE media_version_id = ? AND provider = ?
+        """,
+        (media_version_id, str(provider).strip().lower()),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "media_version_id": row[1],
+        "provider": row[2],
+        "query_title": row[3],
+        "query_year": row[4],
+        "query_locale": row[5],
+        "query_media_type": row[6],
+        "query_signature": row[7],
+        "search_status": row[8],
+        "failure_reason": row[9],
+        "searched_at": row[10],
+    }
 
 
 def main(argv=None) -> int:

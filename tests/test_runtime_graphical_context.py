@@ -289,9 +289,9 @@ class TestRuntimeGraphicalContext(unittest.TestCase):
         self.assertEqual(match["id"], "mode-50")
 
     def test_12_no_db_schema_version_change(self):
-        """Database schema version is 3 and graphical context resolution does not change DB schema."""
+        """Database schema version is 4 and graphical context resolution does not change DB schema."""
         db_mod = _load_module("openhtpc_media_db_test", PAYLOAD / "openhtpc-media-db.py")
-        self.assertEqual(db_mod.SCHEMA_VERSION, 3)
+        self.assertEqual(db_mod.SCHEMA_VERSION, 4)
         version_text = (ROOT / "VERSION").read_text().strip()
         self.assertEqual(version_text, "1.2.0-rc8")
 
@@ -300,7 +300,7 @@ class TestRuntimeGraphicalContext(unittest.TestCase):
         db_mod.initialize(db_path)
         with contextlib.closing(db_mod.connect(db_path)) as db:
             version_before = db_mod.get_schema_version(db)
-            self.assertEqual(version_before, 3)
+            self.assertEqual(version_before, 4)
 
         # Graphical context resolution does not mutate DB schema
         caps_mod.resolve_graphical_context(home=self.home)

@@ -94,6 +94,7 @@ TEST_PROFILES: dict[str, list[str]] = {
     "media-flex-poster": ["tests/test_media_flex_poster.py"],
     "media-movie-detail": ["tests/test_media_movie_detail.py"],
     "media-enrich": ["tests/test_media_enrich.py"],
+    "media-search-state": ["tests/test_media_search_state.py"],
     "media-foundation": [
         "tests/test_media_db_foundation.py",
         "tests/test_media_presentation_db.py",
@@ -113,6 +114,7 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_text_entry.py",
         "tests/test_media_manual_search_ui.py",
         "tests/test_media_enrich.py",
+        "tests/test_media_search_state.py",
     ],
 }
 

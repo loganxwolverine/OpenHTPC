@@ -70,12 +70,12 @@ def test_initialization_permissions_and_idempotence(tmp_path):
     media.initialize(path)
     with closing(media.connect(path)) as db:
         assert db.execute('SELECT * FROM schema_info').fetchall() == history
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         assert media.stats(db)['media_versions'] == 1
         assert set(media.stats(db)) == {
             'schema_info', 'works', 'external_ids', 'media_versions', 'resources',
             'video_streams', 'audio_streams', 'subtitle_streams', 'match_candidates',
-            'provider_snapshots', 'work_presentations'}
+            'provider_snapshots', 'work_presentations', 'media_version_searches'}
 
 
 def test_each_connection_policy(tmp_path):
@@ -175,7 +175,7 @@ def test_integrity(db):
 
 @pytest.mark.parametrize('damage', ['DROP INDEX resources_file_identity',
                                    'ALTER TABLE works ADD COLUMN unwanted TEXT',
-                                   'UPDATE schema_info SET version=4'])
+                                   'UPDATE schema_info SET version=5'])
 def test_reject_schema_damage(tmp_path, damage):
     path = media.initialize(tmp_path / 'media/media.db')
     with closing(media.connect(path)) as db:
@@ -208,7 +208,7 @@ def test_cli_explicit_initialization(tmp_path):
     for operation in ('init', 'status', 'verify', 'init'):
         result = subprocess.run([sys.executable, str(COMPONENT), operation], env=env, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout)['schema_version'] == 3
+        assert json.loads(result.stdout)['schema_version'] == 4
     assert subprocess.run([sys.executable, str(COMPONENT), 'sql'], env=env, capture_output=True).returncode == 2
 
 
@@ -378,10 +378,10 @@ def test_v1_to_v2_migration_and_historical_rows(tmp_path):
     media.initialize(path)
 
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         assert media.check_integrity(db)['ok'] is True
         history = [r[0] for r in db.execute("SELECT version FROM schema_info ORDER BY version").fetchall()]
-        assert history == [1, 2, 3]
+        assert history == [1, 2, 3, 4]
 
         # Historical video row must have NULL for all newly added columns, especially is_forced
         v_row = db.execute(
@@ -420,17 +420,19 @@ def test_v1_to_v2_migration_idempotence(tmp_path):
     media.initialize(path)
 
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         # Explicit _migrate_v1_to_v2 on already migrated db is a no-op
         media._migrate_v1_to_v2(db)
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         media._migrate_v2_to_v3(db)
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
+        media._migrate_v3_to_v4(db)
+        assert media.get_schema_version(db) == 4
 
     # Calling initialize again is idempotent
     media.initialize(path)
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         assert media.check_integrity(db)['ok'] is True
 
 
@@ -597,10 +599,10 @@ def test_v2_to_v3_migration_and_historical_rows(tmp_path):
     media.initialize(path)
 
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         assert media.check_integrity(db)['ok'] is True
         history = [r[0] for r in db.execute("SELECT version FROM schema_info ORDER BY version").fetchall()]
-        assert history == [2, 3]
+        assert history == [2, 3, 4]
 
         # Verify historical rows untouched
         assert db.execute("SELECT title FROM works WHERE id=?", (wid,)).fetchone() == ('Title',)
@@ -611,6 +613,7 @@ def test_v2_to_v3_migration_and_historical_rows(tmp_path):
         # Verify new tables exist and are empty
         assert media.stats(db)['provider_snapshots'] == 0
         assert media.stats(db)['work_presentations'] == 0
+        assert media.stats(db)['media_version_searches'] == 0
 
 
 def test_v2_to_v3_migration_idempotence(tmp_path):
@@ -618,15 +621,17 @@ def test_v2_to_v3_migration_idempotence(tmp_path):
     media.initialize(path)
 
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         # Explicit _migrate_v2_to_v3 on already migrated db is a no-op
         media._migrate_v2_to_v3(db)
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
+        media._migrate_v3_to_v4(db)
+        assert media.get_schema_version(db) == 4
 
     # Calling initialize again is idempotent
     media.initialize(path)
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         assert media.check_integrity(db)['ok'] is True
 
 
@@ -646,3 +651,129 @@ def test_v2_to_v3_migration_rollback_on_failure(tmp_path):
         assert media.get_schema_version(db) == 2
         rows = db.execute("SELECT version FROM schema_info").fetchall()
         assert rows == [(2,)]
+
+
+V3_TEST_SCHEMA = V2_TEST_SCHEMA + """
+CREATE TABLE provider_snapshots (
+ id INTEGER PRIMARY KEY,
+ external_id_id INTEGER NOT NULL REFERENCES external_ids(id) ON DELETE CASCADE,
+ snapshot_kind TEXT NOT NULL,
+ locale TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ fetched_at TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(external_id_id, snapshot_kind, locale)
+);
+CREATE TABLE work_presentations (
+ id INTEGER PRIMARY KEY,
+ work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+ locale TEXT NOT NULL,
+ source_snapshot_id INTEGER REFERENCES provider_snapshots(id) ON DELETE SET NULL,
+ display_title TEXT NOT NULL,
+ display_original_title TEXT,
+ release_date TEXT,
+ runtime_minutes INTEGER CHECK(runtime_minutes IS NULL OR runtime_minutes >= 0),
+ overview TEXT,
+ genres_json TEXT,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ UNIQUE(work_id, locale)
+);
+CREATE INDEX provider_snapshots_external_id ON provider_snapshots(external_id_id);
+CREATE INDEX work_presentations_work ON work_presentations(work_id);
+"""
+
+
+def _create_v3_database(path: Path) -> Path:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript(V3_TEST_SCHEMA)
+        db.execute("INSERT INTO schema_info VALUES (3, '2026-09-15T00:00:00+00:00', 'Media Foundation schema v3')")
+        db.commit()
+    return path
+
+
+def test_v3_to_v4_migration_and_historical_rows(tmp_path):
+    path = _create_v3_database(tmp_path / 'media/media.db')
+    with closing(media.connect(path)) as db:
+        assert media.get_schema_version(db) == 3
+        # Insert historical v3 data
+        wid = work(db)
+        eid = db.execute("INSERT INTO external_ids(work_id, provider, external_id, created_at) "
+                         "VALUES (?, 'tmdb_movie', '12345', 'now')", (wid,)).lastrowid
+        vid = version(db, work_id=wid)
+        rid = resource(db, media_version_id=vid)
+        db.execute("INSERT INTO video_streams (resource_id, stream_index, codec, width, height, is_default, field_order) "
+                   "VALUES (?, 0, 'h264', 1920, 1080, 1, 'progressive')", (rid,))
+        db.execute("INSERT INTO audio_streams (resource_id, stream_index, codec, channels, is_default, is_forced) "
+                   "VALUES (?, 1, 'dts', 6, 1, 0)", (rid,))
+        db.execute("INSERT INTO match_candidates (media_version_id, provider, external_id, candidate_title, score, status, created_at) "
+                   "VALUES (?, 'tmdb_movie', '12345', 'Candidate Movie', 85.0, 'PENDING', 'now')", (vid,))
+        psid = db.execute("INSERT INTO provider_snapshots (external_id_id, snapshot_kind, locale, payload_json, fetched_at, created_at, updated_at) "
+                          "VALUES (?, 'movie_details', 'fr-FR', '{}', 'now', 'now', 'now')", (eid,)).lastrowid
+        wpid = db.execute("INSERT INTO work_presentations (work_id, locale, source_snapshot_id, display_title, display_original_title, created_at, updated_at) "
+                          "VALUES (?, 'fr-FR', ?, 'Display Title', 'Original Title', 'now', 'now')", (wid, psid)).lastrowid
+        db.commit()
+
+    # Migrate via initialize
+    media.initialize(path)
+
+    with closing(media.connect(path)) as db:
+        assert media.get_schema_version(db) == 4
+        assert media.check_integrity(db)['ok'] is True
+        history = [r[0] for r in db.execute("SELECT version FROM schema_info ORDER BY version").fetchall()]
+        assert history == [3, 4]
+
+        # Verify all prior v3 rows are semantically unchanged
+        assert db.execute("SELECT title FROM works WHERE id=?", (wid,)).fetchone() == ('Title',)
+        assert db.execute("SELECT external_id FROM external_ids WHERE id=?", (eid,)).fetchone() == ('12345',)
+        assert db.execute("SELECT field_order FROM video_streams WHERE resource_id=? AND stream_index=0", (rid,)).fetchone() == ('progressive',)
+        assert db.execute("SELECT is_forced FROM audio_streams WHERE resource_id=? AND stream_index=1", (rid,)).fetchone() == (0,)
+        assert db.execute("SELECT candidate_title FROM match_candidates WHERE media_version_id=?", (vid,)).fetchone() == ('Candidate Movie',)
+        assert db.execute("SELECT snapshot_kind FROM provider_snapshots WHERE id=?", (psid,)).fetchone() == ('movie_details',)
+        assert db.execute("SELECT display_title FROM work_presentations WHERE id=?", (wpid,)).fetchone() == ('Display Title',)
+
+        # Verify media_version_searches table exists and is empty
+        assert media.stats(db)['media_version_searches'] == 0
+
+        # Verify inserting search state works
+        db.execute("INSERT INTO media_version_searches (media_version_id, provider, query_title, query_year, query_locale, query_media_type, query_signature, search_status, searched_at) "
+                   "VALUES (?, 'tmdb_movie', 'Candidate Movie', 2020, 'fr-FR', 'movie', 'sig123', 'CANDIDATES', 'now')", (vid,))
+        db.commit()
+        assert media.stats(db)['media_version_searches'] == 1
+
+
+def test_v3_to_v4_migration_idempotence(tmp_path):
+    path = _create_v3_database(tmp_path / 'media/media.db')
+    media.initialize(path)
+
+    with closing(media.connect(path)) as db:
+        assert media.get_schema_version(db) == 4
+        # Explicit _migrate_v3_to_v4 on already migrated db is a no-op
+        media._migrate_v3_to_v4(db)
+        assert media.get_schema_version(db) == 4
+
+    # Calling initialize again is idempotent
+    media.initialize(path)
+    with closing(media.connect(path)) as db:
+        assert media.get_schema_version(db) == 4
+        assert media.check_integrity(db)['ok'] is True
+
+
+def test_v3_to_v4_migration_rollback_on_failure(tmp_path):
+    path = _create_v3_database(tmp_path / 'media/media.db')
+    with closing(media.connect(path)) as db:
+        # Pre-create a conflicting table to force migration statement failure
+        db.execute("CREATE TABLE media_version_searches (id INTEGER PRIMARY KEY, conflicting TEXT)")
+        db.commit()
+
+    with closing(media.connect(path)) as db:
+        with pytest.raises(sqlite3.OperationalError):
+            media._migrate_v3_to_v4(db)
+
+    # Verify rollback: schema version remains 3 and no schema_info version 4 was added
+    with closing(media.connect(path)) as db:
+        assert media.get_schema_version(db) == 3
+        rows = db.execute("SELECT version FROM schema_info").fetchall()
+        assert rows == [(3,)]

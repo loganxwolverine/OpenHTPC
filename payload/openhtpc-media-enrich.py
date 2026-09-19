@@ -356,19 +356,22 @@ def plan_source(
             search_eligibility = "PARSE_FAILURE"
             eligibility_reason = "PARSE_FAILURE"
         else:
-            cand_count = db.execute(
-                "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status IN ('PENDING', 'REJECTED')",
-                (item["media_version_id"],),
-            ).fetchone()[0]
+            media_db = _load_media_db()
+            current_sig = media_db.compute_query_signature(
+                provider="tmdb_movie",
+                media_type="movie",
+                locale=locale,
+                title=clean_title,
+                year=extracted_year,
+            )
+            search_state = media_db.get_media_version_search(
+                db, item["media_version_id"], provider="tmdb_movie"
+            )
 
-            if cand_count > 0:
-                if refresh_candidates:
-                    search_eligibility = "REFRESH_REQUESTED"
-                    eligibility_reason = "REFRESH_REQUESTED"
-                else:
-                    search_eligibility = "CANDIDATES_PRESENT"
-                    eligibility_reason = "CANDIDATES_ALREADY_PERSISTED"
-            else:
+            if refresh_candidates:
+                search_eligibility = "REFRESH_REQUESTED"
+                eligibility_reason = "REFRESH_REQUESTED"
+            elif search_state is None:
                 search_eligibility = "NEVER_SEARCHED"
                 if extracted_year is None:
                     title_without_year += 1
@@ -376,6 +379,21 @@ def plan_source(
                 else:
                     title_and_year += 1
                     eligibility_reason = "ELIGIBLE_FOR_AUTO_MATCH"
+            elif search_state["query_signature"] != current_sig:
+                search_eligibility = "QUERY_CHANGED"
+                eligibility_reason = "QUERY_CHANGED"
+            elif search_state["search_status"] == "CANDIDATES":
+                search_eligibility = "CANDIDATES_CURRENT"
+                eligibility_reason = "CANDIDATES_ALREADY_PERSISTED"
+            elif search_state["search_status"] == "NO_RESULT":
+                search_eligibility = "NO_RESULT_CURRENT"
+                eligibility_reason = "NO_RESULTS_PERSISTED"
+            elif search_state["search_status"] == "FAILED":
+                search_eligibility = "FAILED_RETRY"
+                eligibility_reason = "FAILED_RETRY"
+            else:
+                search_eligibility = "NEVER_SEARCHED"
+                eligibility_reason = "NEVER_SEARCHED"
 
         plan_items.append({
             "media_version_id": item["media_version_id"],
@@ -417,7 +435,11 @@ def plan_source(
         "already_complete": 0,
         "refresh_candidates": refresh_candidates,
         "never_searched": sum(1 for it in plan_items if it["search_eligibility"] == "NEVER_SEARCHED"),
-        "candidates_present": sum(1 for it in plan_items if it["search_eligibility"] == "CANDIDATES_PRESENT"),
+        "candidates_current": sum(1 for it in plan_items if it["search_eligibility"] == "CANDIDATES_CURRENT"),
+        "candidates_present": sum(1 for it in plan_items if it["search_eligibility"] in ("CANDIDATES_PRESENT", "CANDIDATES_CURRENT")),
+        "no_result_current": sum(1 for it in plan_items if it["search_eligibility"] == "NO_RESULT_CURRENT"),
+        "failed_retry": sum(1 for it in plan_items if it["search_eligibility"] == "FAILED_RETRY"),
+        "query_changed": sum(1 for it in plan_items if it["search_eligibility"] == "QUERY_CHANGED"),
         "refresh_requested": sum(1 for it in plan_items if it["search_eligibility"] == "REFRESH_REQUESTED"),
         "missing_skipped": sum(1 for it in plan_items if it["search_eligibility"] == "MISSING_SKIPPED"),
         "items": plan_items,
@@ -540,17 +562,43 @@ def enrich_source(
                 match_status = "UNMATCHED"
                 failure_reason = "PARSE_FAILURE"
             else:
-                cand_count = db.execute(
-                    "SELECT COUNT(*) FROM match_candidates WHERE media_version_id = ? AND status IN ('PENDING', 'REJECTED')",
-                    (item_id,),
-                ).fetchone()[0]
+                media_db = _load_media_db()
+                current_sig = media_db.compute_query_signature(
+                    provider="tmdb_movie",
+                    media_type="movie",
+                    locale=locale,
+                    title=clean_title,
+                    year=extracted_year,
+                )
+                search_state = media_db.get_media_version_search(
+                    db, item_id, provider="tmdb_movie"
+                )
 
-                if cand_count > 0 and not refresh_candidates:
+                should_search = False
+                if refresh_candidates:
+                    should_search = True
+                elif search_state is None:
+                    should_search = True
+                elif search_state["query_signature"] != current_sig:
+                    should_search = True
+                elif search_state["search_status"] == "FAILED":
+                    should_search = True
+                elif search_state["search_status"] == "CANDIDATES":
+                    should_search = False
                     unresolved += 1
                     search_status = "CANDIDATES_PRESERVED"
                     match_status = "UNMATCHED"
                     failure_reason = "CANDIDATES_ALREADY_PERSISTED"
+                elif search_state["search_status"] == "NO_RESULT":
+                    should_search = False
+                    unresolved += 1
+                    search_status = "NO_RESULTS_PRESERVED"
+                    match_status = "UNMATCHED"
+                    failure_reason = "NO_RESULTS"
                 else:
+                    should_search = True
+
+                if should_search:
                     searched += 1
                     if rate_limit_sleep > 0.0:
                         time.sleep(rate_limit_sleep)
@@ -574,6 +622,18 @@ def enrich_source(
                             "DELETE FROM match_candidates WHERE media_version_id = ? AND status = 'PENDING'",
                             (item_id,),
                         )
+                        media_db.upsert_media_version_search(
+                            db,
+                            media_version_id=item_id,
+                            provider="tmdb_movie",
+                            query_signature=current_sig,
+                            search_status="NO_RESULT",
+                            failure_reason="NO_RESULTS",
+                            query_title=clean_title,
+                            query_year=extracted_year,
+                            query_locale=locale,
+                            query_media_type="movie",
+                        )
                         db.commit()
                     elif search_res.status != tmdb_provider.STATUS_OK:
                         provider_failed += 1
@@ -582,6 +642,20 @@ def enrich_source(
                         match_status = "UNMATCHED"
                         failure_reason = search_res.error_code or search_res.status
                         outcome = "PARTIAL"
+                        # Preserve prior usable candidate set across transient failure
+                        media_db.upsert_media_version_search(
+                            db,
+                            media_version_id=item_id,
+                            provider="tmdb_movie",
+                            query_signature=current_sig,
+                            search_status="FAILED",
+                            failure_reason=failure_reason[:200] if failure_reason else None,
+                            query_title=clean_title,
+                            query_year=extracted_year,
+                            query_locale=locale,
+                            query_media_type="movie",
+                        )
+                        db.commit()
                     else:
                         # Search succeeded with candidates
                         search_status = "OK"
@@ -593,6 +667,18 @@ def enrich_source(
                         )
                         # Persist top 5 candidates
                         media_match.persist_candidates(db, item_id, scored, limit=5)
+                        media_db.upsert_media_version_search(
+                            db,
+                            media_version_id=item_id,
+                            provider="tmdb_movie",
+                            query_signature=current_sig,
+                            search_status="CANDIDATES",
+                            failure_reason=None,
+                            query_title=clean_title,
+                            query_year=extracted_year,
+                            query_locale=locale,
+                            query_media_type="movie",
+                        )
 
                         if extracted_year is None:
                             # Section 7: Yearless items — AUTO_ACCEPT is FORBIDDEN
@@ -736,6 +822,7 @@ def enrich_source(
         "already_complete": already_complete,
         "refresh_candidates": refresh_candidates,
         "candidates_preserved": sum(1 for it in item_reports if it.get("search_status") == "CANDIDATES_PRESERVED"),
+        "no_results_preserved": sum(1 for it in item_reports if it.get("search_status") == "NO_RESULTS_PRESERVED"),
         "missing_skipped": sum(1 for it in item_reports if it.get("search_status") == "SKIPPED" and it.get("failure_reason") == "RESOURCE_MISSING"),
         "items": item_reports,
     }

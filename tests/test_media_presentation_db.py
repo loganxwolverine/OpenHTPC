@@ -77,11 +77,11 @@ def insert_external_id(db: sqlite3.Connection, work_id: int, provider: str = "tm
 # ---------------------------------------------------------------------------
 
 def test_fresh_schema_v3_creation_and_integrity(tmp_path):
-    """Fresh initialization produces schema v3 with all tables, indexes, and passes integrity checks."""
+    """Fresh initialization produces schema v4 with all tables, indexes, and passes integrity checks."""
     path = tmp_path / "fresh/media.db"
     assert media.initialize(path) == path
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         chk = media.check_integrity(db)
         assert chk["ok"] is True
         assert chk["integrity_check"] == ["ok"]
@@ -90,9 +90,11 @@ def test_fresh_schema_v3_creation_and_integrity(tmp_path):
         st = media.stats(db)
         assert "provider_snapshots" in st
         assert "work_presentations" in st
+        assert "media_version_searches" in st
         assert st["provider_snapshots"] == 0
         assert st["work_presentations"] == 0
-        assert len(st) == 11
+        assert st["media_version_searches"] == 0
+        assert len(st) == 12
 
 
 def test_schema_indexes_exist(db):
@@ -155,7 +157,7 @@ def test_v2_to_v3_migration_preserves_all_v2_tables_and_rows(tmp_path):
     media.initialize(path)
 
     with closing(media.connect(path)) as db:
-        assert media.get_schema_version(db) == 3
+        assert media.get_schema_version(db) == 4
         chk = media.check_integrity(db)
         assert chk["ok"] is True
 
