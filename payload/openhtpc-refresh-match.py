@@ -207,6 +207,9 @@ class Runtime:
         return result.returncode == 0
 
 
+POST_MODESET_SETTLE_SECONDS = 2.0
+
+
 class Transaction:
     def __init__(self, home, runtime=None):
         self.home = pathlib.Path(home)
@@ -216,8 +219,14 @@ class Transaction:
         self.diag = self.root / 'refresh-match-last.json'
         self.record = {'schema': 1, 'owner': uuid.uuid4().hex, 'status': 'UNAVAILABLE',
                        'switch_requested': False, 'switch_verified': False,
-                       'playback_started': False, 'restore_requested': False, 'restore_verified': False}
+                       'playback_started': False, 'restore_requested': False, 'restore_verified': False,
+                       'settled': False, 'fallback_active': False,
+                       'post_modeset_settle_seconds': POST_MODESET_SETTLE_SECONDS}
         self.lock = None
+
+    def settle(self, seconds=POST_MODESET_SETTLE_SECONDS):
+        if seconds > 0:
+            time.sleep(seconds)
 
     def note(self, status, **fields):
         self.record.update(status=status, **fields)
@@ -282,7 +291,8 @@ class Transaction:
             self.note('RESTORE_FAILED'); return False
         tx['state'] = 'RESTORED'; atomic(self.path, tx)
         self.note('RESTORED', original=original, original_mode=mode, restore_verified=True,
-                  final_mode_id=mode['id'], final_display=active(self.snapshot()))
+                  final_mode_id=mode['id'], final_display=active(self.snapshot()),
+                  refresh_phase='REFRESH_MATCH_RESTORE')
         self.path.unlink()
         return True
 
@@ -303,13 +313,67 @@ class Transaction:
         atomic(self.path, tx)
         self.record.update(original=original, original_mode=old, target_mode=target)
         self.note('PREPARED', switch_requested=True)
-        request_ok = self.runtime.apply(original, target['id'])
+        request_ok = False
+        try:
+            request_ok = bool(self.runtime.apply(original, target['id']))
+        except Exception:
+            request_ok = False
         self.record['switch_request_success'] = request_ok
-        if not request_ok or not self.verify(original, target):
-            self.note('SWITCH_FAILED', switch_status='FAILED')
-            self.restore(); return
-        tx['state'] = 'APPLIED'; atomic(self.path, tx)
-        self.note('APPLIED', switch_verified=True, switch_status='VERIFIED', achieved=active(self.snapshot()))
+
+        verified = False
+        if request_ok:
+            try:
+                verified = bool(self.verify(original, target))
+            except Exception:
+                verified = False
+
+        if not request_ok or not verified:
+            # Fallback path: safe restoration/retention of original mode
+            self.note('SWITCH_FAILED', switch_status='FAILED', switch_verified=False,
+                      fallback_active=True, refresh_phase='REFRESH_MATCH_FALLBACK')
+            now = active(self.snapshot())
+            at_original = bool(now and identity(now) == identity(original)
+                               and now.get('current_mode_id') == old['id']
+                               and self.verify(original, old))
+            applied_corrective = False
+            if not at_original and now:
+                try:
+                    self.note('RESTORING', restore_requested=True)
+                    self.record['restore_request_success'] = bool(self.runtime.apply(now, old['id']))
+                    applied_corrective = True
+                except Exception:
+                    self.record['restore_request_success'] = False
+
+            restore_verified = bool(self.verify(original, old))
+            if not restore_verified:
+                usable = active(self.snapshot())
+                restore_verified = bool(usable and proven(usable))
+
+            if applied_corrective and restore_verified:
+                self.settle(POST_MODESET_SETTLE_SECONDS)
+                self.record['fallback_settled'] = True
+                self.record['settled'] = True
+
+            tx['state'] = 'RESTORED'
+            atomic(self.path, tx)
+            self.note('RESTORED', original=original, original_mode=old, restore_verified=restore_verified,
+                      switch_status='FAILED', switch_verified=False, fallback_active=True,
+                      refresh_phase='REFRESH_MATCH_FALLBACK',
+                      final_mode_id=old['id'], final_display=active(self.snapshot()))
+            if self.path.exists():
+                self.path.unlink()
+            return
+
+        tx['state'] = 'APPLIED'
+        atomic(self.path, tx)
+        self.note('APPLIED', switch_verified=True, switch_status='VERIFIED',
+                  refresh_phase='REFRESH_MATCH_APPLIED', achieved=active(self.snapshot()))
+        self.settle(POST_MODESET_SETTLE_SECONDS)
+        self.record['settled'] = True
+        self.record['settle_seconds'] = POST_MODESET_SETTLE_SECONDS
+        self.note('APPLIED', switch_verified=True, switch_status='VERIFIED', settled=True,
+                  settle_seconds=POST_MODESET_SETTLE_SECONDS,
+                  refresh_phase='REFRESH_MATCH_SETTLED', achieved=active(self.snapshot()))
 
 
 @contextlib.contextmanager
@@ -492,7 +556,7 @@ class TelemetryCollector:
 
 def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
     with matching(home, media, dispatch_id=dispatch_id) as tx:
-        switched = bool(tx and tx.record.get('switch_requested'))
+        switched = bool(tx and tx.record.get('switch_requested') and tx.record.get('switch_verified') and tx.record.get('status') == 'APPLIED')
         if audio_prep is not None:
             try:
                 audio_prep(settle_timeout=1.5 if switched else 0.0)
