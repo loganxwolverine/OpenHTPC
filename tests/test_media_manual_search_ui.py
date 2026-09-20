@@ -1007,3 +1007,243 @@ def test_40_zero_results_trampoline_navigation(sandbox):
     assert f":applyback $HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui {mv_id}" in ms_sec
     assert "RETOUR" in ms_sec
 
+
+# 41. CASE 1: UNMATCHED, MV_ID KNOWN, 0 CANDIDATES -> RECHERCHER MANUELLEMENT IS ENTRY 1
+def test_41_case1_unmatched_zero_candidates_manual_search_is_entry1(sandbox):
+    """CASE 1: When mv_id is known but has 0 candidates, RECHERCHER MANUELLEMENT is Entry 1 (no dead-end)."""
+    mv_id = _ingest_movie(sandbox, "ZeroCandsCase1.mkv", "Zero Cands Case 1")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R41414141", "genCase1", {}, sandbox["media_icon"]
+        )
+        assert len(sections) == 2
+        res_sec, ms_sec = sections[0], sections[1]
+
+        # Verify Entry 1 is RECHERCHER MANUELLEMENT pointing to trampoline submenu
+        res_lines = [l for l in res_sec.splitlines() if l.startswith("Entry")]
+        assert len(res_lines) >= 3
+        assert "Entry1=RECHERCHER MANUELLEMENT" in res_lines[0]
+        assert ":submenu MEDIA_MS_41414141" in res_lines[0]
+
+        # Entry 2 is informational fallback
+        assert "Entry2=Aucune proposition disponible." in res_lines[1]
+        assert ":back" in res_lines[1]
+
+        # Trampoline entry 1 launches manual search helper
+        ms_lines = [l for l in ms_sec.splitlines() if l.startswith("Entry")]
+        assert "Entry1=LANCER LA RECHERCHE" in ms_lines[0]
+        assert f":applyback $HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui {mv_id}" in ms_lines[0]
+
+
+# 42. CASE 2: UNMATCHED, MV_ID KNOWN, CANDIDATES EXIST -> CANDIDATE RESOLVER PRESERVED
+def test_42_case2_unmatched_existing_candidates_preserved(sandbox):
+    """CASE 2: When candidates exist, Candidate Resolver is preserved and lists candidates."""
+    mv_id = _ingest_movie(sandbox, "ExistingCandsCase2.mkv", "Existing Cands Case 2")
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, "4201", "Candidate Alpha", 2020)
+        _add_candidate(db, mv_id, "4202", "Candidate Beta", 2022)
+
+        actions: dict[str, dict] = {}
+        sections = media_match_ui.build_resolver_menu_sections(
+            sandbox["home"], sandbox["install"], db, mv_id, "MEDIA_R42424242", "genCase2", actions, sandbox["media_icon"]
+        )
+        assert len(sections) >= 2
+        res_sec = next(s for s in sections if s.startswith("[MEDIA_R42424242]"))
+
+        # Candidate 1 and 2 must be listed in Entry1 and Entry2
+        res_lines = [l for l in res_sec.splitlines() if l.startswith("Entry")]
+        assert any("Candidate Alpha (2020)" in l for l in res_lines)
+        assert any("Candidate Beta (2022)" in l for l in res_lines)
+
+        # RECHERCHER MANUELLEMENT and AUCUN DE CES FILMS present
+        assert any("RECHERCHER MANUELLEMENT" in l for l in res_lines)
+        assert any("AUCUN DE CES FILMS" in l for l in res_lines)
+
+
+# 43. CASE 3: UNMATCHED, MV_ID ABSENT -> RESOLVES VIA TOKEN, INGESTS ON-DEMAND, SEARCH PROCEEDS
+def test_43_case3_unmatched_missing_mv_id_token_resolution_and_ingest(sandbox):
+    """CASE 3: When mv_id is absent, token is resolved from manifest, file is ingested on-demand, and search proceeds."""
+    # Place unrecorded file into sources_dir (not in DB)
+    unrec_file = sandbox["sources_dir"] / "UnrecordedFilm.mkv"
+    unrec_file.write_bytes(b"dummy unrecorded video")
+
+    # Generate flex config to produce manifest with action tokens
+    cfg_dir = sandbox["home"] / ".config/openhtpc"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "user-config.json").write_text(
+        json.dumps({
+            "configuration_completed": True,
+            "local_media_sources": [str(sandbox["sources_dir"])],
+            "tmdb": {"configured": False},
+        })
+    )
+    flex_config = cfg_dir / "flex-v1.ini"
+    session_engine.publish_flex_config(flex_config, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    manifest_path = cfg_dir / "flex-v1.ini.media-actions.json"
+    assert manifest_path.is_file()
+
+    # Read manifest and locate the action token for UnrecordedFilm.mkv
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    token = None
+    for tok, item in manifest_data["items"].items():
+        if item.get("relative_path") == "UnrecordedFilm.mkv":
+            token = tok
+            break
+    assert token is not None, "Token for unrecorded film not found in manifest"
+
+    # Verify flex-v1.ini contains the resolver menu with RECHERCHER MANUELLEMENT as Entry 1
+    content = flex_config.read_text(encoding="utf-8")
+    assert "RECHERCHER MANUELLEMENT" in content
+    assert f"--token {token}" in content
+
+    # Prior to search: verify media.db has 0 resources for this file
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        cnt = db.execute("SELECT COUNT(*) FROM resources WHERE relative_path = 'UnrecordedFilm.mkv'").fetchone()[0]
+        assert cnt == 0
+
+    def mock_probe(file_resolved, **kwargs):
+        return {
+            "ok": True,
+            "resource": {
+                "supplied_path": str(file_resolved),
+                "canonical_path": str(Path(file_resolved).resolve()),
+                "file_size": 2048,
+                "mtime_ns": 1700000000000000000,
+                "container_format": "matroska",
+                "duration_seconds": 7200.0,
+            },
+            "video_streams": [{"stream_index": 0, "codec": "h264", "width": 1920, "height": 1080}],
+            "audio_streams": [{"stream_index": 1, "codec": "aac", "channels": 2}],
+            "subtitle_streams": [],
+        }
+
+    # Resolve token directly to verify on-demand ingestion
+    resolved_mv_id = manual_search_ui.resolve_media_version_from_token(
+        token=token,
+        home=sandbox["home"],
+        install=sandbox["install"],
+        db_path=sandbox["db_file"],
+        probe_func=mock_probe,
+    )
+    assert resolved_mv_id is not None
+    assert resolved_mv_id > 0
+
+    # Verify resource was ingested into media.db
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        row = db.execute("SELECT id, media_version_id FROM resources WHERE relative_path = 'UnrecordedFilm.mkv'").fetchone()
+        assert row is not None
+        assert row[1] == resolved_mv_id
+
+    # Now verify end-to-end orchestrate_manual_search with this token executes without dead-ending
+    calls = [
+        {"ok": True, "cancelled": False, "text": "Unrecorded Film Title"},
+        {"ok": True, "cancelled": False, "text": "2023"},
+    ]
+    mock_search = mock.MagicMock(return_value={"ok": True, "status": "OK", "revision": "revCase3"})
+    with mock.patch.object(manual_search_ui, "invoke_text_entry", side_effect=calls):
+        with mock.patch.object(manual_search_ui, "show_confirmation_window", return_value="SEARCH"):
+            with mock.patch.object(manual_search_ui, "_load_media_match_ui", return_value=None):
+                rc = manual_search_ui.orchestrate_manual_search(
+                    token=token,
+                    home=sandbox["home"],
+                    install=sandbox["install"],
+                    custom_db_path=sandbox["db_file"],
+                    mock_search_fn=mock_search,
+                    probe_func=mock_probe,
+                )
+                assert rc == 0
+                assert mock_search.call_count == 1
+                assert mock_search.call_args.kwargs["media_version_id"] == resolved_mv_id
+
+
+# 44. CASE 4: MANUAL SEARCH INVOKES TMDB PROVIDER NETWORK
+def test_44_case4_manual_search_invokes_tmdb_provider_network(sandbox):
+    """CASE 4: Manual search actually invokes manual_search_media_version and TMDb provider instead of remaining offline."""
+    mv_id = _ingest_movie(sandbox, "NetworkSearchCase4.mkv", "Network Search Case 4")
+
+    cand = media_match.MovieCandidate("tmdb_movie", "4401", "Live TMDb Film", year=2025)
+    mock_provider_res = mock.MagicMock(
+        status="OK",
+        candidates=[cand],
+        error_code=None,
+        error_detail=None,
+    )
+    mock_provider_mod = _mock_provider_module(mock_provider_res)
+
+    calls = [
+        {"ok": True, "cancelled": False, "text": "Live TMDb Film"},
+        {"ok": True, "cancelled": False, "text": "2025"},
+    ]
+
+    with mock.patch.object(manual_search_ui, "invoke_text_entry", side_effect=calls):
+        with mock.patch.object(manual_search_ui, "show_confirmation_window", return_value="SEARCH"):
+            with mock.patch.object(manual_search_ui, "_load_media_match_ui", return_value=None):
+                with mock.patch.object(media_match, "_load_tmdb_provider", return_value=mock_provider_mod):
+                    with mock.patch.object(manual_search_ui, "_load_media_match", return_value=media_match):
+                        rc = manual_search_ui.orchestrate_manual_search(
+                            media_version_id=mv_id,
+                            home=sandbox["home"],
+                            install=sandbox["install"],
+                            custom_db_path=sandbox["db_file"],
+                        )
+                        assert rc == 0
+                        # Verify provider search_movies was called with queried title and year
+                        assert mock_provider_mod.search_movies.call_count == 1
+                        p_call = mock_provider_mod.search_movies.call_args
+                        assert p_call.kwargs.get("title") == "Live TMDb Film"
+                        assert p_call.kwargs.get("year") == 2025
+
+    # Verify candidate is stored as PENDING in media.db
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        cands = media_match.get_candidates(db, mv_id)
+        assert len(cands) == 1
+        assert cands[0]["candidate_title"] == "Live TMDb Film"
+        assert cands[0]["candidate_year"] == 2025
+        assert cands[0]["status"] == "PENDING"
+
+
+# 45. CASE 5: CANDIDATE ACCEPTED PERSISTS IDENTITY AND ENABLES MOVIE DETAIL
+def test_45_case5_candidate_accepted_persists_identity_and_enables_movie_detail(sandbox):
+    """CASE 5: Accepted candidate persists identity and regenerates Flex config with active movie detail."""
+    mv_id = _ingest_movie(sandbox, "AcceptedMovieCase5.mkv", "Raw File Title")
+
+    # Configure user-config.json
+    cfg_dir = sandbox["home"] / ".config/openhtpc"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "user-config.json").write_text(
+        json.dumps({
+            "configuration_completed": True,
+            "local_media_sources": [str(sandbox["sources_dir"])],
+            "tmdb": {"configured": False},
+        })
+    )
+
+    with closing(media_db.connect(sandbox["db_file"])) as db:
+        _add_candidate(db, mv_id, "4501", "Accepted Masterpiece", 2024, score=98.0)
+        cand = media_match.MovieCandidate("tmdb_movie", "4501", "Accepted Masterpiece", year=2024)
+        accept_res = media_match.accept_candidate(db, mv_id, cand, score=98.0, mode="USER", method="USER_CONFIRMATION")
+        assert accept_res["ok"] is True
+        db.commit()
+
+        # Check DB state
+        st = media_match.get_media_version_status(db, mv_id)
+        assert st["identification_state"] == "USER_MATCHED"
+        assert st["work_id"] is not None
+        assert st["work"]["title"] == "Accepted Masterpiece"
+        assert st["work"]["year"] == 2024
+
+    # Regenerate Flex config
+    flex_config = cfg_dir / "flex-v1.ini"
+    session_engine.publish_flex_config(flex_config, sandbox["home"], [sandbox["sources_dir"]], sandbox["install"])
+    assert flex_config.is_file()
+    content = flex_config.read_text(encoding="utf-8")
+
+    # In flex-v1.ini:
+    # 1. Main folder entry has context action "CHANGER L’IDENTIFICATION"
+    assert "CHANGER L’IDENTIFICATION" in content
+    # 2. Main folder entry command routes to movie detail section :submenu MEDIA_D...
+    assert ":submenu MEDIA_D" in content
+    # 3. Movie detail section contains LIRE LE FILM
+    assert "LIRE LE FILM" in content
+    # 4. Movie detail section contains CHANGER L’IDENTIFICATION routing to resolver
+    assert "MEDIA_R" in content

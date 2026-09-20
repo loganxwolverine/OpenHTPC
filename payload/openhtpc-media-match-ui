@@ -374,8 +374,8 @@ def build_resolver_menu_sections(
     ms_section = f"[{ms_menu}]\n{ms_e1}\n{ms_e2}"
 
     if state == "UNMATCHED" and not candidates:
-        e1 = bounded_flex_line(1, "Aucune proposition disponible.", icon, ":back")
-        e2 = bounded_flex_line(2, "RECHERCHER MANUELLEMENT", icon, ms_cmd)
+        e1 = bounded_flex_line(1, "RECHERCHER MANUELLEMENT", icon, ms_cmd)
+        e2 = bounded_flex_line(2, "Aucune proposition disponible.", icon, ":back")
         e3 = bounded_flex_line(3, "RETOUR", icon, ":back")
         sections.append(f"[{res_section_id}]\n{e1}\n{e2}\n{e3}")
         sections.append(ms_section)

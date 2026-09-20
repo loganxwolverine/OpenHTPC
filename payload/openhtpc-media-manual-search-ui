@@ -17,6 +17,7 @@ Single-Flex architecture with safe :applyback return.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -28,6 +29,150 @@ import sys
 from typing import Any
 
 DEFAULT_LANGUAGE = "fr-FR"
+
+
+_MEDIA_INGEST = None
+
+
+def set_media_ingest_module(mod: Any) -> None:
+    global _MEDIA_INGEST
+    _MEDIA_INGEST = mod
+
+
+def _load_media_ingest(install: Path | None = None):
+    if _MEDIA_INGEST is not None:
+        return _MEDIA_INGEST
+    candidates = [
+        install / "openhtpc-media-ingest.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-ingest.py",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_ingest", p)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    return None
+
+
+def ingest_and_get_media_version(
+    file_path: Path,
+    source_root: Path,
+    db_path: Path,
+    install: Path | None = None,
+    probe_func: Any = None,
+) -> int | None:
+    """Ingest an unrecorded media file using the existing openhtpc-media-ingest primitive."""
+    media_db = _load_media_db(install)
+    if media_db and hasattr(media_db, "initialize"):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        media_db.initialize(db_path)
+
+    media_ingest = _load_media_ingest(install)
+    if not media_ingest:
+        return None
+
+    kwargs: dict[str, Any] = {
+        "file_path": file_path,
+        "source_root": source_root,
+        "db_path": db_path,
+    }
+    if probe_func is not None:
+        kwargs["probe_func"] = probe_func
+
+    res = media_ingest.ingest_file(**kwargs)
+    if res.get("ok") and res.get("media_version_id"):
+        return int(res["media_version_id"])
+    return None
+
+
+def resolve_media_version_from_token(
+    token: str,
+    home: Path,
+    install: Path | None = None,
+    db_path: Path | None = None,
+    probe_func: Any = None,
+) -> int | None:
+    """Resolve an action token to a media_version_id, ingesting the file on-demand if unrecorded."""
+    manifest_candidates = [
+        home / ".local/state/openhtpc/media-actions/current.json",
+        home / ".config/openhtpc/actions.json",
+        home / ".config/openhtpc/flex-v1.ini.media-actions.json",
+    ]
+    action_data = None
+    for mc in manifest_candidates:
+        if mc.is_file():
+            try:
+                data = json.loads(mc.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and "items" in data and token in data["items"]:
+                    action_data = data
+                    break
+            except Exception:
+                continue
+
+    if not action_data:
+        return None
+
+    item = action_data["items"][token]
+    source_id = item.get("source_id")
+    rel_path_str = item.get("relative_path")
+    if not source_id or not rel_path_str:
+        return None
+
+    target_db = db_path or (home / ".local/share/openhtpc/media/media.db")
+    if target_db.is_file():
+        try:
+            with sqlite3.connect(f"file:{target_db}?mode=ro", uri=True) as db:
+                row = db.execute(
+                    "SELECT media_version_id FROM resources WHERE source_id = ? AND relative_path = ?",
+                    (source_id, rel_path_str),
+                ).fetchone()
+                if row and row[0]:
+                    return int(row[0])
+        except Exception:
+            pass
+
+    # Find matching source root
+    sources = action_data.get("sources", [])
+    source_root = None
+    for s in sources:
+        if isinstance(s, dict) and (s.get("source_id") == source_id or s.get("id") == source_id):
+            p = s.get("canonical_path") or s.get("configured_path") or s.get("path")
+            if p:
+                cand = Path(p)
+                if cand.is_dir():
+                    source_root = cand
+                    break
+
+    if not source_root or not source_root.is_dir():
+        user_cfg = home / ".config/openhtpc/user-config.json"
+        if user_cfg.is_file():
+            try:
+                cfg = json.loads(user_cfg.read_text(encoding="utf-8"))
+                for src in cfg.get("local_media_sources", []):
+                    sp = Path(src).resolve()
+                    cand_id = hashlib.blake2s(os.fsencode(sp), digest_size=8).hexdigest()
+                    if cand_id == source_id:
+                        source_root = sp
+                        break
+            except Exception:
+                pass
+
+    if not source_root:
+        return None
+
+    file_path = (source_root / rel_path_str).resolve()
+    if not file_path.is_file():
+        return None
+
+    return ingest_and_get_media_version(
+        file_path=file_path,
+        source_root=source_root,
+        db_path=target_db,
+        install=install,
+        probe_func=probe_func,
+    )
 
 
 def resolve_graphical_env(install: Path | None = None) -> dict[str, str]:
@@ -552,12 +697,16 @@ def show_error_window(
 
 
 def orchestrate_manual_search(
-    media_version_id: int,
+    media_version_id: int | None = None,
     home: Path | None = None,
     install: Path | None = None,
     platform_arg: str | None = None,
     custom_db_path: Path | None = None,
     mock_search_fn: Any | None = None,
+    token: str | None = None,
+    file_path: Path | None = None,
+    source_root: Path | None = None,
+    probe_func: Any | None = None,
 ) -> int:
     """Main orchestration flow for living-room manual search."""
     if home is None:
@@ -566,6 +715,29 @@ def orchestrate_manual_search(
         install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
 
     db_path = custom_db_path or (home / ".local/share/openhtpc/media/media.db")
+
+    if media_version_id is None:
+        if token:
+            media_version_id = resolve_media_version_from_token(
+                token=token,
+                home=home,
+                install=install,
+                db_path=db_path,
+                probe_func=probe_func,
+            )
+        elif file_path and source_root:
+            media_version_id = ingest_and_get_media_version(
+                file_path=file_path,
+                source_root=source_root,
+                db_path=db_path,
+                install=install,
+                probe_func=probe_func,
+            )
+
+    if media_version_id is None:
+        print("ERROR: media_version_id could not be resolved", file=sys.stderr)
+        return 1
+
     if not db_path.is_file():
         print(f"ERROR: Database not found at {db_path}", file=sys.stderr)
         return 1
@@ -692,8 +864,11 @@ def orchestrate_manual_search(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="OpenHTPC Living-Room Media Manual Search Orchestrator")
-    parser.add_argument("action_or_id", nargs="?", default=None, help="Action ('search') or media_version_id")
-    parser.add_argument("media_version_id", nargs="?", type=int, default=None, help="Target media_version_id")
+    parser.add_argument("action_or_id", nargs="?", default=None, help="Action ('search'), media_version_id, or action token")
+    parser.add_argument("media_version_id", nargs="?", default=None, help="Target media_version_id")
+    parser.add_argument("--token", default=None, help="Action token from active Flex manifest")
+    parser.add_argument("--file", type=Path, default=None, help="Direct media file path for on-demand ingest")
+    parser.add_argument("--source-root", type=Path, default=None, help="Source root for direct media file")
     parser.add_argument("--home", type=Path, default=None, help="OpenHTPC home directory")
     parser.add_argument("--install-dir", type=Path, default=None, help="OpenHTPC install directory")
     parser.add_argument("-platform", default=None, help="Qt platform (e.g. offscreen, wayland)")
@@ -713,14 +888,20 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return exc.code
 
-    mv_id: int | None = None
-    if args.action_or_id:
-        if args.action_or_id.isdigit():
-            mv_id = int(args.action_or_id)
-        elif args.action_or_id == "search" and args.media_version_id is not None:
-            mv_id = args.media_version_id
+    raw_token = args.token
+    if not raw_token and args.action_or_id and str(args.action_or_id).startswith("mact_"):
+        raw_token = str(args.action_or_id)
+    elif not raw_token and args.action_or_id == "search" and args.media_version_id and str(args.media_version_id).startswith("mact_"):
+        raw_token = str(args.media_version_id)
 
-    if mv_id is None:
+    mv_id: int | None = None
+    if not raw_token:
+        if args.action_or_id and str(args.action_or_id).isdigit():
+            mv_id = int(args.action_or_id)
+        elif args.action_or_id == "search" and args.media_version_id is not None and str(args.media_version_id).isdigit():
+            mv_id = int(args.media_version_id)
+
+    if mv_id is None and not raw_token and not (args.file and args.source_root):
         print("ERROR: media_version_id is required", file=sys.stderr)
         return 2
 
@@ -729,6 +910,9 @@ def main(argv: list[str] | None = None) -> int:
         home=args.home,
         install=args.install_dir,
         platform_arg=platform_val,
+        token=raw_token,
+        file_path=args.file,
+        source_root=args.source_root,
     )
 
 

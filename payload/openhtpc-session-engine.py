@@ -698,7 +698,8 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                     """
                     SELECT r.source_id, r.relative_path, r.media_version_id,
                            mv.identification_state, mv.match_locked, mv.work_id,
-                           w.title, w.year, w.original_title
+                           w.title, w.year, w.original_title,
+                           (SELECT COUNT(*) FROM match_candidates mc WHERE mc.media_version_id = mv.id AND mc.status != 'REJECTED') AS cand_count
                     FROM resources r
                     JOIN media_versions mv ON mv.id = r.media_version_id
                     LEFT JOIN works w ON w.id = mv.work_id
@@ -713,6 +714,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "title": r[6],
                         "year": r[7],
                         "original_title": r[8],
+                        "candidate_count": r[9] or 0,
                     }
 
                 # DEV6B2 / DEV6B3: Batch presentation lookup for fr-FR movie posters & details
@@ -825,6 +827,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         res_menu = f"MEDIA_R{item_id[:8]}"
                         context_cmd = f":submenu {res_menu}"
 
+                        res_secs = None
                         if match_ui and mv_id is not None and media_db_path.is_file():
                             try:
                                 import sqlite3
@@ -839,15 +842,27 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                                         actions=actions,
                                         icon=entry_icon,
                                     )
-                                    sections.extend(res_secs)
+                                    if res_secs:
+                                        sections.extend(res_secs)
                             except Exception:
-                                pass
-                        else:
-                            no_cand_body = "\n".join([
-                                bounded_flex_entry(1, "Aucune proposition disponible.", entry_icon, ":back"),
-                                bounded_flex_entry(2, "RETOUR", entry_icon, ":back"),
-                            ])
-                            sections.append(f"[{res_menu}]\n{no_cand_body}")
+                                res_secs = None
+                        if not res_secs:
+                            token_suffix = item_id[:8]
+                            search_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui"
+                            ms_menu = f"MEDIA_MS_{token_suffix}"
+                            ms_cmd = f":submenu {ms_menu}"
+                            ms_launch_cmd = f":applyback {search_helper_path} --token {token}"
+                            ms_e1 = bounded_flex_entry(1, "LANCER LA RECHERCHE", entry_icon, ms_launch_cmd)
+                            ms_e2 = bounded_flex_entry(2, "RETOUR", entry_icon, ":back")
+                            ms_sec = f"[{ms_menu}]\n{ms_e1}\n{ms_e2}"
+
+                            r_e1 = bounded_flex_entry(1, "RECHERCHER MANUELLEMENT", entry_icon, ms_cmd)
+                            r_e2 = bounded_flex_entry(2, "Aucune proposition disponible.", entry_icon, ":back")
+                            r_e3 = bounded_flex_entry(3, "RETOUR", entry_icon, ":back")
+                            res_sec = f"[{res_menu}]\n{r_e1}\n{r_e2}\n{r_e3}"
+
+                            sections.append(res_sec)
+                            sections.append(ms_sec)
 
                         detail_menu = f"MEDIA_D{item_id[:8]}"
                         detail_sec = _build_movie_detail_section(
