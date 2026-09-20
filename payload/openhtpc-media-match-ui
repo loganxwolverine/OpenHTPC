@@ -25,6 +25,12 @@ _MEDIA_MATCH = None
 _MEDIA_DB = None
 _SESSION_ENGINE = None
 
+DISPATCH_ACCEPTED = "ACCEPTED"
+DISPATCH_REJECTED = "REJECTED"
+DISPATCH_STALE = "STALE"
+DISPATCH_INVALID = "INVALID"
+DISPATCH_ERROR = "ERROR"
+
 
 def set_media_match_module(mod: Any) -> None:
     global _MEDIA_MATCH
@@ -383,6 +389,7 @@ def build_resolver_menu_sections(
 
     res_entries: list[tuple[str, Path, str]] = []
     helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-match-ui"
+    enrich_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-enrich.py"
 
     for i, cand in enumerate(candidates, 1):
         cand_id = cand["id"]
@@ -416,7 +423,7 @@ def build_resolver_menu_sections(
         res_entries.append((cand_label, icon, conf_cmd))
 
         # Build confirmation screen
-        dispatch_cmd = f":applyback {helper_path} dispatch {action_token}"
+        dispatch_cmd = f":applyback {enrich_helper_path} --token {action_token}"
         if not needs_replace:
             if same_work and state == "AUTO_MATCHED":
                 conf_title = "CONFIRMER CETTE IDENTIFICATION"
@@ -519,26 +526,33 @@ def _regenerate_ui(home: Path, install: Path, stale_mv_id: int | None = None) ->
         return False
 
 
-def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
-    """Dispatch an ephemeral action token to DEV5C1 with optimistic concurrency."""
+def _dispatch_result(status: str, exit_code: int, **fields: Any) -> dict[str, Any]:
+    return {"status": status, "exit_code": exit_code, **fields}
+
+
+def dispatch_action_result(home: Path, token: str, install: Path | None = None) -> dict[str, Any]:
+    """Dispatch an action token and report its semantic outcome unambiguously."""
     if install is None:
         install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
 
     manifest_path = home / ".local/state/openhtpc/media-actions/current.json"
     if not manifest_path.is_file():
         print("ERROR: ACTION_MANIFEST_MISSING", file=sys.stderr)
-        return 1
+        return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_MISSING")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
         print(f"ERROR: ACTION_MANIFEST_INVALID: {exc}", file=sys.stderr)
-        return 1
+        return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_INVALID")
 
-    actions = manifest.get("items", {})
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("items"), dict):
+        print("ERROR: ACTION_MANIFEST_INVALID", file=sys.stderr)
+        return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_INVALID")
+    actions = manifest["items"]
     action_data = actions.get(token)
     if not action_data or not isinstance(action_data, dict):
         print(f"ERROR: INVALID_ACTION_TOKEN: {token}", file=sys.stderr)
-        return 1
+        return _dispatch_result(DISPATCH_INVALID, 1, error="INVALID_ACTION_TOKEN")
 
     action_type = action_data.get("action")
     mv_id = action_data.get("media_version_id")
@@ -546,15 +560,15 @@ def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
     expected_rev = action_data.get("expected_revision")
     replace = action_data.get("replace", False)
 
-    if not isinstance(mv_id, int):
+    if type(mv_id) is not int:
         print("ERROR: INVALID_ACTION_IDENTITY", file=sys.stderr)
-        return 1
+        return _dispatch_result(DISPATCH_INVALID, 1, error="INVALID_ACTION_IDENTITY")
 
     media_db = _load_media_db(install)
     media_match = _load_media_match(install)
     if not media_db or not media_match:
         print("ERROR: MODULE_UNAVAILABLE", file=sys.stderr)
-        return 2
+        return _dispatch_result(DISPATCH_ERROR, 2, error="MODULE_UNAVAILABLE")
 
     media_match.set_media_db_module(media_db)
 
@@ -563,13 +577,13 @@ def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
         db_file = media_db.database_path(home=home, environ={})
     if not db_file.is_file():
         print(f"ERROR: DB_NOT_FOUND: {db_file}", file=sys.stderr)
-        return 1
+        return _dispatch_result(DISPATCH_ERROR, 1, error="DB_NOT_FOUND")
 
     with closing(media_db.connect(db_file)) as db:
         if action_type in ("accept", "replace"):
-            if not isinstance(cand_id, int):
+            if type(cand_id) is not int:
                 print("ERROR: CANDIDATE_ID_REQUIRED", file=sys.stderr)
-                return 1
+                return _dispatch_result(DISPATCH_INVALID, 1, error="CANDIDATE_ID_REQUIRED")
             res = media_match.accept_candidate_by_id(
                 db,
                 media_version_id=mv_id,
@@ -585,7 +599,7 @@ def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
             )
         else:
             print(f"ERROR: UNKNOWN_ACTION: {action_type}", file=sys.stderr)
-            return 1
+            return _dispatch_result(DISPATCH_INVALID, 1, error="UNKNOWN_ACTION")
 
         if not res.get("ok"):
             err = res.get("error")
@@ -593,15 +607,37 @@ def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
                 print("Les propositions ont changé. La liste va être actualisée.", file=sys.stderr)
                 # Obtain new revision and refresh UI with visible stale notice without automatic acceptance retry
                 ok_regen = _regenerate_ui(home, install, stale_mv_id=mv_id)
-                return 0 if ok_regen else 1
+                return _dispatch_result(
+                    DISPATCH_STALE,
+                    0 if ok_regen else 1,
+                    media_version_id=mv_id,
+                    error=err,
+                )
             print(f"ERROR: {err}: {res.get('message')}", file=sys.stderr)
-            return 1
+            return _dispatch_result(
+                DISPATCH_REJECTED,
+                1,
+                media_version_id=mv_id,
+                error=err,
+            )
 
         db.commit()
 
         # Successful DB commit: regenerate Flex presentation
         _regenerate_ui(home, install)
-        return 0
+        if action_type == "reject":
+            return _dispatch_result(DISPATCH_REJECTED, 0, media_version_id=mv_id)
+        return _dispatch_result(
+            DISPATCH_ACCEPTED,
+            0,
+            media_version_id=mv_id,
+            work_id=res.get("work_id"),
+        )
+
+
+def dispatch_action(home: Path, token: str, install: Path | None = None) -> int:
+    """Compatibility wrapper preserving the established CLI exit-code contract."""
+    return dispatch_action_result(home, token, install)["exit_code"]
 
 
 def main(argv: list[str] | None = None) -> int:

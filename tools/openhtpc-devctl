@@ -114,6 +114,7 @@ TEST_PROFILES: dict[str, list[str]] = {
         "tests/test_text_entry.py",
         "tests/test_media_manual_search_ui.py",
         "tests/test_media_enrich.py",
+        "tests/test_media_single_item_enrich.py",
         "tests/test_media_search_state.py",
     ],
 }

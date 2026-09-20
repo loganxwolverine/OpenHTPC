@@ -62,6 +62,10 @@ def test_media_enrich_profile_is_in_media_foundation():
     assert enrich in devctl.TEST_PROFILES["media-foundation"]
 
 
+def test_media_single_item_enrich_is_in_media_foundation():
+    assert "tests/test_media_single_item_enrich.py" in devctl.TEST_PROFILES["media-foundation"]
+
+
 def test_media_search_state_profile_is_in_media_foundation():
     state = "tests/test_media_search_state.py"
     assert devctl.TEST_PROFILES["media-search-state"] == [state]

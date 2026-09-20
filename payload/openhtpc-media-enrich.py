@@ -48,22 +48,26 @@ _TMDB_PROVIDER = None
 _MEDIA_MATCH = None
 _PRESENTATION = None
 _ARTWORK = None
+_MEDIA_MATCH_UI = None
 
 
-def _load_media_db() -> Any:
+def _load_media_db(install: Path | None = None) -> Any:
     global _MEDIA_DB
     if _MEDIA_DB is not None:
         return _MEDIA_DB
-    target = Path(__file__).resolve().parent / "openhtpc-media-db.py"
-    if not target.is_file():
-        target = Path.home() / ".local/lib/openhtpc/openhtpc-media-db.py"
-    if target.is_file():
-        spec = importlib.util.spec_from_file_location("openhtpc_media_db", target)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            _MEDIA_DB = mod
-            return mod
+    candidates = [
+        install / "openhtpc-media-db.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-db.py",
+        Path.home() / ".local/lib/openhtpc/openhtpc-media-db.py",
+    ]
+    for target in candidates:
+        if target and target.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_db", target)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _MEDIA_DB = mod
+                return mod
     raise RuntimeError("Cannot load openhtpc-media-db component")
 
 
@@ -119,20 +123,23 @@ def set_media_match_module(mod: Any) -> None:
     _MEDIA_MATCH = mod
 
 
-def _load_presentation() -> Any:
+def _load_presentation(install: Path | None = None) -> Any:
     global _PRESENTATION
     if _PRESENTATION is not None:
         return _PRESENTATION
-    target = Path(__file__).resolve().parent / "openhtpc-media-presentation.py"
-    if not target.is_file():
-        target = Path.home() / ".local/lib/openhtpc/openhtpc-media-presentation.py"
-    if target.is_file():
-        spec = importlib.util.spec_from_file_location("openhtpc_media_presentation", target)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            _PRESENTATION = mod
-            return mod
+    candidates = [
+        install / "openhtpc-media-presentation.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-presentation.py",
+        Path.home() / ".local/lib/openhtpc/openhtpc-media-presentation.py",
+    ]
+    for target in candidates:
+        if target and target.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_presentation", target)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _PRESENTATION = mod
+                return mod
     raise RuntimeError("Cannot load openhtpc-media-presentation component")
 
 
@@ -142,20 +149,23 @@ def set_presentation_module(mod: Any) -> None:
     _PRESENTATION = mod
 
 
-def _load_artwork() -> Any:
+def _load_artwork(install: Path | None = None) -> Any:
     global _ARTWORK
     if _ARTWORK is not None:
         return _ARTWORK
-    target = Path(__file__).resolve().parent / "openhtpc-media-artwork.py"
-    if not target.is_file():
-        target = Path.home() / ".local/lib/openhtpc/openhtpc-media-artwork.py"
-    if target.is_file():
-        spec = importlib.util.spec_from_file_location("openhtpc_media_artwork", target)
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            _ARTWORK = mod
-            return mod
+    candidates = [
+        install / "openhtpc-media-artwork.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-artwork.py",
+        Path.home() / ".local/lib/openhtpc/openhtpc-media-artwork.py",
+    ]
+    for target in candidates:
+        if target and target.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_media_artwork", target)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _ARTWORK = mod
+                return mod
     raise RuntimeError("Cannot load openhtpc-media-artwork component")
 
 
@@ -163,6 +173,37 @@ def set_artwork_module(mod: Any) -> None:
     """Dependency injection helper for testing."""
     global _ARTWORK
     _ARTWORK = mod
+
+
+def _load_media_match_ui(install: Path | None = None) -> Any:
+    global _MEDIA_MATCH_UI
+    if _MEDIA_MATCH_UI is not None:
+        return _MEDIA_MATCH_UI
+    candidates = [
+        install / "openhtpc-media-match-ui" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-match-ui",
+        Path.home() / ".local/lib/openhtpc/openhtpc-media-match-ui",
+    ]
+    for target in candidates:
+        if target and target.is_file():
+            try:
+                import importlib.machinery
+                loader = importlib.machinery.SourceFileLoader("openhtpc_media_match_ui", str(target))
+                spec = importlib.util.spec_from_loader("openhtpc_media_match_ui", loader)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    _MEDIA_MATCH_UI = mod
+                    return mod
+            except Exception:
+                continue
+    raise RuntimeError("Cannot load openhtpc-media-match-ui component")
+
+
+def set_media_match_ui_module(mod: Any) -> None:
+    """Dependency injection helper for testing."""
+    global _MEDIA_MATCH_UI
+    _MEDIA_MATCH_UI = mod
 
 
 def compute_source_id(source_root: Path | str) -> str:
@@ -446,6 +487,198 @@ def plan_source(
     }
 
 
+def enrich_work(
+    db: sqlite3.Connection,
+    work_id: int,
+    *,
+    locale: str = "fr-FR",
+    home: Path | None = None,
+    opener: Any = None,
+    rate_limit_sleep: float = 0.0,
+    install: Path | None = None,
+) -> dict[str, Any]:
+    """Single-item presentation and artwork enrichment for an identified Work.
+
+    Guarantees:
+      1. Presentation fetch via openhtpc-media-presentation.py.
+      2. Artwork download and caching via openhtpc-media-artwork.py.
+      3. Failure isolation: network or provider errors never roll back or alter
+         works, external_ids, or media_versions.
+      4. Idempotence: repeated invocations detect existing presentation and cache.
+    """
+    media_pres = _load_presentation(install)
+    artwork_mod = _load_artwork(install)
+
+    pres_existed_before = False
+    presentation_status = "NOT_APPLICABLE"
+    pres_error = None
+
+    if work_id is not None:
+        pres_row = db.execute(
+            "SELECT id FROM work_presentations WHERE work_id = ? AND locale = ?",
+            (work_id, locale),
+        ).fetchone()
+        if pres_row is not None:
+            pres_existed_before = True
+            presentation_status = "ALREADY_PRESENT"
+        else:
+            if rate_limit_sleep > 0.0:
+                time.sleep(rate_limit_sleep)
+            pres_res = media_pres.refresh_work_presentation(
+                db,
+                work_id,
+                locale=locale,
+                home=home,
+                opener=opener,
+            )
+            if pres_res.get("ok"):
+                presentation_status = "REFRESHED"
+                db.commit()
+            else:
+                presentation_status = "FAILED"
+                pres_error = pres_res.get("error_code") or pres_res.get("status") or "PRESENTATION_FAILED"
+
+    poster_hit_before = False
+    poster_status = "NOT_APPLICABLE"
+    poster_error = None
+
+    if work_id is not None and presentation_status in ("ALREADY_PRESENT", "REFRESHED"):
+        poster_res = artwork_mod.ensure_work_poster(
+            db,
+            work_id,
+            locale=locale,
+            home=home,
+            opener=opener,
+        )
+        p_status = poster_res.get("status")
+        if p_status == "OK_CACHE_HIT":
+            poster_status = "CACHE_HIT"
+            poster_hit_before = True
+        elif p_status == "OK_DOWNLOADED":
+            poster_status = "DOWNLOADED"
+        elif p_status in ("NO_POSTER", "NO_PRESENTATION"):
+            poster_status = "MISSING"
+        else:
+            poster_status = "FAILED"
+            poster_error = p_status or "POSTER_FAILED"
+
+    return {
+        "ok": bool(presentation_status in ("ALREADY_PRESENT", "REFRESHED")),
+        "work_id": work_id,
+        "presentation_status": presentation_status,
+        "pres_existed_before": pres_existed_before,
+        "poster_status": poster_status,
+        "poster_hit_before": poster_hit_before,
+        "error": pres_error or poster_error,
+    }
+
+
+def enrich_media_version(
+    db: sqlite3.Connection,
+    media_version_id: int,
+    *,
+    locale: str = "fr-FR",
+    home: Path | None = None,
+    opener: Any = None,
+    rate_limit_sleep: float = 0.0,
+    install: Path | None = None,
+) -> dict[str, Any]:
+    """Single-item enrichment for an identified media version."""
+    row = db.execute(
+        "SELECT work_id, identification_state FROM media_versions WHERE id = ?",
+        (media_version_id,),
+    ).fetchone()
+    if not row:
+        return {
+            "ok": False,
+            "media_version_id": media_version_id,
+            "work_id": None,
+            "error": "MEDIA_VERSION_NOT_FOUND",
+        }
+    work_id, ident_state = row[0], row[1]
+    if work_id is None or ident_state not in ("USER_MATCHED", "AUTO_MATCHED"):
+        return {
+            "ok": False,
+            "media_version_id": media_version_id,
+            "work_id": work_id,
+            "error": "NOT_IDENTIFIED",
+        }
+    res = enrich_work(
+        db,
+        work_id,
+        locale=locale,
+        home=home,
+        opener=opener,
+        rate_limit_sleep=rate_limit_sleep,
+        install=install,
+    )
+    res["media_version_id"] = media_version_id
+    return res
+
+
+def enrich_action_token(
+    home: Path | str,
+    token: str,
+    *,
+    install: Path | str | None = None,
+    locale: str = "fr-FR",
+    opener: Any = None,
+) -> int:
+    """Execute candidate acceptance offline then invoke single-item enrichment.
+
+    Guarantees:
+      1. Candidate acceptance is delegated to openhtpc-media-match-ui and commits locally.
+      2. USER_MATCHED remains valid even if subsequent network/TMDb/poster operations fail.
+      3. On acceptance, performs single-item enrichment for the accepted work_id.
+      4. Regenerates Flex presentation to make the enriched poster & details available immediately.
+    """
+    home_path = Path(home).resolve()
+    install_path = Path(install).resolve() if install else Path(os.environ.get("OPENHTPC_INSTALL_DIR", home_path / ".local/lib/openhtpc"))
+
+    match_ui = _load_media_match_ui(install_path)
+
+    # 1. Candidate acceptance commits locally & deterministically (STRICTLY OFFLINE)
+    dispatch_res = match_ui.dispatch_action_result(home_path, token, install=install_path)
+    exit_code = dispatch_res.get("exit_code", 1)
+    if dispatch_res.get("status") != match_ui.DISPATCH_ACCEPTED:
+        return exit_code
+
+    mv_id = dispatch_res.get("media_version_id")
+    if type(mv_id) is not int:
+        return 1
+
+    # 3. Single-item enrichment for the accepted work_id
+    media_db = _load_media_db(install_path)
+    db_file = home_path / ".local/share/openhtpc/media/media.db"
+    if not db_file.is_file():
+        db_file = media_db.database_path(home=home_path, environ={})
+
+    if db_file.is_file():
+        try:
+            with closing(media_db.connect(db_file)) as db:
+                row = db.execute(
+                    "SELECT work_id FROM media_versions WHERE id = ?", (mv_id,)
+                ).fetchone()
+                if row and row[0] is not None:
+                    work_id = row[0]
+                    enrich_work(
+                        db,
+                        work_id,
+                        locale=locale,
+                        home=home_path,
+                        opener=opener,
+                        install=install_path,
+                    )
+        except Exception as exc:
+            # Failure contract: network / provider failure must NEVER roll back
+            # or corrupt USER_MATCHED. Fallback remains operational.
+            print(f"Warning: single-item enrichment failed: {exc}", file=sys.stderr)
+
+    # 4. Regenerate Flex presentation with new poster and synopsis
+    match_ui._regenerate_ui(home_path, install_path)
+    return 0
+
+
 def enrich_source(
     db: sqlite3.Connection,
     source_id: str,
@@ -721,68 +954,38 @@ def enrich_source(
                                     external_id = accept_res["external_id"]
                                     db.commit()
 
-        # ─── PHASE 4: Presentation ──────────────────────────────────────────
-        pres_existed_before = False
-        if work_id is not None:
-            pres_row = db.execute(
-                "SELECT id FROM work_presentations WHERE work_id = ? AND locale = ?",
-                (work_id, locale),
-            ).fetchone()
-            if pres_row is not None:
-                pres_existed_before = True
-                presentation_status = "ALREADY_PRESENT"
-            else:
-                if rate_limit_sleep > 0.0:
-                    time.sleep(rate_limit_sleep)
-                pres_res = media_pres.refresh_work_presentation(
-                    db,
-                    work_id,
-                    locale=locale,
-                    home=home,
-                    opener=opener,
-                )
-                if pres_res.get("ok"):
-                    presentation_refreshed += 1
-                    presentation_status = "REFRESHED"
-                    db.commit()
-                else:
-                    presentation_failed += 1
-                    presentation_status = "FAILED"
-                    if not failure_reason:
-                        failure_reason = pres_res.get("error_code") or pres_res.get("status")
-                    outcome = "PARTIAL"
-        else:
-            presentation_status = "NOT_APPLICABLE"
+        # ─── PHASES 4 & 5: Presentation & Artwork via enrich_work ──────────
+        work_res = enrich_work(
+            db,
+            work_id,
+            locale=locale,
+            home=home,
+            opener=opener,
+            rate_limit_sleep=rate_limit_sleep,
+        )
+        pres_existed_before = work_res["pres_existed_before"]
+        presentation_status = work_res["presentation_status"]
+        if presentation_status == "REFRESHED":
+            presentation_refreshed += 1
+        elif presentation_status == "FAILED":
+            presentation_failed += 1
+            if not failure_reason:
+                failure_reason = work_res["error"]
+            outcome = "PARTIAL"
 
-        # ─── PHASE 5: Artwork (Poster Cache) ─────────────────────────────────
-        poster_hit_before = False
-        if work_id is not None and presentation_status in ("ALREADY_PRESENT", "REFRESHED"):
-            poster_res = artwork_mod.ensure_work_poster(
-                db,
-                work_id,
-                locale=locale,
-                home=home,
-                opener=opener,
-            )
-            p_status = poster_res.get("status")
-            if p_status == "OK_CACHE_HIT":
-                posters_cache_hit += 1
-                poster_status = "CACHE_HIT"
-                poster_hit_before = True
-            elif p_status == "OK_DOWNLOADED":
-                posters_cached += 1
-                poster_status = "DOWNLOADED"
-            elif p_status in ("NO_POSTER", "NO_PRESENTATION"):
-                posters_missing += 1
-                poster_status = "MISSING"
-            else:
-                poster_failed += 1
-                poster_status = "FAILED"
-                if not failure_reason:
-                    failure_reason = p_status
-                outcome = "PARTIAL"
-        else:
-            poster_status = "NOT_APPLICABLE"
+        poster_hit_before = work_res["poster_hit_before"]
+        poster_status = work_res["poster_status"]
+        if poster_status == "CACHE_HIT":
+            posters_cache_hit += 1
+        elif poster_status == "DOWNLOADED":
+            posters_cached += 1
+        elif poster_status == "MISSING":
+            posters_missing += 1
+        elif poster_status == "FAILED":
+            poster_failed += 1
+            if not failure_reason:
+                failure_reason = work_res["error"]
+            outcome = "PARTIAL"
 
         # Check already_complete condition:
         if ident_state in ("USER_MATCHED", "AUTO_MATCHED") and pres_existed_before and poster_hit_before:
@@ -923,9 +1126,9 @@ def build_parser() -> argparse.ArgumentParser:
     """Construct CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="openhtpc-media-enrich",
-        description="Explicit Media Batch Enrichment Orchestrator for OPENHTPC.",
+        description="Media Enrichment Orchestrator for OPENHTPC (Batch & Single-Item).",
     )
-    src_group = parser.add_argument_group("Source Scope (Mandatory)")
+    src_group = parser.add_argument_group("Source Scope (Batch Mode)")
     src_group.add_argument(
         "--source-id",
         dest="source_id",
@@ -935,6 +1138,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-root",
         dest="source_root",
         help="Path to media directory; computes canonical source_id",
+    )
+
+    single_group = parser.add_argument_group("On-Demand & Single-Item Controls")
+    single_group.add_argument(
+        "--token",
+        dest="token",
+        help="Action token (iact_...) to accept candidate and enrich on-demand",
+    )
+    single_group.add_argument(
+        "--work-id",
+        dest="work_id",
+        type=int,
+        help="Single work_id to enrich on-demand",
+    )
+    single_group.add_argument(
+        "--regenerate-ui",
+        dest="regenerate_ui",
+        action="store_true",
+        help="Regenerate Flex configuration after single-item enrichment",
+    )
+    single_group.add_argument(
+        "action_or_token",
+        nargs="?",
+        help="Optional positional action ('accept', 'dispatch') or action token",
+    )
+    single_group.add_argument(
+        "positional_token",
+        nargs="?",
+        help="Optional positional action token when action is specified",
     )
 
     op_group = parser.add_argument_group("Operation Controls")
@@ -976,6 +1208,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Custom home directory for XDG isolation",
     )
     env_group.add_argument(
+        "--install",
+        dest="install",
+        help="Custom install directory for OpenHTPC scripts",
+    )
+    env_group.add_argument(
         "--locale",
         dest="locale",
         default="fr-FR",
@@ -1003,7 +1240,79 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     home_path = Path(args.home).resolve() if args.home else None
+    install_path = Path(args.install).resolve() if getattr(args, "install", None) else None
 
+    # Resolve token from positional args if present
+    token = args.token
+    if not token and args.action_or_token:
+        if args.action_or_token.startswith("iact_"):
+            token = args.action_or_token
+        elif args.action_or_token in ("accept", "dispatch") and args.positional_token:
+            token = args.positional_token
+
+    # 1. Action token on-demand dispatch & enrich
+    if token:
+        return enrich_action_token(
+            home=home_path or Path.home(),
+            token=token,
+            install=install_path,
+            locale=args.locale,
+        )
+
+    # 2. Single-item work enrichment
+    if args.work_id is not None:
+        db = connect_db(args.db, home=home_path)
+        try:
+            res = enrich_work(
+                db,
+                args.work_id,
+                locale=args.locale,
+                home=home_path,
+                rate_limit_sleep=args.rate_limit_sleep,
+                install=install_path,
+            )
+            if args.regenerate_ui:
+                match_ui = _load_media_match_ui(install_path)
+                match_ui._regenerate_ui(home_path or Path.home(), install_path)
+            if args.json_output:
+                print(json.dumps(res, indent=2))
+            else:
+                print(f"Enriched work {args.work_id}: {res['presentation_status']} / {res['poster_status']}")
+            return 0 if res.get("ok") else 1
+        finally:
+            db.close()
+
+    # 3. Single-item media_version enrichment (when not in batch mode)
+    if args.media_version_ids and not (args.source_id or args.source_root):
+        db = connect_db(args.db, home=home_path)
+        try:
+            results = []
+            all_ok = True
+            for mv_id in args.media_version_ids:
+                res = enrich_media_version(
+                    db,
+                    mv_id,
+                    locale=args.locale,
+                    home=home_path,
+                    rate_limit_sleep=args.rate_limit_sleep,
+                    install=install_path,
+                )
+                results.append(res)
+                if not res.get("ok"):
+                    all_ok = False
+            if args.regenerate_ui:
+                match_ui = _load_media_match_ui(install_path)
+                match_ui._regenerate_ui(home_path or Path.home(), install_path)
+            if args.json_output:
+                print(json.dumps(results, indent=2))
+            else:
+                for r in results:
+                    print(f"Enriched media_version {r.get('media_version_id')}: {r.get('presentation_status')} / {r.get('poster_status')}")
+            return 0 if all_ok else 1
+        finally:
+            db.close()
+
+    # 4. Batch mode (source-scoped)
     result = run_batch_enrichment(
         source_id=args.source_id,
         source_root=args.source_root,
