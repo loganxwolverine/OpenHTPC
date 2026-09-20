@@ -2497,9 +2497,12 @@ static void execute_command(const char *command)
             }
         }
         else if (!strcmp(special_command, SCMD_APPLY_BACK)) {
+            char operation_id[UI_ACTION_OPERATION_ID_MAX] = {0};
+            (void) ui_action_trace_begin(operation_id, sizeof(operation_id));
             char *settings_command = strtok(NULL, "");
             Menu *parent = current_menu != NULL ? current_menu->back : NULL;
-            if (settings_command != NULL && parent != NULL && run_process_sync(settings_command)) {
+            if (settings_command != NULL && parent != NULL && run_process_sync(settings_command, operation_id)) {
+                ui_action_trace_event("flex_reload_begin", operation_id, 0);
                 reload_menu_section(parent);
                 /* presentation_mode is global.  Keep an already-created DVD
                  * detail menu coherent when the selector was used in SYSTEME. */
@@ -2514,7 +2517,10 @@ static void execute_command(const char *command)
                         parent->background_texture = next;
                     }
                 }
-                load_menu(parent, false, true);
+                if (load_menu(parent, false, true) == 0)
+                    ui_action_trace_event("flex_ui_ready", operation_id, 0);
+                else
+                    ui_action_trace_event("flex_ui_reload_failed", operation_id, 0);
             }
         }
         else if (!strcmp(special_command, SCMD_REPLACE)) {

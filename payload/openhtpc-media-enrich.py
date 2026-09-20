@@ -37,6 +37,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 import time
@@ -49,6 +50,142 @@ _MEDIA_MATCH = None
 _PRESENTATION = None
 _ARTWORK = None
 _MEDIA_MATCH_UI = None
+
+_UI_ACTION_TRACE_ENV = "OPENHTPC_TRACE_UI_ACTION"
+_UI_ACTION_OPERATION_ENV = "OPENHTPC_UI_ACTION_OPERATION_ID"
+_UI_ACTION_CHILD_PID_ENV = "OPENHTPC_UI_ACTION_CHILD_PID"
+_UI_ACTION_PID_MAX = 2_147_483_647
+_UI_ACTION_MONOTONIC_MAX = 9_223_372_036_854_775_807
+_UI_ACTION_FLEX_OPERATION_PATTERN = re.compile(
+    r"^uiaq-([1-9][0-9]{0,9})-(0|[1-9][0-9]{0,18})$",
+    re.ASCII,
+)
+_UI_ACTION_LOCAL_OPERATION: tuple[int, str] | None = None
+_UI_ACTION_TRACE_EVENTS = {
+    "python_entry",
+    "active_manifest_loaded",
+    "action_token_validated",
+    "action_token_invalid",
+    "identity_dispatch_begin",
+    "identity_transaction_begin",
+    "identity_commit",
+    "first_flex_regeneration_begin",
+    "first_flex_regeneration_end",
+    "tmdb_movie_details_begin",
+    "tmdb_movie_details_end",
+    "presentation_commit",
+    "poster_cache_begin",
+    "poster_cache_end",
+    "second_flex_regeneration_begin",
+    "second_flex_regeneration_end",
+    "python_exit",
+}
+
+
+def _ui_action_decimal(value: str, *, maximum: int, maximum_digits: int, allow_zero: bool) -> int | None:
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum_digits or not value.isascii():
+        return None
+    if allow_zero and value == "0":
+        return 0
+    if value[0] not in "123456789" or any(character not in "0123456789" for character in value[1:]):
+        return None
+    try:
+        parsed = int(value, 10)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed <= maximum else None
+
+
+def _ui_action_parent_executable(parent_pid: int) -> str:
+    return Path(os.readlink(f"/proc/{parent_pid}/exe")).name
+
+
+def _ui_action_flex_correlation() -> tuple[str, int] | None:
+    operation_id = os.environ.get(_UI_ACTION_OPERATION_ENV, "")
+    if not isinstance(operation_id, str) or len(operation_id) > 35 or not operation_id.isascii():
+        return None
+    match = _UI_ACTION_FLEX_OPERATION_PATTERN.fullmatch(operation_id)
+    if match is None:
+        return None
+    flex_pid = _ui_action_decimal(
+        match.group(1), maximum=_UI_ACTION_PID_MAX, maximum_digits=10, allow_zero=False
+    )
+    monotonic_ns = _ui_action_decimal(
+        match.group(2), maximum=_UI_ACTION_MONOTONIC_MAX, maximum_digits=19, allow_zero=True
+    )
+    child_pid = _ui_action_decimal(
+        os.environ.get(_UI_ACTION_CHILD_PID_ENV, ""),
+        maximum=_UI_ACTION_PID_MAX,
+        maximum_digits=10,
+        allow_zero=False,
+    )
+    if flex_pid is None or monotonic_ns is None or child_pid is None:
+        return None
+    if child_pid != os.getpid() or flex_pid != os.getppid():
+        return None
+    try:
+        parent_executable = _ui_action_parent_executable(flex_pid)
+    except Exception:
+        return None
+    if parent_executable != "flex-launcher":
+        return None
+    return operation_id, child_pid
+
+
+def _ui_action_local_operation() -> str:
+    global _UI_ACTION_LOCAL_OPERATION
+    current_pid = os.getpid()
+    if _UI_ACTION_LOCAL_OPERATION is None or _UI_ACTION_LOCAL_OPERATION[0] != current_pid:
+        _UI_ACTION_LOCAL_OPERATION = (
+            current_pid,
+            f"uiaq-python-{current_pid}-{time.monotonic_ns()}",
+        )
+    return _UI_ACTION_LOCAL_OPERATION[1]
+
+
+def _ui_action_trace_impl(event: str, *, home: Path | None = None) -> None:
+    if os.environ.get(_UI_ACTION_TRACE_ENV) != "1" or event not in _UI_ACTION_TRACE_EVENTS:
+        return
+    correlation = _ui_action_flex_correlation()
+    operation_id = correlation[0] if correlation is not None else _ui_action_local_operation()
+
+    row: dict[str, Any] = {
+        "schema": 1,
+        "event": event,
+        "mono_ns": time.monotonic_ns(),
+        "pid": os.getpid(),
+        "operation_id": operation_id,
+    }
+    if correlation is not None:
+        row["child_pid"] = correlation[1]
+
+    trace_home = Path(home) if home is not None else Path(os.environ.get("OPENHTPC_HOME", Path.home()))
+    target = trace_home / ".local/state/openhtpc/ui-action-timing.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, encoded)
+    finally:
+        os.close(fd)
+
+
+def _ui_action_trace(event: str, *, home: Path | None = None) -> None:
+    """Append one bounded developer timing event without affecting production flow."""
+    try:
+        _ui_action_trace_impl(event, home=home)
+    except Exception:
+        pass
+
+
+def _emit_trace(trace: Any, event: str) -> None:
+    if trace is None:
+        return
+    try:
+        trace(event)
+    except Exception:
+        pass
 
 
 def _load_media_db(install: Path | None = None) -> Any:
@@ -496,6 +633,7 @@ def enrich_work(
     opener: Any = None,
     rate_limit_sleep: float = 0.0,
     install: Path | None = None,
+    trace: Any = None,
 ) -> dict[str, Any]:
     """Single-item presentation and artwork enrichment for an identified Work.
 
@@ -530,6 +668,7 @@ def enrich_work(
                 locale=locale,
                 home=home,
                 opener=opener,
+                trace=trace,
             )
             if pres_res.get("ok"):
                 presentation_status = "REFRESHED"
@@ -543,13 +682,17 @@ def enrich_work(
     poster_error = None
 
     if work_id is not None and presentation_status in ("ALREADY_PRESENT", "REFRESHED"):
-        poster_res = artwork_mod.ensure_work_poster(
-            db,
-            work_id,
-            locale=locale,
-            home=home,
-            opener=opener,
-        )
+        _emit_trace(trace, "poster_cache_begin")
+        try:
+            poster_res = artwork_mod.ensure_work_poster(
+                db,
+                work_id,
+                locale=locale,
+                home=home,
+                opener=opener,
+            )
+        finally:
+            _emit_trace(trace, "poster_cache_end")
         p_status = poster_res.get("status")
         if p_status == "OK_CACHE_HIT":
             poster_status = "CACHE_HIT"
@@ -634,11 +777,17 @@ def enrich_action_token(
     """
     home_path = Path(home).resolve()
     install_path = Path(install).resolve() if install else Path(os.environ.get("OPENHTPC_INSTALL_DIR", home_path / ".local/lib/openhtpc"))
+    trace = lambda event: _ui_action_trace(event, home=home_path)
 
     match_ui = _load_media_match_ui(install_path)
 
     # 1. Candidate acceptance commits locally & deterministically (STRICTLY OFFLINE)
-    dispatch_res = match_ui.dispatch_action_result(home_path, token, install=install_path)
+    dispatch_res = match_ui.dispatch_action_result(
+        home_path,
+        token,
+        install=install_path,
+        trace=trace,
+    )
     exit_code = dispatch_res.get("exit_code", 1)
     if dispatch_res.get("status") != match_ui.DISPATCH_ACCEPTED:
         return exit_code
@@ -668,6 +817,7 @@ def enrich_action_token(
                         home=home_path,
                         opener=opener,
                         install=install_path,
+                        trace=trace,
                     )
         except Exception as exc:
             # Failure contract: network / provider failure must NEVER roll back
@@ -675,7 +825,9 @@ def enrich_action_token(
             print(f"Warning: single-item enrichment failed: {exc}", file=sys.stderr)
 
     # 4. Regenerate Flex presentation with new poster and synopsis
+    _emit_trace(trace, "second_flex_regeneration_begin")
     match_ui._regenerate_ui(home_path, install_path)
+    _emit_trace(trace, "second_flex_regeneration_end")
     return 0
 
 
@@ -1234,7 +1386,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     """CLI main entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1328,6 +1480,15 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(result, indent=2))
     return 0 if result.get("ok") and result.get("outcome") in ("COMPLETE", "PARTIAL", "PLAN_READY") else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Trace the CLI lifetime while preserving the established implementation."""
+    _ui_action_trace("python_entry")
+    try:
+        return _main(argv)
+    finally:
+        _ui_action_trace("python_exit")
 
 
 if __name__ == "__main__":

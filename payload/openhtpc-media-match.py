@@ -68,6 +68,15 @@ VALID_PROVIDER_NAMESPACES = frozenset({
 DEFAULT_LANGUAGE = "fr-FR"
 
 
+def _emit_trace(trace: Any, event: str) -> None:
+    if trace is None:
+        return
+    try:
+        trace(event)
+    except Exception:
+        pass
+
+
 def _load_media_db() -> Any:
     global _MEDIA_DB
     if _MEDIA_DB is not None:
@@ -530,6 +539,7 @@ def accept_candidate(
     method: str | None = None,
     replace: bool = False,
     expected_revision: str | None = None,
+    trace: Any = None,
 ) -> dict[str, Any]:
     """Transactionally accept an identity candidate for media_version_id.
 
@@ -621,6 +631,7 @@ def accept_candidate(
     else:
         # Create new WORK
         norm_title = normalize_title(cand.title)
+        _emit_trace(trace, "identity_transaction_begin")
         cur = db.execute(
             """
             INSERT INTO works (
@@ -660,6 +671,8 @@ def accept_candidate(
     new_locked = 1 if mode == "USER" else 0
     resolved_method = method or ("USER_CONFIRMATION" if mode == "USER" else "AUTO_TITLE_YEAR_EXACT")
 
+    if ext_row is not None:
+        _emit_trace(trace, "identity_transaction_begin")
     db.execute(
         """
         UPDATE media_versions
@@ -727,6 +740,7 @@ def accept_candidate_by_id(
     candidate_id: int,
     replace: bool = False,
     expected_revision: str | None = None,
+    trace: Any = None,
 ) -> dict[str, Any]:
     """Accept a candidate by candidate_id with full validation and concurrency guards."""
     cur = db.execute(
@@ -855,6 +869,7 @@ def accept_candidate_by_id(
         method="USER_CONFIRMATION",
         replace=replace,
         expected_revision=expected_revision,
+        trace=trace,
     )
 
 

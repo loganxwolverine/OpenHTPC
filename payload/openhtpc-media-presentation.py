@@ -36,6 +36,15 @@ _MEDIA_DB = None
 _TMDB_PROVIDER = None
 
 
+def _emit_trace(trace: Any, event: str) -> None:
+    if trace is None:
+        return
+    try:
+        trace(event)
+    except Exception:
+        pass
+
+
 def _load_media_db() -> Any:
     global _MEDIA_DB
     if _MEDIA_DB is not None:
@@ -89,6 +98,7 @@ def refresh_work_presentation(
     home: Path | None = None,
     opener: Any = None,
     now: str | None = None,
+    trace: Any = None,
 ) -> dict[str, Any]:
     """Refresh normalized presentation for a work from its TMDb movie identity.
 
@@ -167,12 +177,16 @@ def refresh_work_presentation(
             "error_detail": "openhtpc-media-db module could not be loaded",
         }
 
-    details_res = tmdb_mod.get_movie_details(
-        tmdb_id=tmdb_movie_id,
-        language=locale,
-        home=home,
-        opener=opener or urllib.request.urlopen,
-    )
+    _emit_trace(trace, "tmdb_movie_details_begin")
+    try:
+        details_res = tmdb_mod.get_movie_details(
+            tmdb_id=tmdb_movie_id,
+            language=locale,
+            home=home,
+            opener=opener or urllib.request.urlopen,
+        )
+    finally:
+        _emit_trace(trace, "tmdb_movie_details_end")
 
     if details_res.status != tmdb_mod.STATUS_OK or details_res.movie is None:
         return {
@@ -229,6 +243,7 @@ def refresh_work_presentation(
             db.commit()
         else:
             db.execute(f"RELEASE SAVEPOINT {sp_name}")
+        _emit_trace(trace, "presentation_commit")
 
     except Exception as exc:
         if not in_tx:

@@ -728,3 +728,312 @@ def test_16_regeneration_failure_after_acceptance_preserves_identity(test_env):
         assert state[0:2] == ("USER_MATCHED", 1)
         assert state[2] is not None
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def _trace_rows(home: Path) -> list[dict[str, Any]]:
+    target = home / ".local/state/openhtpc/ui-action-timing.jsonl"
+    return [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
+
+
+def _enable_trace(monkeypatch, home: Path) -> None:
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_OPERATION_ID", "uiaq-4242-987654321")
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", "5151")
+    monkeypatch.setenv("OPENHTPC_HOME", str(home))
+
+
+def _assert_python_local_trace(rows: list[dict[str, Any]]) -> str:
+    operation_ids = {row["operation_id"] for row in rows}
+    assert len(operation_ids) == 1
+    operation_id = operation_ids.pop()
+    assert operation_id.startswith(f"uiaq-python-{os.getpid()}-")
+    assert all("child_pid" not in row for row in rows)
+    return operation_id
+
+
+def test_17_trace_disabled_creates_no_diagnostic(test_env, monkeypatch):
+    """Normal accepted behavior creates no trace output unless explicitly enabled."""
+    monkeypatch.delenv("OPENHTPC_TRACE_UI_ACTION", raising=False)
+    manifest_path = test_env["home"] / ".local/state/openhtpc/media-actions/current.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    token = next(k for k, v in manifest["items"].items() if v.get("candidate_id") is not None)
+
+    assert media_enrich.enrich_action_token(
+        test_env["home"],
+        token,
+        install=test_env["install_dir"],
+        opener=make_mock_opener(),
+    ) == 0
+    assert not (test_env["home"] / ".local/state/openhtpc/ui-action-timing.jsonl").exists()
+
+
+def test_18_trace_enabled_records_accepted_core_markers_without_sensitive_data(test_env, monkeypatch):
+    """Accepted flow is fully timed without recording identity or provider data."""
+    home = test_env["home"]
+    _enable_trace(monkeypatch, home)
+    manifest_path = home / ".local/state/openhtpc/media-actions/current.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    token = next(k for k, v in manifest["items"].items() if v.get("candidate_id") is not None)
+
+    assert media_enrich.enrich_action_token(
+        home,
+        token,
+        install=test_env["install_dir"],
+        opener=make_mock_opener(),
+    ) == 0
+
+    rows = _trace_rows(home)
+    events = [row["event"] for row in rows]
+    expected = [
+        "active_manifest_loaded",
+        "action_token_validated",
+        "identity_dispatch_begin",
+        "identity_transaction_begin",
+        "identity_commit",
+        "first_flex_regeneration_begin",
+        "first_flex_regeneration_end",
+        "tmdb_movie_details_begin",
+        "tmdb_movie_details_end",
+        "presentation_commit",
+        "poster_cache_begin",
+        "poster_cache_end",
+        "second_flex_regeneration_begin",
+        "second_flex_regeneration_end",
+    ]
+    positions = [events.index(event) for event in expected]
+    assert positions == sorted(positions)
+    _assert_python_local_trace(rows)
+    assert all(type(row["mono_ns"]) is int and row["mono_ns"] > 0 for row in rows)
+
+    raw_trace = (home / ".local/state/openhtpc/ui-action-timing.jsonl").read_text(encoding="utf-8")
+    forbidden = (
+        token,
+        "13 fantômes",
+        json.dumps("13 fantômes")[1:-1],
+        str(test_env["sources_dir"] / "13.Fantomes.2001.mkv"),
+        "13.Fantomes.2001.mkv",
+        "api.themoviedb.org",
+        "image.tmdb.org",
+        "ey_mock_tmdb_token",
+    )
+    assert all(value not in raw_trace for value in forbidden)
+
+
+def test_19_cli_entry_and_exit_markers_are_bounded(test_env, monkeypatch):
+    """The CLI wrapper covers Python entry and every normal return path."""
+    home = test_env["home"]
+    _enable_trace(monkeypatch, home)
+    assert media_enrich.main([
+        "--home", str(home),
+        "--install", str(test_env["install_dir"]),
+        "--token", "iact_forged_sensitive_value",
+    ]) == 1
+    events = [row["event"] for row in _trace_rows(home)]
+    assert events[0] == "python_entry"
+    assert "action_token_invalid" in events
+    assert events[-1] == "python_exit"
+    raw_trace = (home / ".local/state/openhtpc/ui-action-timing.jsonl").read_text(encoding="utf-8")
+    assert "iact_forged_sensitive_value" not in raw_trace
+
+
+def test_20_stale_trace_has_no_enrichment_markers(test_env, monkeypatch):
+    """A stale token records validation/dispatch only, never enrichment success."""
+    home = test_env["home"]
+    _enable_trace(monkeypatch, home)
+    manifest_path = home / ".local/state/openhtpc/media-actions/current.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    token = next(k for k, v in manifest["items"].items() if v.get("candidate_id") is not None)
+    with closing(media_db.connect(test_env["db_path"])) as db:
+        db.execute(
+            """INSERT INTO match_candidates (
+                   media_version_id, provider, external_id, candidate_title,
+                   candidate_year, candidate_payload_json, score, status, created_at
+               ) VALUES (?, 'tmdb_movie', '9999', 'Different candidate', 2002,
+                         '{}', 80.0, 'PENDING', '2026-01-02T00:00:00+00:00')""",
+            (test_env["mv_id"],),
+        )
+        db.commit()
+
+    assert media_enrich.enrich_action_token(
+        home,
+        token,
+        install=test_env["install_dir"],
+        opener=mock.Mock(side_effect=AssertionError("network must not run")),
+    ) == 0
+    events = {row["event"] for row in _trace_rows(home)}
+    assert "identity_commit" not in events
+    assert "tmdb_movie_details_begin" not in events
+    assert "presentation_commit" not in events
+    assert "poster_cache_begin" not in events
+    assert "second_flex_regeneration_begin" not in events
+
+
+def test_21_rejected_trace_has_no_enrichment_markers(test_env, monkeypatch):
+    """A successful explicit rejection never emits accepted enrichment phases."""
+    home = test_env["home"]
+    _enable_trace(monkeypatch, home)
+    manifest = json.loads(
+        (home / ".local/state/openhtpc/media-actions/current.json").read_text(encoding="utf-8")
+    )
+    token = next(k for k, v in manifest["items"].items() if v.get("action") == "reject")
+
+    assert media_enrich.enrich_action_token(
+        home,
+        token,
+        install=test_env["install_dir"],
+    ) == 0
+    events = {row["event"] for row in _trace_rows(home)}
+    assert "identity_commit" not in events
+    assert "first_flex_regeneration_begin" not in events
+    assert "tmdb_movie_details_begin" not in events
+    assert "presentation_commit" not in events
+    assert "poster_cache_begin" not in events
+    assert "second_flex_regeneration_begin" not in events
+
+
+@pytest.mark.parametrize(
+    "child_pid",
+    [
+        "9" * 5000,
+        "not-a-pid",
+        "+1",
+        "-1",
+        "0",
+        "2147483648",
+        "١٢٣",
+    ],
+)
+def test_22_malformed_child_pid_is_total_and_uses_local_fallback(tmp_path, monkeypatch, child_pid):
+    """Untrusted child PID text cannot raise or claim authoritative ownership."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv(
+        "OPENHTPC_UI_ACTION_OPERATION_ID",
+        f"uiaq-{os.getppid()}-123456789",
+    )
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", child_pid)
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+
+    media_enrich._ui_action_trace("python_entry")
+    rows = _trace_rows(tmp_path)
+    assert [row["event"] for row in rows] == ["python_entry"]
+    _assert_python_local_trace(rows)
+
+
+def test_23_pid_mismatch_uses_local_fallback(tmp_path, monkeypatch):
+    """A valid-looking operation cannot claim a different child process."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv(
+        "OPENHTPC_UI_ACTION_OPERATION_ID",
+        f"uiaq-{os.getppid()}-123456789",
+    )
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", str(os.getpid() + 1))
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+
+    media_enrich._ui_action_trace("python_entry")
+    _assert_python_local_trace(_trace_rows(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "operation_id",
+    [
+        "uiaq-" + ("9" * 5000) + "-1",
+        "uiaq-+1-1",
+        "uiaq-0-1",
+        "uiaq-١-1",
+        "uiaq-python-1-1",
+        "not-an-operation",
+    ],
+)
+def test_24_malformed_operation_id_uses_local_fallback(
+    tmp_path, monkeypatch, operation_id
+):
+    """Only the bounded canonical C form is eligible for Flex provenance."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_OPERATION_ID", operation_id)
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", str(os.getpid()))
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+
+    media_enrich._ui_action_trace("python_entry")
+    _assert_python_local_trace(_trace_rows(tmp_path))
+
+
+def test_25_parent_mismatch_uses_local_fallback(tmp_path, monkeypatch):
+    """The operation's embedded parent PID must be the actual Python parent."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv(
+        "OPENHTPC_UI_ACTION_OPERATION_ID",
+        f"uiaq-{os.getppid() + 1}-123456789",
+    )
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", str(os.getpid()))
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+
+    media_enrich._ui_action_trace("python_entry")
+    _assert_python_local_trace(_trace_rows(tmp_path))
+
+
+def test_26_direct_python_trace_has_local_operation_without_child_pid(tmp_path, monkeypatch):
+    """Direct developer invocation is traceable without impersonating Flex."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.delenv("OPENHTPC_UI_ACTION_OPERATION_ID", raising=False)
+    monkeypatch.delenv("OPENHTPC_UI_ACTION_CHILD_PID", raising=False)
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+
+    media_enrich._ui_action_trace("python_entry")
+    media_enrich._ui_action_trace("python_exit")
+    rows = _trace_rows(tmp_path)
+    assert [row["event"] for row in rows] == ["python_entry", "python_exit"]
+    _assert_python_local_trace(rows)
+
+
+def test_27_parent_executable_failure_uses_local_fallback(tmp_path, monkeypatch):
+    """Unavailable process ancestry evidence fails open to local diagnostics."""
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv(
+        "OPENHTPC_UI_ACTION_OPERATION_ID",
+        f"uiaq-{os.getppid()}-123456789",
+    )
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", str(os.getpid()))
+    monkeypatch.setenv("OPENHTPC_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        media_enrich,
+        "_ui_action_parent_executable",
+        mock.Mock(side_effect=PermissionError),
+    )
+
+    media_enrich._ui_action_trace("python_entry")
+    _assert_python_local_trace(_trace_rows(tmp_path))
+
+
+def test_28_trace_writer_failure_does_not_change_cli_result(test_env, monkeypatch):
+    """Trace destination failures cannot change normal CLI failure semantics."""
+    _enable_trace(monkeypatch, test_env["home"])
+    monkeypatch.setattr(media_enrich.os, "open", mock.Mock(side_effect=PermissionError))
+
+    assert media_enrich.main([
+        "--home", str(test_env["home"]),
+        "--install", str(test_env["install_dir"]),
+        "--token", "iact_forged_sensitive_value",
+    ]) == 1
+
+
+def test_29_malformed_entry_correlation_preserves_cli_and_exit(test_env, monkeypatch):
+    """Malformed entry provenance cannot prevent CLI handling or final tracing."""
+    home = test_env["home"]
+    monkeypatch.setenv("OPENHTPC_TRACE_UI_ACTION", "1")
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_OPERATION_ID", "uiaq-1-1")
+    monkeypatch.setenv("OPENHTPC_UI_ACTION_CHILD_PID", "7" * 5000)
+    monkeypatch.setenv("OPENHTPC_HOME", str(home))
+
+    assert media_enrich.main([
+        "--home", str(home),
+        "--install", str(test_env["install_dir"]),
+        "--token", "iact_forged_sensitive_value",
+    ]) == 1
+    rows = _trace_rows(home)
+    assert [row["event"] for row in rows] == [
+        "python_entry",
+        "active_manifest_loaded",
+        "action_token_invalid",
+        "python_exit",
+    ]
+    _assert_python_local_trace(rows)

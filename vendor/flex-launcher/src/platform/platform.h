@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <stddef.h>
 
 #ifdef _WIN32
 #define FILE_MODE_WRITE "wt"
@@ -13,7 +14,10 @@ void get_region(char *buffer);
 void scan_slideshow_directory(Slideshow *slideshow, const char *directory);
 bool start_process(char *cmd, bool application, bool replace_launcher);
 pid_t start_process_tracked(char *cmd);
-bool run_process_sync(char *cmd);
+#define UI_ACTION_OPERATION_ID_MAX 96
+bool ui_action_trace_begin(char *operation_id, size_t operation_id_size);
+void ui_action_trace_event(const char *event, const char *operation_id, pid_t child_pid);
+bool run_process_sync(char *cmd, const char *operation_id);
 void scmd_shutdown(void);
 void scmd_restart(void);
 void scmd_sleep(void);

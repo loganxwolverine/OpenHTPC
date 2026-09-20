@@ -530,27 +530,47 @@ def _dispatch_result(status: str, exit_code: int, **fields: Any) -> dict[str, An
     return {"status": status, "exit_code": exit_code, **fields}
 
 
-def dispatch_action_result(home: Path, token: str, install: Path | None = None) -> dict[str, Any]:
+def _emit_trace(trace: Any, event: str) -> None:
+    if trace is None:
+        return
+    try:
+        trace(event)
+    except Exception:
+        pass
+
+
+def dispatch_action_result(
+    home: Path,
+    token: str,
+    install: Path | None = None,
+    *,
+    trace: Any = None,
+) -> dict[str, Any]:
     """Dispatch an action token and report its semantic outcome unambiguously."""
     if install is None:
         install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
 
     manifest_path = home / ".local/state/openhtpc/media-actions/current.json"
     if not manifest_path.is_file():
+        _emit_trace(trace, "action_token_invalid")
         print("ERROR: ACTION_MANIFEST_MISSING", file=sys.stderr)
         return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_MISSING")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
+        _emit_trace(trace, "action_token_invalid")
         print(f"ERROR: ACTION_MANIFEST_INVALID: {exc}", file=sys.stderr)
         return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_INVALID")
+    _emit_trace(trace, "active_manifest_loaded")
 
     if not isinstance(manifest, dict) or not isinstance(manifest.get("items"), dict):
+        _emit_trace(trace, "action_token_invalid")
         print("ERROR: ACTION_MANIFEST_INVALID", file=sys.stderr)
         return _dispatch_result(DISPATCH_INVALID, 1, error="ACTION_MANIFEST_INVALID")
     actions = manifest["items"]
     action_data = actions.get(token)
     if not action_data or not isinstance(action_data, dict):
+        _emit_trace(trace, "action_token_invalid")
         print(f"ERROR: INVALID_ACTION_TOKEN: {token}", file=sys.stderr)
         return _dispatch_result(DISPATCH_INVALID, 1, error="INVALID_ACTION_TOKEN")
 
@@ -561,8 +581,13 @@ def dispatch_action_result(home: Path, token: str, install: Path | None = None) 
     replace = action_data.get("replace", False)
 
     if type(mv_id) is not int:
+        _emit_trace(trace, "action_token_invalid")
         print("ERROR: INVALID_ACTION_IDENTITY", file=sys.stderr)
         return _dispatch_result(DISPATCH_INVALID, 1, error="INVALID_ACTION_IDENTITY")
+    if action_type in ("accept", "replace") and type(cand_id) is int:
+        _emit_trace(trace, "action_token_validated")
+    elif action_type == "reject":
+        _emit_trace(trace, "action_token_validated")
 
     media_db = _load_media_db(install)
     media_match = _load_media_match(install)
@@ -582,22 +607,27 @@ def dispatch_action_result(home: Path, token: str, install: Path | None = None) 
     with closing(media_db.connect(db_file)) as db:
         if action_type in ("accept", "replace"):
             if type(cand_id) is not int:
+                _emit_trace(trace, "action_token_invalid")
                 print("ERROR: CANDIDATE_ID_REQUIRED", file=sys.stderr)
                 return _dispatch_result(DISPATCH_INVALID, 1, error="CANDIDATE_ID_REQUIRED")
+            _emit_trace(trace, "identity_dispatch_begin")
             res = media_match.accept_candidate_by_id(
                 db,
                 media_version_id=mv_id,
                 candidate_id=cand_id,
                 replace=bool(replace or action_type == "replace"),
                 expected_revision=expected_rev,
+                trace=trace,
             )
         elif action_type == "reject":
+            _emit_trace(trace, "identity_dispatch_begin")
             res = media_match.reject_candidates(
                 db,
                 media_version_id=mv_id,
                 expected_revision=expected_rev,
             )
         else:
+            _emit_trace(trace, "action_token_invalid")
             print(f"ERROR: UNKNOWN_ACTION: {action_type}", file=sys.stderr)
             return _dispatch_result(DISPATCH_INVALID, 1, error="UNKNOWN_ACTION")
 
@@ -624,7 +654,13 @@ def dispatch_action_result(home: Path, token: str, install: Path | None = None) 
         db.commit()
 
         # Successful DB commit: regenerate Flex presentation
-        _regenerate_ui(home, install)
+        if action_type in ("accept", "replace"):
+            _emit_trace(trace, "identity_commit")
+            _emit_trace(trace, "first_flex_regeneration_begin")
+            _regenerate_ui(home, install)
+            _emit_trace(trace, "first_flex_regeneration_end")
+        else:
+            _regenerate_ui(home, install)
         if action_type == "reject":
             return _dispatch_result(DISPATCH_REJECTED, 0, media_version_id=mv_id)
         return _dispatch_result(

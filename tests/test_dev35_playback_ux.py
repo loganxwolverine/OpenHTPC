@@ -44,7 +44,7 @@ class GeometryAndReturn(unittest.TestCase):
         launcher = (FLEX / "launcher.c").read_text(encoding="utf-8")
         unix = (FLEX / "platform/unix.c").read_text(encoding="utf-8")
         self.assertIn("SCMD_APPLY_BACK", launcher)
-        self.assertIn("run_process_sync(settings_command)", launcher)
+        self.assertIn("run_process_sync(settings_command, operation_id)", launcher)
         self.assertIn("reload_menu_section(parent)", launcher)
         self.assertIn("load_menu(parent, false, true)", launcher)
         self.assertIn("waitpid(child_pid, &status, 0)", unix)
