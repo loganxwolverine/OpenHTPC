@@ -299,6 +299,163 @@ def test_media_list_unidentified_still_uses_filename_stem(env):
     assert media_file.read_bytes() == b"original-video-bytes"
 
 
+def test_unidentified_view_contains_only_db_unmatched_with_raw_titles(env):
+    matched = _seed_movie(env, filename="Matched.Release.mkv", work_id=1,
+                          title="Canonical Matched", state="AUTO_MATCHED")
+    _seed_presentation(env, display_title="Presented Matched")
+    unmatched = _seed_movie(env, filename="Raw.Unmatched.Release.mkv", work_id=2, external_id="2002",
+                            title="Stale Foreign Work", state="UNMATCHED")
+    user_matched = _seed_movie(env, filename="User.Release.mkv", work_id=3, external_id="3003",
+                               title="Canonical User", state="USER_MATCHED")
+    second_unmatched = _seed_movie(env, filename="Another.Raw.File.avi", work_id=4,
+                                   external_id="4004", title="Unrelated Work", state="UNMATCHED")
+    # A stale work reference must not lend its title or poster to an UNMATCHED row.
+    with closing(media_db.connect(env["db_file"])) as db:
+        db.execute("UPDATE media_versions SET work_id = 1 WHERE id = 2")
+        db.execute("UPDATE media_versions SET work_id = NULL WHERE id = 4")
+        db.commit()
+        resources_before = db.execute(
+            "SELECT source_id, relative_path, canonical_path FROM resources ORDER BY id"
+        ).fetchall()
+    _write_canonical_cache(env["home"], "/the_thing.jpg")
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    root = _get_section_lines(sections, "[MEDIA_ROOT]")
+    unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    assert any("À identifier — 2" in row and ":submenu MEDIA_UNMATCHED" in row for row in root)
+    assert unidentified[0].endswith(";:back")
+    assert len(unidentified) == 3
+    assert any("Raw.Unmatched.Release  ·  MKV" in row for row in unidentified[1:])
+    assert any("Another.Raw.File  ·  AVI" in row for row in unidentified[1:])
+    assert all("Presented Matched" not in row and "Canonical User" not in row
+               and "Stale Foreign Work" not in row and "Unrelated Work" not in row
+               for row in unidentified)
+    assert all(f"/tmp/ohtpc-{env['uid']}-m.png" in row for row in unidentified[1:])
+    assert all(row.split(";", 3)[2].startswith((":back", ":submenu MEDIA_D"))
+               for row in unidentified)
+    raw_row = next(row for row in unidentified if "Raw.Unmatched.Release" in row)
+    detail_id = raw_row.split(";:submenu ", 1)[1].split(";", 1)[0]
+    detail = _get_section_lines(sections, f"[{detail_id}]")
+    assert "Title=Raw.Unmatched.Release" in detail
+    assert "Synopsis1=Fichier local non identifié." in detail
+    assert f"Poster=/tmp/ohtpc-{env['uid']}-m.png" in detail
+    assert any(row.endswith(";:back") for row in detail if row.startswith("Entry"))
+    assert any("Presented Matched  ·  MKV" in row for row in sections.splitlines())
+    assert any("Canonical User  ·  MKV" in row for row in sections.splitlines())
+    assert matched.read_bytes() == user_matched.read_bytes() == unmatched.read_bytes() == second_unmatched.read_bytes() == b"video-data"
+    with closing(media_db.connect(env["db_file"])) as db:
+        assert db.execute(
+            "SELECT source_id, relative_path, canonical_path FROM resources ORDER BY id"
+        ).fetchall() == resources_before
+
+
+def test_unidentified_entry_absent_when_no_db_unmatched(env):
+    _seed_movie(env, state="AUTO_MATCHED")
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert "À identifier" not in sections
+    assert "[MEDIA_UNMATCHED]" not in sections
+
+
+def test_unidentified_view_includes_item_beyond_normal_depth(env):
+    relative = "a/b/c/d/Deep.Raw.Release.mkv"
+    (env["sources_dir"] / "a/b/c/d").mkdir(parents=True)
+    _seed_movie(env, filename=relative, state="UNMATCHED")
+    db_sha = hashlib.sha256(env["db_file"].read_bytes()).hexdigest()
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert hashlib.sha256(env["db_file"].read_bytes()).hexdigest() == db_sha
+    assert "À identifier — 1" in sections
+    unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    assert len(unidentified) == 2
+    assert "Deep.Raw.Release  ·  MKV" in unidentified[1]
+    detail_id = unidentified[1].split(";:submenu ", 1)[1]
+    assert _get_section_lines(sections, f"[{detail_id}]")
+    manifest = json.loads(session_engine.current_media_manifest(env["home"]).read_text())
+    assert any(item.get("relative_path") == relative
+               and item.get("page_id") == detail_id
+               and item.get("parent_page_id") == "MEDIA_UNMATCHED"
+               for item in manifest["items"].values())
+    assert "Deep.Raw.Release  ·  MKV" not in "\n".join(
+        row for row in sections.splitlines() if row != unidentified[1]
+    )
+
+
+def test_unidentified_view_includes_item_beyond_64_directories(env):
+    for index in range(64):
+        (env["sources_dir"] / f"d{index:02}").mkdir()
+    (env["sources_dir"] / "zz_target").mkdir()
+    _seed_movie(env, filename="zz_target/Beyond.Limit.mkv", state="UNMATCHED")
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert "À identifier — 1" in sections
+    unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    assert len(unidentified) == 2
+    assert "Beyond.Limit  ·  MKV" in unidentified[1]
+    assert "Beyond.Limit  ·  MKV" not in "\n".join(
+        row for row in sections.splitlines() if row != unidentified[1]
+    )
+
+
+def test_unidentified_view_exposes_all_63_versions(env):
+    for work_id in range(1, 64):
+        _seed_movie(env, filename=f"Raw.Release.{work_id:03}.mkv",
+                    work_id=work_id, external_id=str(work_id), state="UNMATCHED")
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert "À identifier — 63" in _get_section_lines(sections, "[MEDIA_ROOT]")[-2]
+    unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    assert len(unidentified) == 64
+    assert sum(":submenu MEDIA_D" in row for row in unidentified) == 63
+    for work_id in range(1, 64):
+        assert sum(f"Raw.Release.{work_id:03}  ·  MKV" in row for row in unidentified) == 1
+
+
+def test_unidentified_view_excludes_missing_unknown_and_absent_resources(env):
+    _seed_movie(env, filename="Eligible.mkv", work_id=1, state="UNMATCHED")
+    _seed_movie(env, filename="Missing.mkv", work_id=2, external_id="2002", state="UNMATCHED")
+    _seed_movie(env, filename="Unknown.mkv", work_id=3, external_id="3003", state="UNMATCHED")
+    absent = _seed_movie(env, filename="Absent.mkv", work_id=4, external_id="4004", state="UNMATCHED")
+    duplicate = env["sources_dir"] / "Eligible.Copy.mkv"
+    duplicate.write_bytes(b"video-data")
+    with closing(media_db.connect(env["db_file"])) as db:
+        db.execute("UPDATE resources SET availability_status = 'MISSING' WHERE relative_path = 'Missing.mkv'")
+        db.execute("UPDATE resources SET availability_status = 'UNKNOWN' WHERE relative_path = 'Unknown.mkv'")
+        db.execute(
+            "INSERT INTO resources (media_version_id, resource_kind, source_id, relative_path, created_at) "
+            "VALUES (1, 'FILE', ?, 'Eligible.Copy.mkv', ?)",
+            (session_engine.media_source_id(env["sources_dir"].resolve()), NOW),
+        )
+        db.commit()
+    absent.unlink()
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert "À identifier — 1" in sections
+    unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    assert len(unidentified) == 2
+    assert "Eligible" in unidentified[1]
+    assert all(name not in "\n".join(unidentified) for name in ("Missing", "Unknown", "Absent"))
+    with closing(media_db.connect(env["db_file"])) as db:
+        db.execute("UPDATE resources SET availability_status = 'MISSING' WHERE media_version_id = 1")
+        db.commit()
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    assert "À identifier" not in sections
+    assert "[MEDIA_UNMATCHED]" not in sections
+
+
 # ==============================================================================
 # 1. ACTIVATING IDENTIFIED MEDIA OPENS MEDIA_D SUBMENU
 # ==============================================================================

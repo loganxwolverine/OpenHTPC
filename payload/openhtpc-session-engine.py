@@ -657,6 +657,10 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     """Build a bounded complete media graph before the persistent Flex starts."""
     sections: list[str] = []
     actions: dict[str, dict] = {}
+    unmatched_entries: list[tuple[str, pathlib.Path, str]] = []
+    unmatched_resources: list[tuple[int, str, str]] = []
+    generated_detail_ids: set[str] = set()
+    source_roots: dict[str, pathlib.Path] = {}
     visited: set[pathlib.Path] = set(); inventory=[]
     install = home / ".local/lib/openhtpc"
     picker_bin = install / "openhtpc-media-picker"
@@ -717,6 +721,20 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "candidate_count": r[9] or 0,
                     }
 
+                unmatched_resources = db.execute(
+                    """
+                    SELECT mv.id, r.source_id, r.relative_path
+                    FROM media_versions mv
+                    JOIN resources r ON r.media_version_id = mv.id
+                    WHERE mv.identification_state = 'UNMATCHED'
+                      AND r.resource_kind = 'FILE'
+                      AND r.availability_status = 'AVAILABLE'
+                      AND r.source_id IS NOT NULL
+                      AND r.relative_path IS NOT NULL
+                    ORDER BY mv.id, r.source_id, r.relative_path, r.id
+                    """
+                ).fetchall()
+
                 # DEV6B2 / DEV6B3: Batch presentation lookup for fr-FR movie posters & details
                 # Provenance chain: work_presentations -> provider_snapshots -> external_ids
                 pres_rows = db.execute(
@@ -748,6 +766,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         except Exception:
             identity_map = {}
             pres_map = {}
+            unmatched_resources = []
 
         distinct_work_ids = {info["work_id"] for info in identity_map.values() if info.get("work_id") is not None}
         for wid in distinct_work_ids:
@@ -816,7 +835,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         title = ini_value(title_source)
                         if len(title) > 72: title = title[:69].rstrip() + "…"
 
-                        item_icon = work_posters.get(work_id) if work_id is not None else None
+                        item_icon = work_posters.get(work_id) if state in ("AUTO_MATCHED", "USER_MATCHED") and work_id is not None else None
                         if item_icon is None:
                             item_icon = entry_icon
 
@@ -880,9 +899,11 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                             res_menu=res_menu,
                         )
                         sections.append(detail_sec)
+                        generated_detail_ids.add(detail_menu)
 
                         parent_cmd = f":submenu {detail_menu}"
-                        entries.append((f"{title}  ·  {ext[1:].upper()}", item_icon, parent_cmd, context_cmd, context_title))
+                        label = f"{title}  ·  {ext[1:].upper()}"
+                        entries.append((label, item_icon, parent_cmd, context_cmd, context_title))
             except OSError:
                 continue
         if resolved == source_root.resolve():
@@ -908,12 +929,96 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
             except OSError:canonical=None
             sid=media_source_id(canonical) if canonical is not None else media_source_id(source)
             target = section_for(canonical,canonical,sid) if canonical is not None and canonical.is_dir() else None
+            if canonical is not None and canonical.is_dir():
+                source_roots[sid] = canonical
             inventory.append({"source_id":sid,"configured_path":str(source),"canonical_path":str(canonical) if canonical is not None else None})
             label = ini_value(source.name or str(source)) + ("" if target else " — indisponible")
             source_cmd = f":submenu {target}" if target else ":fork true"
             context_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-media-remove \"{str(source)}\""
             roots.append((label, folder_icon, source_cmd, context_cmd, "RETIRER LA SOURCE"))
         roots.append(("+ AJOUTER UNE SOURCE", add_icon, f"{picker_bin}"))
+
+    # The unmatched view is sourced from the DB, independent of the bounded folder graph.
+    unmatched_ids: set[int] = set()
+    for mv_id, source_id, relative_path in unmatched_resources:
+        if (type(mv_id) is not int or type(source_id) is not str
+                or type(relative_path) is not str
+                or mv_id in unmatched_ids or source_id not in source_roots):
+            continue
+        relative = pathlib.PurePosixPath(relative_path)
+        if (relative.is_absolute() or not relative.parts
+                or any(part in ("", ".", "..") for part in relative.parts)):
+            continue
+        root = source_roots[source_id]
+        try:
+            physical = root.joinpath(*relative.parts).resolve(strict=True)
+            if root not in physical.parents or not physical.is_file():
+                continue
+        except (OSError, RuntimeError):
+            continue
+        ext = relative.suffix.casefold()
+        if ext not in VIDEO_EXTENSIONS:
+            continue
+
+        item_id = media_item_id(source_id, relative, "file")
+        token = media_action_token(generation, item_id)
+        detail_menu = f"MEDIA_D{item_id[:8]}"
+        res_menu = f"MEDIA_R{item_id[:8]}"
+        if detail_menu not in generated_detail_ids:
+            actions[token] = {"page_id": detail_menu, "parent_page_id": "MEDIA_UNMATCHED",
+                              "item_type": "file", "source_id": source_id,
+                              "relative_path": relative.as_posix(), "semantic_id": item_id}
+            res_secs = None
+            if match_ui:
+                try:
+                    import sqlite3
+                    with sqlite3.connect(f"file:{media_db_path}?mode=ro", uri=True) as db:
+                        res_secs = match_ui.build_resolver_menu_sections(
+                            home=home, install=install, db=db, media_version_id=mv_id,
+                            res_section_id=res_menu, generation=generation,
+                            actions=actions, icon=entry_icon,
+                        )
+                        if res_secs:
+                            sections.extend(res_secs)
+                except Exception:
+                    res_secs = None
+            if not res_secs:
+                search_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-manual-search-ui"
+                ms_menu = f"MEDIA_MS_{item_id[:8]}"
+                sections.append(f"[{res_menu}]\n" + "\n".join([
+                    bounded_flex_entry(1, "RECHERCHER MANUELLEMENT", entry_icon, f":submenu {ms_menu}"),
+                    bounded_flex_entry(2, "Aucune proposition disponible.", entry_icon, ":back"),
+                    bounded_flex_entry(3, "RETOUR", entry_icon, ":back"),
+                ]))
+                sections.append(f"[{ms_menu}]\n" + "\n".join([
+                    bounded_flex_entry(1, "LANCER LA RECHERCHE", entry_icon,
+                                       f":applyback {search_helper_path} --token {token}"),
+                    bounded_flex_entry(2, "RETOUR", entry_icon, ":back"),
+                ]))
+            sections.append(_build_movie_detail_section(
+                section_id=detail_menu, token=token, stem=relative.stem, ext=ext,
+                ident={"media_version_id": mv_id, "identification_state": "UNMATCHED",
+                       "work_id": None},
+                pres_info=None, item_icon=entry_icon, entry_icon=entry_icon,
+                res_menu=res_menu,
+            ))
+            generated_detail_ids.add(detail_menu)
+
+        title = ini_value(relative.stem)
+        if len(title) > 72:
+            title = title[:69].rstrip() + "…"
+        unmatched_entries.append((f"{title}  ·  {ext[1:].upper()}", entry_icon,
+                                  f":submenu {detail_menu}"))
+        unmatched_ids.add(mv_id)
+
+    if unmatched_entries:
+        unmatched_body = "\n".join([
+            bounded_flex_entry(1, "RETOUR", icon, ":back"),
+            *(bounded_flex_entry(i, label, item_icon, command)
+              for i, (label, item_icon, command) in enumerate(unmatched_entries, 2)),
+        ])
+        sections.append(f"[MEDIA_UNMATCHED]\n{unmatched_body}")
+        roots.append((f"À identifier — {len(unmatched_entries)}", icon, ":submenu MEDIA_UNMATCHED"))
 
     roots.append(("RETOUR À OPENHTPC", icon, ":back"))
     root_entries = []
