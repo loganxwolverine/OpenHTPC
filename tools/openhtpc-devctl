@@ -315,9 +315,12 @@ def _source_fingerprint_hashes(hashes: dict[str, str]) -> str:
 
 
 def _elf_build_id(path: pathlib.Path) -> str:
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
     result = subprocess.run(
         ["readelf", "-n", str(path)], text=True, capture_output=True,
-        stdin=subprocess.DEVNULL, check=True,
+        stdin=subprocess.DEVNULL, check=True, env=env,
     )
     match = re.search(r"(?m)^\s*Build ID:\s*([0-9a-fA-F]+)\s*$", result.stdout)
     if match is None or not ELF_BUILD_ID_PATTERN.fullmatch(match.group(1).lower()):
