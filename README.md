@@ -73,6 +73,15 @@ Update preserves user configuration, MEDIA sources, the Hardware Passport,
 recorded video validations and other persistent user state. It replaces only
 managed product files according to the packaged manifest.
 
+## Update the local media library
+
+Run `~/.local/lib/openhtpc/openhtpc-media-library-update` to scan every
+configured local source, enrich available movies, cache posters, and publish one
+final Flex configuration. The command prints a JSON summary and returns a
+nonzero status if any source or item failed or Flex publication was incomplete.
+Unchanged files and previously matched identities keep their existing
+incremental behavior.
+
 ## Public commands
 
 ```text

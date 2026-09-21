@@ -193,11 +193,11 @@ def _seed_movie(env: dict, filename: str = "The Thing (1982).mkv", work_id: int 
     return media_file
 
 
-def _seed_presentation(env: dict, work_id: int = 1, external_id_id: int = 1, poster_path: str = "/the_thing.jpg", kind: str = "MOVIE_DETAILS", provider: str = "tmdb_movie", locale: str = "fr-FR", malformed_json: bool = False):
+def _seed_presentation(env: dict, work_id: int = 1, external_id_id: int = 1, poster_path: str = "/the_thing.jpg", kind: str = "MOVIE_DETAILS", provider: str = "tmdb_movie", locale: str = "fr-FR", malformed_json: bool = False, display_title: str = "The Thing"):
     """Seed provider_snapshots and work_presentations for a work."""
     db_file = env["db_file"]
     snap_id = work_id
-    payload = {"id": 1091, "poster_path": poster_path, "title": "The Thing"}
+    payload = {"id": 1091, "poster_path": poster_path, "title": display_title}
     payload_str = "{bad json" if malformed_json else json.dumps(payload)
 
     with closing(media_db.connect(db_file)) as db:
@@ -208,8 +208,8 @@ def _seed_presentation(env: dict, work_id: int = 1, external_id_id: int = 1, pos
         )
         db.execute(
             "INSERT INTO work_presentations (id, work_id, locale, source_snapshot_id, display_title, display_original_title, release_date, runtime_minutes, overview, genres_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, 'The Thing', 'The Thing', '1982-06-25', 109, 'A horror classic.', '[\"Horror\"]', ?, ?)",
-            (work_id, work_id, locale, snap_id, NOW, NOW),
+            "VALUES (?, ?, ?, ?, ?, ?, '1982-06-25', 109, 'A horror classic.', '[\"Horror\"]', ?, ?)",
+            (work_id, work_id, locale, snap_id, display_title, display_title, NOW, NOW),
         )
         db.commit()
 
@@ -589,7 +589,7 @@ def test_17_titles_unchanged(env):
     poster_title = poster_entry.split(";")[0].split("=", 1)[1]
 
     assert base_title == poster_title
-    assert base_title == "The Thing (1982)  ·  MKV"
+    assert base_title == "The Thing  ·  MKV"
 
 
 # ==============================================================================
@@ -643,7 +643,7 @@ def test_20_long_ascii_title_le_198_bytes(env):
     """20. Long ASCII title with cached poster produces an Entry line <= 198 UTF-8 bytes."""
     long_name = "A" * 120 + ".mkv"
     _seed_movie(env, filename=long_name, title="A" * 120)
-    _seed_presentation(env, poster_path="/the_thing.jpg")
+    _seed_presentation(env, poster_path="/the_thing.jpg", display_title="A" * 120)
     _write_canonical_cache(env["home"], "/the_thing.jpg")
     env["track_alias"](1)
 

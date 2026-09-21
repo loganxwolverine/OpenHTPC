@@ -151,6 +151,7 @@ openhtpc-media-artwork.py
 openhtpc-media-db.py
 openhtpc-media-enrich.py
 openhtpc-media-ingest.py
+openhtpc-media-library-update
 openhtpc-media-manual-search-ui
 openhtpc-media-match.py
 openhtpc-media-match-ui

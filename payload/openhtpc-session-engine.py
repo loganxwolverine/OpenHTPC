@@ -805,13 +805,16 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         detail_menu = f"MEDIA_D{item_id[:8]}"
                         actions[token] = {"page_id": detail_menu, "parent_page_id": name, "item_type": "file", "source_id": source_id, "relative_path": relative.as_posix(), "semantic_id": item_id}
                         stem = os.path.splitext(item.name)[0]
-                        title = ini_value(stem)
-                        if len(title) > 72: title = title[:69].rstrip() + "…"
-
                         ident = identity_map.get((source_id, relative.as_posix()))
                         mv_id = ident.get("media_version_id") if ident else None
                         state = ident.get("identification_state") if ident else "UNMATCHED"
                         work_id = ident.get("work_id") if ident else None
+                        title_source = stem
+                        if state in ("AUTO_MATCHED", "USER_MATCHED") and work_id is not None:
+                            presentation = pres_map.get(work_id)
+                            title_source = (presentation.get("display_title") if presentation else None) or ident.get("title") or stem
+                        title = ini_value(title_source)
+                        if len(title) > 72: title = title[:69].rstrip() + "…"
 
                         item_icon = work_posters.get(work_id) if work_id is not None else None
                         if item_icon is None:

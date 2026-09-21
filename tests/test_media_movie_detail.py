@@ -251,6 +251,54 @@ def _get_section_lines(sections_text: str, section_header: str) -> list[str]:
     return result
 
 
+def test_media_list_prefers_presentation_then_canonical_title(env):
+    filename = "Opaque.Release.1982.mkv"
+    media_file = _seed_movie(env, filename=filename, title="Canonical Film")
+    original_bytes = media_file.read_bytes()
+    _seed_presentation(env, display_title="Titre Présenté")
+    with closing(media_db.connect(env["db_file"])) as db:
+        resource_before = db.execute(
+            "SELECT source_id, relative_path, canonical_path FROM resources"
+        ).fetchone()
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    list_rows = [line for line in sections.splitlines() if ":submenu MEDIA_D" in line]
+    assert len(list_rows) == 1
+    assert "Titre Présenté  ·  MKV" in list_rows[0]
+    assert media_file.name == filename and media_file.read_bytes() == original_bytes
+    with closing(media_db.connect(env["db_file"])) as db:
+        assert db.execute(
+            "SELECT source_id, relative_path, canonical_path FROM resources"
+        ).fetchone() == resource_before
+
+
+def test_media_list_uses_canonical_title_without_presentation(env):
+    filename = "Opaque.Release.1982.mkv"
+    media_file = _seed_movie(env, filename=filename, title="Canonical Film")
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    list_rows = [line for line in sections.splitlines() if ":submenu MEDIA_D" in line]
+    assert len(list_rows) == 1
+    assert "Canonical Film  ·  MKV" in list_rows[0]
+    assert media_file.name == filename
+
+
+def test_media_list_unidentified_still_uses_filename_stem(env):
+    media_file = env["sources_dir"] / "Unidentified.Release.mkv"
+    media_file.write_bytes(b"original-video-bytes")
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    list_rows = [line for line in sections.splitlines() if ":submenu MEDIA_D" in line]
+    assert len(list_rows) == 1
+    assert "Unidentified.Release  ·  MKV" in list_rows[0]
+    assert media_file.name == "Unidentified.Release.mkv"
+    assert media_file.read_bytes() == b"original-video-bytes"
+
+
 # ==============================================================================
 # 1. ACTIVATING IDENTIFIED MEDIA OPENS MEDIA_D SUBMENU
 # ==============================================================================

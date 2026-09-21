@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+# Copyright 2026 Steve Dehanne
+# SPDX-License-Identifier: Apache-2.0
+#
+# Part of the OPENHTPC project.
+# Original project by Steve Dehanne.
+"""Synchronously update configured media sources and publish one Flex generation."""
+
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+
+def _load_component(name: str) -> Any:
+    path = Path(__file__).resolve().with_name(name)
+    loader = importlib.machinery.SourceFileLoader(name.replace("-", "_"), str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise RuntimeError(f"Cannot load {name}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def update_library(home: Path, db_path: Path | None = None, install: Path | None = None) -> dict[str, Any]:
+    """Delegate incremental work to the existing scanner and batch enricher.
+
+    ``enriched`` counts refreshed presentations; poster hits/downloads are
+    separate. ``still_unmatched`` uses the enricher's unresolved count.
+    """
+    summary: dict[str, Any] = {
+        "ok": False, "sources_configured": 0, "sources_processed": 0,
+        "files_discovered": 0, "new": 0, "unchanged": 0, "changed": 0,
+        "restored": 0, "missing": 0, "auto_matched": 0,
+        "still_unmatched": 0, "enriched": 0, "poster_cache_hits": 0,
+        "poster_downloads": 0, "failures": 0, "flex_published": False,
+        "source_failures": [], "warnings": [],
+    }
+    phase = "configuration"
+    try:
+        scan = _load_component("openhtpc-media-scan.py")
+        enrich = _load_component("openhtpc-media-enrich.py")
+        session = _load_component("openhtpc-session-engine.py")
+
+        config_path = home / ".config/openhtpc/user-config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        raw_sources = config.get("local_media_sources") if type(config) is dict else None
+        if type(raw_sources) is not list or any(
+            type(raw) is not str or not raw.strip() or not Path(raw).is_absolute()
+            for raw in raw_sources
+        ):
+            raise ValueError("Invalid local_media_sources in user-config.json")
+        sources = scan.get_configured_sources(home)
+        if len(sources) != len(raw_sources):
+            raise ValueError("Configured media sources could not be resolved")
+        sources.sort(key=lambda source: (str(source["canonical_path"]), source["source_id"]))
+        summary["sources_configured"] = len(sources)
+        summary["warnings"] = scan.detect_overlapping_sources(sources)
+
+        for source in sources:
+            sid = source["source_id"]
+            source_path = str(source["canonical_path"])
+            summary["sources_processed"] += 1
+            stage = "scan"
+            try:
+                scan_result = scan.scan_source(source_id=sid, db_path=db_path, home=home)
+                for key, result_key in (
+                    ("files_discovered", "enumerated"), ("new", "new"),
+                    ("unchanged", "unchanged"), ("changed", "changed"),
+                    ("restored", "restored"), ("missing", "missing"),
+                    ("failures", "failed"),
+                ):
+                    summary[key] += scan_result.get(result_key, 0)
+                if not scan_result.get("ok"):
+                    raise ValueError(scan_result.get("error") or scan_result.get("message") or "SCAN_FAILED")
+                if scan_result.get("outcome") != "COMPLETE":
+                    summary["source_failures"].append({
+                        "source_id": sid, "path": source_path, "stage": "scan",
+                        "error": scan_result.get("outcome", "INCOMPLETE"),
+                    })
+                stage = "enrich"
+                enrich_result = enrich.run_batch_enrichment(
+                    source_id=sid, home=home, db_path=db_path,
+                )
+                if not enrich_result.get("ok"):
+                    raise ValueError(enrich_result.get("error") or enrich_result.get("message") or "ENRICH_FAILED")
+                for key, result_key in (
+                    ("auto_matched", "auto_matched"), ("still_unmatched", "unresolved"),
+                    ("enriched", "presentation_refreshed"),
+                    ("poster_cache_hits", "posters_cache_hit"),
+                    ("poster_downloads", "posters_cached"),
+                ):
+                    summary[key] += enrich_result.get(result_key, 0)
+                summary["failures"] += sum(enrich_result.get(key, 0) for key in (
+                    "provider_failed", "presentation_failed", "poster_failed",
+                ))
+                if enrich_result.get("outcome") != "COMPLETE":
+                    summary["source_failures"].append({
+                        "source_id": sid, "path": source_path, "stage": "enrich",
+                        "error": enrich_result.get("outcome", "INCOMPLETE"),
+                    })
+            except Exception as exc:
+                summary["failures"] += 1
+                summary["source_failures"].append({
+                    "source_id": sid, "path": source_path, "stage": stage,
+                    "error": str(exc),
+                })
+
+        phase = "publish"
+        config_path = session.canonical_flex_config_path(home)
+        install_path = install or Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
+        if not session.publish_flex_config(
+            config_path, home, [source["canonical_path"] for source in sources], install_path,
+        ):
+            raise RuntimeError("FLEX_PUBLICATION_FAILED")
+        summary["flex_published"] = True
+    except Exception as exc:
+        summary["failures"] += 1
+        summary["source_failures"].append({"stage": phase, "error": str(exc)})
+
+    summary["ok"] = summary["failures"] == 0 and not summary["source_failures"] and summary["flex_published"]
+    return summary
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Update configured local media and publish Flex once")
+    parser.add_argument("--home", type=Path, default=None)
+    parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--install", type=Path, default=None)
+    args = parser.parse_args(argv)
+    home = (args.home or Path(os.environ.get("OPENHTPC_HOME", Path.home()))).resolve()
+    result = update_library(home, args.db, args.install)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
