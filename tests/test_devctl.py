@@ -230,234 +230,346 @@ class TestBuild:
 
         assert rc == 1
 
-    def test_exact_commit_archive_generation(self, tmp_path):
-        """Build produces archive from HEAD commit using git archive."""
-        name = "TestArchive-Dev99"
-        commit_hash = "073d712f7bc21402e880ce0e50ca3e247d877678"
+    def test_exact_commit_archive_generation(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        with tarfile.open(archive, "r:gz") as tar:
+            binary = tar.extractfile("TestArtifact-Dev1/payload/flex/bin/flex-launcher").read()
+            metadata = json.load(tar.extractfile("TestArtifact-Dev1/payload/flex/BUILD-METADATA.json"))
+        assert binary == b"NEW_FROM_EXPORTED_SOURCE"
+        assert metadata["binary_sha256"] == devctl.hashlib.sha256(binary).hexdigest()
+        assert metadata["source_commit"] == TEST_COMMIT
+        assert (tmp_path / f"{archive.name}.sha256").read_text().split()[1] == archive.name
+        report = json.loads((tmp_path / "TestArtifact-Dev1-report.json").read_text())
+        assert report["commit"] == TEST_COMMIT
+        assert report["build_id"] == "fresh-flex-dev1"
 
-        call_count = {"build": 0}
-        expected_archive = tmp_path / f"{name}.tar.gz"
+    def test_failed_flex_compile_fails_closed(self, monkeypatch, tmp_path):
+        def fail_build(source, build_dir):
+            raise subprocess.CalledProcessError(1, ["cmake", "--build"])
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, build_override=fail_build, expect_failure=True)
+        assert rc == 1
+        assert not list(tmp_path.glob("*.tar.gz"))
 
-        def fake_build_archive(commit: str, n: str, dest: pathlib.Path) -> pathlib.Path:
-            call_count["build"] += 1
-            assert commit == commit_hash
-            assert n == name
-            # Create a tiny synthetic tar.gz
-            dest.mkdir(parents=True, exist_ok=True)
-            archive = dest / f"{n}.tar.gz"
-            with tarfile.open(str(archive), "w:gz") as tar:
-                content = b"version: test\n"
-                info = tarfile.TarInfo(name=f"{n}/VERSION")
-                info.size = len(content)
-                tar.addfile(info, io.BytesIO(content))
-            return archive
-
-        def fake_git(*args, **kwargs):
-            cmd = args[0] if args else []
-            if "--porcelain" in cmd:
-                return _fake_completed(stdout="")
-            if "rev-parse" in cmd:
-                return _fake_completed(stdout=commit_hash)
+    @pytest.mark.parametrize("failure_call", [1, 2])
+    def test_cmake_configure_or_compile_failure(self, monkeypatch, tmp_path, failure_call):
+        calls = []
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if len(calls) == failure_call:
+                raise subprocess.CalledProcessError(1, command)
             return _fake_completed()
+        monkeypatch.setattr(devctl.subprocess, "run", fake_run)
+        with pytest.raises(subprocess.CalledProcessError):
+            devctl._build_flex(tmp_path / "source", tmp_path / "build")
+        assert len(calls) == failure_call
 
-        args = MagicMock()
-        args.name = name
-        args.build_id = "test-dev99"
-        args.dev_tranche = "DEV99"
-        args.workstream = "TEST"
-        args.tests = "5/5 PASS"
+    def test_source_export_failure_fails_closed(self, monkeypatch, tmp_path):
+        def fail_export(commit, staging, scratch):
+            raise subprocess.CalledProcessError(1, ["git", "archive"])
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, export_override=fail_export, expect_failure=True)
+        assert rc == 1
+        assert not list(tmp_path.glob("*.tar.gz"))
 
-        with patch.object(devctl, "ARTIFACTS", tmp_path), \
-             patch.object(devctl, "_git", side_effect=fake_git), \
-             patch.object(devctl, "_product_version", return_value="1.2.0-rc7"), \
-             patch.object(devctl, "_build_archive_from_commit", side_effect=fake_build_archive):
-            rc = devctl.cmd_build(args)
+    def test_missing_build_output_fails_closed(self, monkeypatch, tmp_path):
+        rc = _make_provenance_artifact(
+            monkeypatch, tmp_path, build_override=lambda source, build_dir: build_dir / "flex-launcher",
+            expect_failure=True,
+        )
+        assert rc == 1
 
-        assert rc == 0
-        assert call_count["build"] == 1
+    def test_nonexecutable_build_output_fails_closed(self, monkeypatch, tmp_path):
+        def nonexecutable(source, build_dir):
+            build_dir.mkdir()
+            binary = build_dir / "flex-launcher"
+            binary.write_bytes(b"NEW_FROM_EXPORTED_SOURCE")
+            binary.chmod(0o644)
+            return binary
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, build_override=nonexecutable, expect_failure=True)
+        assert rc == 1
 
-    def test_sha256_generation(self, tmp_path):
-        """Build writes a SHA256 sidecar with just the filename (not full path)."""
-        name = "TestSHA-Dev1"
-        commit_hash = "abc1234abc1234abc1234abc1234abc1234abc12"
+    def test_staged_copy_mismatch_fails_closed(self, monkeypatch, tmp_path):
+        def bad_copy(source, destination):
+            destination.write_bytes(b"OLD")
+            destination.chmod(0o755)
+        monkeypatch.setattr(devctl.shutil, "copy2", bad_copy)
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, expect_failure=True)
+        assert rc == 1
 
-        def fake_build_archive(commit, n, dest):
-            dest.mkdir(parents=True, exist_ok=True)
-            archive = dest / f"{n}.tar.gz"
-            with tarfile.open(str(archive), "w:gz") as tar:
-                data = b"version: test\n"
-                info = tarfile.TarInfo(name=f"{n}/VERSION")
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
-            return archive
+    def test_metadata_generation_failure_fails_closed(self, monkeypatch, tmp_path):
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, elf_override=lambda path: "invalid", expect_failure=True)
+        assert rc == 1
 
-        def fake_git(*args, **kwargs):
-            joined = " ".join(str(a) for a in args)
-            if "--porcelain" in joined:
-                return _fake_completed(stdout="")
-            if "rev-parse" in joined:
-                return _fake_completed(stdout=commit_hash)
-            return _fake_completed()
+    def test_manifest_generation_failure_fails_closed(self, monkeypatch, tmp_path):
+        def fail_manifest(staging):
+            raise ValueError("manifest generation failed")
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, manifest_override=fail_manifest, expect_failure=True)
+        assert rc == 1
 
-        args = MagicMock()
-        args.name = name
-        args.build_id = "sha-dev1"
-        args.dev_tranche = "DEV1"
-        args.workstream = "TEST"
-        args.tests = "1/1 PASS"
-
-        with patch.object(devctl, "ARTIFACTS", tmp_path), \
-             patch.object(devctl, "_git", side_effect=fake_git), \
-             patch.object(devctl, "_product_version", return_value="1.2.0-rc7"), \
-             patch.object(devctl, "_build_archive_from_commit", side_effect=fake_build_archive):
-            rc = devctl.cmd_build(args)
-
-        assert rc == 0
-        sha_file = tmp_path / f"{name}.tar.gz.sha256"
-        assert sha_file.is_file()
-        text = sha_file.read_text()
-        # sidecar must contain just the filename, not a full path
-        parts = text.strip().split()
-        assert len(parts) == 2
-        assert "/" not in parts[1], f"SHA sidecar contains path separator: {parts[1]!r}"
-        assert parts[1] == f"{name}.tar.gz"
-
-    def test_report_json_generation(self, tmp_path):
-        """Build writes a properly structured report JSON."""
-        name = "TestReport-Dev1"
-        commit_hash = "abc1234abc1234abc1234abc1234abc1234abc12"
-
-        def fake_build_archive(commit, n, dest):
-            dest.mkdir(parents=True, exist_ok=True)
-            archive = dest / f"{n}.tar.gz"
-            with tarfile.open(str(archive), "w:gz") as tar:
-                data = b"version: 1.2.0-rc7\n"
-                info = tarfile.TarInfo(name=f"{n}/VERSION")
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
-            return archive
-
-        def fake_git(*args, **kwargs):
-            joined = " ".join(str(a) for a in args)
-            if "--porcelain" in joined:
-                return _fake_completed(stdout="")
-            if "rev-parse" in joined:
-                return _fake_completed(stdout=commit_hash)
-            return _fake_completed()
-
-        args = MagicMock()
-        args.name = name
-        args.build_id = "report-dev1"
-        args.dev_tranche = "DEV1"
-        args.workstream = "MEDIA_FOUNDATION"
-        args.tests = "22/22 PASS"
-
-        with patch.object(devctl, "ARTIFACTS", tmp_path), \
-             patch.object(devctl, "_git", side_effect=fake_git), \
-             patch.object(devctl, "_product_version", return_value="1.2.0-rc7"), \
-             patch.object(devctl, "_build_archive_from_commit", side_effect=fake_build_archive):
-            rc = devctl.cmd_build(args)
-
-        assert rc == 0
-        report = json.loads((tmp_path / f"{name}-report.json").read_text())
-        assert report["schema"] == 1
-        assert report["commit"] == commit_hash
-        assert report["version"] == "1.2.0-rc7"
-        assert report["workstream"] == "MEDIA_FOUNDATION"
-        assert report["dev_tranche"] == "DEV1"
-        assert report["tests"] == "22/22 PASS"
-        assert "sha256" in report
-        assert "artifact" in report
+    def test_final_verification_failure_fails_build(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(devctl, "_verify_artifact", lambda archive: ["fixture failure"])
+        rc = _make_provenance_artifact(monkeypatch, tmp_path, expect_failure=True)
+        assert rc == 1
+        assert not list(tmp_path.glob("*.tar.gz"))
 
 
-# ─── VERIFY ──────────────────────────────────────────────────────────────────
+TEST_COMMIT = "a" * 40
+TEST_UPSTREAM = "b" * 40
+TEST_ELF_ID = "c" * 40
+
+
+def _make_provenance_artifact(monkeypatch, tmp_path, *, build_override=None,
+                              export_override=None, elf_override=None,
+                              manifest_override=None, source_executable=False,
+                              expect_failure=False):
+    """Build through production cmd_build with synthetic exported source and Flex output."""
+    committed = {}
+
+    def fake_git(*args, **kwargs):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return _fake_completed(stdout=TEST_COMMIT + "\n")
+        return _fake_completed(stdout="")
+
+    def fake_export(commit, staging, scratch):
+        assert commit == TEST_COMMIT
+        files = {
+            "VERSION": b"1.2.0-rc8\n",
+            "vendor/flex-launcher/UPSTREAM_COMMIT": (TEST_UPSTREAM + "\n").encode(),
+            "vendor/flex-launcher/src/launcher.c": b"NEW_FROM_EXPORTED_SOURCE",
+            "payload/flex/bin/flex-launcher": b"OLD_TRACKED_BINARY",
+            "payload/flex/BUILD-METADATA.json": b'{"schema": 1, "binary_sha256": "stale"}',
+            "MANIFEST.sha256": b"stale manifest",
+        }
+        for name, content in files.items():
+            path = staging / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+            if name.endswith("flex-launcher"):
+                path.chmod(0o755)
+            if name == "vendor/flex-launcher/src/launcher.c" and source_executable:
+                path.chmod(0o755)
+        committed.update({
+            name: (devctl._sha256(staging / name), os.access(staging / name, os.X_OK))
+            for name in files
+        })
+
+    def fake_build(source, build_dir):
+        assert (source / "src/launcher.c").read_bytes() == b"NEW_FROM_EXPORTED_SOURCE"
+        build_dir.mkdir()
+        binary = build_dir / "flex-launcher"
+        binary.write_bytes(b"NEW_FROM_EXPORTED_SOURCE")
+        binary.chmod(0o755)
+        return binary
+
+    monkeypatch.setattr(devctl, "ARTIFACTS", tmp_path)
+    monkeypatch.setattr(devctl, "_git", fake_git)
+    monkeypatch.setattr(devctl, "_export_commit", export_override or fake_export)
+    monkeypatch.setattr(devctl, "_build_flex", build_override or fake_build)
+    monkeypatch.setattr(devctl, "_elf_build_id", elf_override or (lambda path: TEST_ELF_ID))
+    if manifest_override is not None:
+        monkeypatch.setattr(devctl, "_write_manifest", manifest_override)
+    monkeypatch.setattr(devctl, "_committed_entries", lambda commit: committed if commit == TEST_COMMIT else {})
+    args = type("Args", (), {
+        "name": "TestArtifact-Dev1", "build_id": "fresh-flex-dev1",
+        "dev_tranche": "DEV1", "workstream": "MEDIA_FOUNDATION", "tests": "1/1 PASS",
+    })()
+    rc = devctl.cmd_build(args)
+    if expect_failure:
+        return rc
+    assert rc == 0
+    return tmp_path / "TestArtifact-Dev1.tar.gz", committed
+
+
+def _rewrite_archive(archive, change, *, refresh_checksums=True):
+    """Tamper with a synthetic archive while keeping outer checksums coherent."""
+    members = []
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            data = tar.extractfile(member).read() if member.isfile() else None
+            members.append((member, data))
+    members = change(members)
+    with tarfile.open(archive, "w:gz") as tar:
+        for member, data in members:
+            if data is not None:
+                member.size = len(data)
+            tar.addfile(member, io.BytesIO(data) if data is not None else None)
+    if refresh_checksums:
+        sha = devctl._sha256(archive)
+        (archive.parent / f"{archive.name}.sha256").write_text(f"{sha}  {archive.name}\n")
+        report = archive.parent / f"{archive.name[:-7]}-report.json"
+        data = json.loads(report.read_text())
+        data["sha256"] = sha
+        report.write_text(json.dumps(data))
+
 
 class TestVerify:
-    def _make_valid_artifact(self, tmp_path: pathlib.Path, name: str) -> tuple[pathlib.Path, str]:
-        """Create a valid artifact with matching sidecar and report."""
-        archive = tmp_path / f"{name}.tar.gz"
-        with tarfile.open(str(archive), "w:gz") as tar:
-            data = b"test content"
-            info = tarfile.TarInfo(name=f"{name}/VERSION")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
+    def test_verify_pass_on_valid_artifact(self, monkeypatch, tmp_path, capsys):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        assert devctl.cmd_verify(type("Args", (), {"artifact": str(archive)})()) == 0
+        assert "VERIFY PASS" in capsys.readouterr().out
 
-        sha = devctl._sha256(archive)
-        sidecar = tmp_path / f"{name}.tar.gz.sha256"
-        sidecar.write_text(f"{sha}  {name}.tar.gz\n")
+    def test_verify_checksum_mismatch(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        (tmp_path / f"{archive.name}.sha256").write_text(f"{'0' * 64}  {archive.name}\n")
+        assert devctl._verify_artifact(archive)
 
-        commit = "abc1234abc1234abc1234abc1234abc1234abc12"
-        report = tmp_path / f"{name}-report.json"
-        report.write_text(json.dumps({
-            "schema": 1, "sha256": sha, "commit": commit,
-            "artifact": f"{name}.tar.gz", "version": "1.2.0-rc7",
-        }, indent=2))
+    def test_verify_report_mismatch(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        report = tmp_path / "TestArtifact-Dev1-report.json"
+        data = json.loads(report.read_text()); data["sha256"] = "0" * 64
+        report.write_text(json.dumps(data))
+        assert devctl._verify_artifact(archive)
 
-        return archive, commit
+    def test_verify_missing_report(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        (tmp_path / "TestArtifact-Dev1-report.json").unlink()
+        assert devctl._verify_artifact(archive)
 
-    def test_verify_pass_on_valid_artifact(self, tmp_path, capsys):
-        """Verify passes on a valid artifact with matching SHA and report."""
-        name = "TestVerify-Dev1"
-        archive, commit = self._make_valid_artifact(tmp_path, name)
+    def test_verify_missing_archive(self, tmp_path):
+        assert devctl._verify_artifact(tmp_path / "missing.tar.gz")
 
-        def fake_git(*args, **kwargs):
-            cmd = args[0] if args else []
-            if "cat-file" in cmd:
-                return _fake_completed(returncode=0)
-            return _fake_completed()
+    @pytest.mark.parametrize("member_path", [
+        "payload/flex/BUILD-METADATA.json", "payload/flex/bin/flex-launcher",
+    ])
+    def test_missing_critical_member(self, monkeypatch, tmp_path, member_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        _rewrite_archive(archive, lambda members: [item for item in members if not item[0].name.endswith(member_path)])
+        assert devctl._verify_artifact(archive)
 
-        args = MagicMock()
-        args.artifact = str(archive)
+    def test_malformed_flex_metadata(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            return [(m, b"{invalid" if m.name.endswith("BUILD-METADATA.json") else data) for m, data in members]
+        _rewrite_archive(archive, change)
+        assert devctl._verify_artifact(archive)
 
-        with patch.object(devctl, "_git", side_effect=fake_git):
-            rc = devctl.cmd_verify(args)
+    def test_incomplete_flex_metadata(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            result = []
+            for member, data in members:
+                if member.name.endswith("BUILD-METADATA.json"):
+                    metadata = json.loads(data); del metadata["elf_build_id"]
+                    data = json.dumps(metadata).encode()
+                result.append((member, data))
+            return result
+        _rewrite_archive(archive, change)
+        assert "field missing" in devctl._verify_artifact(archive)[0]
 
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert "VERIFY PASS" in out
+    def test_dev6c3m_binary_metadata_mismatch(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            result = []
+            for member, data in members:
+                if member.name.endswith("BUILD-METADATA.json"):
+                    metadata = json.loads(data)
+                    metadata["binary_sha256"] = "0" * 64
+                    data = json.dumps(metadata).encode()
+                result.append((member, data))
+            return result
+        _rewrite_archive(archive, change)
+        assert "binary/metadata SHA256 mismatch" in devctl._verify_artifact(archive)[0]
 
-    def test_verify_checksum_mismatch(self, tmp_path, capsys):
-        """Verify fails and returns non-zero on SHA256 mismatch."""
-        name = "TestMismatch-Dev1"
-        archive, _ = self._make_valid_artifact(tmp_path, name)
+    @pytest.mark.parametrize("key,value", [
+        ("source_commit", "d" * 40), ("artifact_build_id", "wrong"),
+        ("dev_tranche", "DEV2"), ("workstream", "WRONG"),
+    ])
+    def test_wrong_identity(self, monkeypatch, tmp_path, key, value):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            result = []
+            for member, data in members:
+                if member.name.endswith("BUILD-METADATA.json"):
+                    metadata = json.loads(data); metadata[key] = value
+                    data = json.dumps(metadata).encode()
+                result.append((member, data))
+            return result
+        _rewrite_archive(archive, change)
+        assert devctl._verify_artifact(archive)
 
-        # Corrupt the sidecar
-        sidecar = tmp_path / f"{name}.tar.gz.sha256"
-        sidecar.write_text(f"{'0' * 64}  {name}.tar.gz\n")
+    def test_wrong_report_source_commit(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        report = tmp_path / "TestArtifact-Dev1-report.json"
+        data = json.loads(report.read_text()); data["commit"] = "d" * 40
+        report.write_text(json.dumps(data))
+        assert devctl._verify_artifact(archive)
 
-        args = MagicMock()
-        args.artifact = str(archive)
+    def test_archived_source_differs_from_reported_commit(self, monkeypatch, tmp_path):
+        archive, committed = _make_provenance_artifact(monkeypatch, tmp_path)
+        altered = dict(committed)
+        altered["vendor/flex-launcher/src/launcher.c"] = ("0" * 64, False)
+        monkeypatch.setattr(devctl, "_committed_entries", lambda commit: altered)
+        assert "source does not match" in devctl._verify_artifact(archive)[0]
 
-        with patch.object(devctl, "_git", return_value=_fake_completed()):
-            rc = devctl.cmd_verify(args)
+    @pytest.mark.parametrize("path,original_executable,tampered_mode", [
+        ("vendor/flex-launcher/src/launcher.c", True, 0o644),
+        ("VERSION", False, 0o755),
+    ])
+    def test_source_executable_mode_tamper(self, monkeypatch, tmp_path,
+                                           path, original_executable, tampered_mode):
+        archive, committed = _make_provenance_artifact(
+            monkeypatch, tmp_path, source_executable=original_executable)
+        sha, executable = committed[path]
+        assert executable is original_executable
+        def change(members):
+            for member, _ in members:
+                if member.name == f"TestArtifact-Dev1/{path}":
+                    assert bool(member.mode & 0o111) is original_executable
+                    member.mode = tampered_mode
+            return members
+        _rewrite_archive(archive, change)
+        with tarfile.open(archive, "r:gz") as tar:
+            stream = tar.extractfile(f"TestArtifact-Dev1/{path}")
+            assert stream is not None
+            assert devctl.hashlib.sha256(stream.read()).hexdigest() == sha
+        assert "executable mode mismatch" in devctl._verify_artifact(archive)[0]
 
-        assert rc == 1
-        out = capsys.readouterr().out
-        assert "MISMATCH" in out
+    def test_matching_source_executable_modes_verify(self, monkeypatch, tmp_path):
+        archive, committed = _make_provenance_artifact(
+            monkeypatch, tmp_path, source_executable=True)
+        path = "vendor/flex-launcher/src/launcher.c"
+        assert committed[path][1] is True
+        with tarfile.open(archive, "r:gz") as tar:
+            assert tar.getmember(f"TestArtifact-Dev1/{path}").mode & 0o111
+        assert devctl._verify_artifact(archive) == []
 
-    def test_verify_missing_report(self, tmp_path, capsys):
-        """Verify fails when report JSON is missing."""
-        name = "TestNoReport-Dev1"
-        archive, _ = self._make_valid_artifact(tmp_path, name)
+    def test_elf_identity_mismatch(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        monkeypatch.setattr(devctl, "_elf_build_id", lambda path: "d" * 40)
+        assert "ELF build ID mismatch" in devctl._verify_artifact(archive)[0]
 
-        # Remove report
-        (tmp_path / f"{name}-report.json").unlink()
+    def test_manifest_mismatch(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            return [(member, b"stale manifest\\n" if member.name.endswith("MANIFEST.sha256") else data)
+                    for member, data in members]
+        _rewrite_archive(archive, change)
+        assert "manifest" in devctl._verify_artifact(archive)[0]
 
-        args = MagicMock()
-        args.artifact = str(archive)
+    def test_duplicate_critical_member(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            found = next(item for item in members if item[0].name.endswith("BUILD-METADATA.json"))
+            return members + [found]
+        _rewrite_archive(archive, change)
+        assert "duplicate" in devctl._verify_artifact(archive)[0]
 
-        with patch.object(devctl, "_git", return_value=_fake_completed()):
-            rc = devctl.cmd_verify(args)
+    def test_unsafe_member(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            info = tarfile.TarInfo("../payload/flex/bin/flex-launcher")
+            info.size = 4
+            return members + [(info, b"EVIL")]
+        _rewrite_archive(archive, change)
+        assert "unsafe" in devctl._verify_artifact(archive)[0]
 
-        assert rc == 1
-
-    def test_verify_missing_archive(self, tmp_path, capsys):
-        """Verify fails when artifact file does not exist."""
-        args = MagicMock()
-        args.artifact = str(tmp_path / "NonExistent-Dev1.tar.gz")
-
-        rc = devctl.cmd_verify(args)
-        assert rc == 1
+    def test_regular_file_at_archive_root_fails_closed(self, monkeypatch, tmp_path):
+        archive, _ = _make_provenance_artifact(monkeypatch, tmp_path)
+        def change(members):
+            info = tarfile.TarInfo("TestArtifact-Dev1")
+            info.size = 4
+            return [item for item in members if item[0].name != "TestArtifact-Dev1"] + [(info, b"ROOT")]
+        _rewrite_archive(archive, change)
+        assert "outside root directory" in devctl._verify_artifact(archive)[0]
 
 
 # ─── SSH/SCP COMMAND CONSTRUCTION ────────────────────────────────────────────

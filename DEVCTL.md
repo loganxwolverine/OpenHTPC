@@ -66,8 +66,8 @@ tools/openhtpc-devctl qualification \
 |---------|-------------|
 | `status` | Branch, HEAD, clean/dirty, protected stash, version |
 | `test <profile>` | Run named test profile (media-db, media-probe, media-foundation) |
-| `build ...` | Build artifact from exact HEAD commit via `git archive` |
-| `verify <artifact>` | Verify archive, SHA256 sidecar, report, commit in repo |
+| `build ...` | Export HEAD, build Flex from exported source, stage and verify artifact |
+| `verify <artifact>` | Independently check archive, source commit, embedded Flex and provenance |
 | `ship <artifact>` | SCP artifact + SHA + report to target; verify remote SHA |
 | `target-prepare` | Snapshot target dirs, then stop OPENHTPC cleanly |
 | `target-install <artifact>` | Remote SHA check → extract → run update.sh |
@@ -94,8 +94,26 @@ tools/openhtpc-devctl qualification \
 
 ## Archive reproducibility
 
-`build` uses `git archive --format=tar.gz` from the exact HEAD commit.
-Only committed files are included — untracked/working-tree modifications are
-excluded automatically.
+`build` exports the exact HEAD commit to a temporary staging tree. It configures
+and compiles Flex from that exported source in a fresh temporary build directory,
+copies the resulting executable into staging, and checks the copy's SHA256.
+It generates `payload/flex/BUILD-METADATA.json` from that staged binary and
+source, regenerates `MANIFEST.sha256`, creates the archive, and runs independent
+artifact verification before reporting success. Only committed source is used;
+working-tree changes are excluded.
 
-The same commit on the same git installation produces the same archive bytes.
+The tracked `payload/flex/bin/flex-launcher` and its tracked metadata are **not**
+authoritative for artifact generation. Build failure never falls back to them.
+The verifier rehashes the archived binary, checks its ELF build ID and source
+fingerprint, compares embedded identity fields with the report, validates the
+manifest, and compares archived source file content and Git executable state
+with the reported Git commit.
+Build reproducibility now also depends on the CMake/compiler environment.
+
+Staged Flex metadata uses schema 2. `binary_sha256` and `elf_build_id` describe
+the staged executable. `source_commit`, `upstream_commit`, `source_revision`,
+and `flex_source_fingerprint` describe the exported vendor source; the
+fingerprint hashes sorted vendor-relative paths and each file's SHA256.
+`artifact_build_id`, `dev_tranche`, `workstream`, and `product_version` identify
+the OPENHTPC artifact and must match its report. `elf_build_id` is the ELF note,
+not the artifact build ID.

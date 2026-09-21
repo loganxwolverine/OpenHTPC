@@ -1,12 +1,11 @@
 # Flex Launcher provenance
 
-The distributed `payload/flex/bin/flex-launcher` is the Dev16 OPENHTPC Flex
-binary recorded by `payload/flex/BUILD-METADATA.json`.
+The tracked `payload/flex/bin/flex-launcher` is a historical repository
+payload. It is not authoritative for new RC8 artifact builds. Its tracked
+`BUILD-METADATA.json` is also historical and is not artifact provenance.
 
 - Upstream: `complexlogic/flex-launcher`
 - Upstream commit: `94a7a273fe8124df51e63058816526b66bbc9538`
-- OPENHTPC adaptation: `openhtpc-running-flex-media-generation-sync-dev16`
-- Binary SHA256: `351fbe72572fa719fd325899e6ab3703cf42de9a62732904c80555daf236448c`
 - Target: Fedora 44 x86_64
 
 The OPENHTPC adaptation retains the launcher/menu/input engine and includes the
@@ -24,6 +23,12 @@ after a committed live source mutation. The authoritative Flex process is
 retained; stale or removed MEDIA sections cannot remain selectable.
 
 Flex Launcher is distributed under The Unlicense. NanoSVG/NanoSVGRast notices
-for code incorporated into the binary are provided separately. Dev16 rebuilds
-the shipped ELF from the recorded vendor source and records its exact hash and
-build ID in `payload/flex/BUILD-METADATA.json`.
+for code incorporated into the binary are provided separately.
+
+The active RC8 `openhtpc-devctl build` path exports the exact Git commit,
+compiles Flex from that exported vendor source in a fresh temporary directory,
+and replaces the staging copy of the executable. It generates staged
+`payload/flex/BUILD-METADATA.json` from that exact staged ELF and source,
+regenerates the staged manifest, creates the archive, and independently verifies
+the archive. The embedded Flex ELF build ID is separate from the OPENHTPC
+artifact build ID, development tranche, and workstream.

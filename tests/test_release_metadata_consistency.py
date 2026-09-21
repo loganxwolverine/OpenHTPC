@@ -81,11 +81,6 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "RELEASE_README_ACTIVE_IDENTITY_MISMATCH"):
             MODULE.validate_distribution_readme(stale, "1.2.0-rc1")
 
-    def test_unchanged_flex_binary_records_rc1_product_identity(self):
-        metadata = json.loads((ROOT / "payload/flex/BUILD-METADATA.json").read_text())
-        self.assertEqual(metadata["product_version"], "1.2.0-rc8")
-        self.assertEqual(metadata["binary_sha256"], "351fbe72572fa719fd325899e6ab3703cf42de9a62732904c80555daf236448c")
-
     def test_rc2_builder_requires_human_physical_validation(self):
         builder = (ROOT / "tools/build-1.1.3-rc2.py").read_text(encoding="utf-8")
         self.assertIn('BUILD = "public-release-1.1.3-rc2"', builder)
