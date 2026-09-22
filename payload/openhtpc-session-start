@@ -137,8 +137,7 @@ except module.GateError as exc:
     print(f"BLOCKED|{exc.gate}|{exc.reason}|{exc}")
     raise SystemExit(3)
 config_path = pathlib.Path(sys.argv[3])
-module.write_flex_config(config_path, home, state["sources"])
-module.activate_media_manifest(config_path, home)
+module.publish_flex_config(config_path, home, state["sources"])
 print("PASS|all|READY|Hardware, viabilité, runtime et configuration : PASS")
 PY
 } 2>&1)" || rc=$?

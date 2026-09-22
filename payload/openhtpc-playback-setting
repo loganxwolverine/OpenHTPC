@@ -10,6 +10,7 @@ Original project by Steve Dehanne.
 from __future__ import annotations
 
 import importlib.util
+import functools
 import os
 import pathlib
 import subprocess
@@ -24,6 +25,21 @@ def load(path: pathlib.Path):
     return module
 
 
+def serialized_flex_refresh(function):
+    """Keep each Flex label read and replacement in one publication transaction."""
+    @functools.wraps(function)
+    def wrapped(home: pathlib.Path, *args, **kwargs):
+        engine_path = pathlib.Path(os.environ.get(
+            "OPENHTPC_SESSION_ENGINE",
+            pathlib.Path(__file__).resolve().with_name("openhtpc-session-engine.py"),
+        ))
+        engine = load(engine_path)
+        with engine.flex_publication_lock(home):
+            return function(home, *args, **kwargs)
+    return wrapped
+
+
+@serialized_flex_refresh
 def refresh_dvd_mode_label(home: pathlib.Path, value: str) -> None:
     """Synchronize the derived DVD shortcut label in the active Flex config."""
     target = home / ".config/openhtpc/flex-v1.ini"
@@ -55,6 +71,7 @@ def refresh_dvd_mode_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+@serialized_flex_refresh
 def refresh_audio_mode_label(home: pathlib.Path, value: str) -> None:
     """Synchronize the AUDIO parent label before Flex reloads it."""
     target = home / ".config/openhtpc/flex-v1.ini"
@@ -77,6 +94,7 @@ def refresh_audio_mode_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+@serialized_flex_refresh
 def refresh_refresh_matching_label(home: pathlib.Path, value: str) -> None:
     """Synchronize the DISPLAY refresh matching parent label before Flex reloads it."""
     target = home / ".config/openhtpc/flex-v1.ini"
@@ -100,6 +118,7 @@ def refresh_refresh_matching_label(home: pathlib.Path, value: str) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+@serialized_flex_refresh
 def refresh_audio_target_label(home: pathlib.Path, target: dict) -> None:
     """Synchronize the AUDIO target parent label and checkmarks in active Flex config."""
     ini_path = home / ".config/openhtpc/flex-v1.ini"

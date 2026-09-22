@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Keep the running HOME menu synchronized with canonical optical state."""
-import hashlib, importlib.util, json, os, pathlib, subprocess, sys, time
+import atexit, hashlib, importlib.util, json, os, pathlib, signal, subprocess, sys, time
 
 home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
 install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
@@ -56,7 +56,7 @@ def full_state_key():
 
 def regenerate():
     state = engine.evaluate(home)
-    engine.write_flex_config(target, home, state["sources"])
+    engine.publish_flex_config(target, home, state["sources"])
     if runtime:
         runtime.log(home, "ui", "MENU_GENERATED", menu_generation=engine.menu_identity(target), optical_generation=optical_state().get("generation", 0), current_optical_state=optical_state().get("state"))
 
@@ -66,7 +66,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "--regenerate-only":
     state = engine.evaluate(home)
     changed = engine.write_flex_config(
         target, home, state["sources"], expected_optical_generation=generation,
-        media_generation=engine.active_media_generation(home),
+        # The engine reads the active MEDIA generation under its publication lock.
     )
     if changed and runtime:
         st = optical_state()
@@ -74,6 +74,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "--regenerate-only":
     raise SystemExit(0 if changed else 3)
 
 disc_view = install / "openhtpc-disc-view.py"
+media_control = load("media_update_control", install / "openhtpc-media-update-control.py")
 enricher = None
 current_enrichment_generation = None
 completed_enrichment_generation = None
@@ -150,7 +151,6 @@ if not has_graphical:
     raise SystemExit("OPENHTPC: démarrage Flex impossible sans session graphique active (OPENHTPC_GRAPHICAL_SESSION_UNAVAILABLE).")
 
 regenerate()
-engine.activate_media_manifest(target, home)
 pass_fds = ()
 try:
     lock_fd = int(os.environ.get("OPENHTPC_SESSION_LOCK_FD", "-1"))
@@ -189,6 +189,16 @@ regenerator_generation = None
 regenerator_started = None
 pending_auto_open_generation = 0
 pending_eject_home_generation = 0
+update_controller = media_control.UpdateController(home, install)
+atexit.register(update_controller.close)
+stop_requested = False
+
+def stop_home(_signal, _frame):
+    global stop_requested
+    stop_requested = True
+
+signal.signal(signal.SIGTERM, stop_home)
+signal.signal(signal.SIGINT, stop_home)
 
 def request_regeneration():
     global regenerator, regenerator_generation, regenerator_started
@@ -206,8 +216,11 @@ def request_regeneration():
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
     )
 
-while proc.poll() is None:
+while proc.poll() is None and not stop_requested:
     time.sleep(0.3)
+    if stop_requested:
+        break
+    update_controller.poll()
     if enricher is not None and enricher.poll() is not None:
         completed_enrichment_generation = current_enrichment_generation
         enricher = None
@@ -252,6 +265,7 @@ while proc.poll() is None:
         if runtime:
             runtime.log(home, "ui", "OPTICAL_GENERATION_DEFERRED", flex_pid=proc.pid, action_type="STATE_UPDATE", source_page="ANY", destination_page="CURRENT", optical_generation=optical_state().get("generation", 0))
 
+update_controller.close()
 if runtime:
     runtime.record_flex_exit(home, proc.returncode, time.monotonic() - started)
     runtime.log(home, "ui", "FLEX_STOPPED", ui_instance_identity=f"flex-{proc.pid}", stop_reason="NORMAL_EXIT" if proc.returncode == 0 else "CRASH", caller_component="flex", caller_pid=proc.pid, returncode=proc.returncode)

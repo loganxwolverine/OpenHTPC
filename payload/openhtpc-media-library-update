@@ -9,12 +9,39 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
 import os
+import signal
+import tempfile
 from pathlib import Path
 from typing import Any
+
+
+# Exit 4 is a non-blocking ALREADY_RUNNING result. Exit 1 is a failed update.
+ALREADY_RUNNING_EXIT = 4
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_status(path: Path, value: dict[str, Any]) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _load_component(name: str) -> Any:
@@ -133,11 +160,49 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", type=Path, default=None)
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--install", type=Path, default=None)
+    parser.add_argument("--origin", choices=("CLI", "UI"), default="CLI")
     args = parser.parse_args(argv)
     home = (args.home or Path(os.environ.get("OPENHTPC_HOME", Path.home()))).resolve()
-    result = update_library(home, args.db, args.install)
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
-    return 0 if result["ok"] else 1
+    state_dir = home / ".local/state/openhtpc/media"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = state_dir / "library-update.lock"
+    status_path = state_dir / "library-update-status.json"
+    log_path = state_dir / "library-update.log"
+    with lock_path.open("a+b") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({"ok": False, "state": "ALREADY_RUNNING", "exit_code": ALREADY_RUNNING_EXIT}, sort_keys=True))
+            return ALREADY_RUNNING_EXIT
+        started = _timestamp()
+        base = {"state": "RUNNING", "started_at": started, "pid": os.getpid(),
+                "origin": args.origin, "log_path": str(log_path)}
+        log_path.write_text("", encoding="utf-8")
+        os.chmod(log_path, 0o600)
+        _atomic_status(status_path, base)
+        previous_handler = signal.getsignal(signal.SIGTERM)
+        def interrupted(_signal, _frame):
+            raise KeyboardInterrupt("TERMINATED")
+        signal.signal(signal.SIGTERM, interrupted)
+        try:
+            try:
+                result = update_library(home, args.db, args.install)
+                code = 0 if result["ok"] else 1
+            except BaseException as exc:
+                result = {"ok": False, "error": str(exc) or type(exc).__name__}
+                code = 1
+            final = {**base, "state": "SUCCESS" if code == 0 else "FAILED",
+                     "finished_at": _timestamp(), "exit_code": code, "summary": result}
+            _atomic_status(status_path, final)
+            output = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2)
+            if args.origin == "CLI":
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write(output + "\n")
+            print(output, flush=True)
+            return code
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":

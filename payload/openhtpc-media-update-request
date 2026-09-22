@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+# Copyright 2026 Steve Dehanne
+# SPDX-License-Identifier: Apache-2.0
+#
+# Part of the OPENHTPC project.
+# Original project by Steve Dehanne.
+"""Submit one fast MEDIA update request to the running HOME controller."""
+
+import importlib.util
+import os
+from pathlib import Path
+
+home = Path(os.environ.get("OPENHTPC_HOME", Path.home()))
+path = Path(__file__).with_name("openhtpc-media-update-control.py")
+spec = importlib.util.spec_from_file_location("openhtpc_media_update_control", path)
+control = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(control)
+raise SystemExit(0 if control.request_update(home) else 1)

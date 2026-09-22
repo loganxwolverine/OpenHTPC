@@ -412,7 +412,7 @@ def test_unidentified_view_exposes_all_63_versions(env):
     _root, sections = session_engine.media_menu_sections(
         env["home"], [env["sources_dir"]], env["media_icon"],
     )
-    assert "À identifier — 63" in _get_section_lines(sections, "[MEDIA_ROOT]")[-2]
+    assert any("À identifier — 63" in row for row in _get_section_lines(sections, "[MEDIA_ROOT]"))
     unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     assert len(unidentified) == 64
     assert sum(":submenu MEDIA_D" in row for row in unidentified) == 63

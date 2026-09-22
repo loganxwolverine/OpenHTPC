@@ -78,7 +78,8 @@ class GlobalDvdDetailRefresh(unittest.TestCase):
         config = self.home / ".config/openhtpc"; config.mkdir(parents=True)
         self.flex = config / "flex-v1.ini"
         self.flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=MODE VIDÉO : CINÉMA AUTO;i;:submenu DVD_VIDEO_MODE\n[DVD_VIDEO_MODE]\nEntry1=PURE;i;set\n", encoding="utf-8")
-        self.env = {**os.environ, "HOME":str(self.home), "OPENHTPC_HOME":str(self.home), "OPENHTPC_INSTALL_DIR":str(self.install)}
+        self.env = {**os.environ, "HOME":str(self.home), "OPENHTPC_HOME":str(self.home), "OPENHTPC_INSTALL_DIR":str(self.install),
+                    "OPENHTPC_SESSION_ENGINE":str(PAYLOAD / "openhtpc-session-engine.py")}
         self.env.pop("DISPLAY", None); self.env.pop("WAYLAND_DISPLAY", None)
 
     def tearDown(self): self.tmp.cleanup()

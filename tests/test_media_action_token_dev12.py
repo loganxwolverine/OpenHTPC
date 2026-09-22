@@ -29,9 +29,8 @@ class MediaActionBinding(unittest.TestCase):
   self.assertEqual(len(pages),2)
  def test_optical_only_regeneration_preserves_active_media_generation_and_tokens(self):
   first=self.generate("media-stable");first_actions=self.actions(first)
-  self.assertTrue(session.write_flex_config(self.flex,self.home,[self.source],self.install,expected_optical_generation=0,media_generation=session.active_media_generation(self.home)))
+  self.assertTrue(session.write_flex_config(self.flex,self.home,[self.source],self.install,expected_optical_generation=0))
   candidate=json.loads(self.flex.with_name(self.flex.name+".media-actions.json").read_text());self.assertEqual(candidate["manifest_generation"],"media-stable");self.assertEqual(set(candidate["items"]),set(first["items"]));self.assertEqual(self.actions(candidate),first_actions)
-  home_source=(PAYLOAD/"openhtpc-home.py").read_text();self.assertIn("media_generation=engine.active_media_generation(home)",home_source)
  def test_wrong_page_unknown_malformed_and_old_generation_are_rejected(self):
   current=self.generate("generation-one");token,item=self.actions(current)["Classics/Alerte.mkv"];self.set_page(self.actions(current)["Modern/Nested/300 Rise of an Empire (2014).mkv"][1]["page_id"])
   with self.assertRaisesRegex(ValueError,"STALE_PAGE"):play.load_media_action(self.home,token)

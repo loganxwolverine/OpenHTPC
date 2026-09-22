@@ -17,6 +17,7 @@ import re
 import shlex
 import sys
 import time
+from contextlib import contextmanager
 
 _optical_spec = importlib.util.spec_from_file_location("openhtpc_optical_presentation", pathlib.Path(__file__).with_name("openhtpc-optical.py"))
 _optical_model = importlib.util.module_from_spec(_optical_spec); _optical_spec.loader.exec_module(_optical_model)
@@ -920,7 +921,8 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         sections.append(f"[{name}]\n{body}")
         return name
 
-    roots = []
+    roots = [("METTRE À JOUR LA MÉDIATHÈQUE", icon,
+              f":fork {install / 'openhtpc-media-update-request'}")]
     if not sources:
         roots.append(("+ AJOUTER UNE SOURCE MÉDIA", add_icon, f"{picker_bin}"))
     else:
@@ -1434,7 +1436,27 @@ def canonical_flex_config_path(home: pathlib.Path | None = None) -> pathlib.Path
     return home / ".config/openhtpc/flex-v1.ini"
 
 
+@contextmanager
+def flex_publication_lock(home: pathlib.Path):
+    """Serialize complete Flex generation/publication across HOME and CLI writers."""
+    target = home / ".local/state/openhtpc/flex-publication.lock"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a+b") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
 def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None, media_generation: str | None = None) -> bool:
+    with flex_publication_lock(home):
+        if expected_optical_generation is not None and media_generation is None:
+            media_generation = active_media_generation(home)
+        return _write_flex_config(path, home, sources, install, expected_optical_generation, media_generation)
+
+
+def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None, media_generation: str | None = None) -> bool:
     install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
     icon_dir = install / "assets/ui"
@@ -1879,6 +1901,11 @@ def activate_media_manifest(config_path:pathlib.Path,home:pathlib.Path)->pathlib
 
 def publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None)->bool:
     """Publish one MEDIA generation at the synchronous Flex action boundary."""
+    with flex_publication_lock(home):
+        return _publish_flex_config(path, home, sources, install)
+
+
+def _publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None)->bool:
     path.parent.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix=path.name+".publish.",dir=path.parent);os.close(fd);staged=pathlib.Path(name)
     candidate=path.with_name(path.name+".media-actions.json");staged_candidate=staged.with_name(staged.name+".media-actions.json")
@@ -1893,7 +1920,7 @@ def publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib
             if os.path.exists(tmp):os.unlink(tmp)
     try:
         staged.unlink()
-        if not write_flex_config(staged,home,sources,install):return False
+        if not _write_flex_config(staged,home,sources,install):return False
         model=load_object(staged_candidate,"media_actions","ACTION_MANIFEST_MISSING","ACTION_MANIFEST_INVALID")
         if model.get("schema")!=1 or not isinstance(model.get("items"),dict):raise GateError("media_actions","ACTION_MANIFEST_INVALID","Le manifeste MEDIA candidat est invalide.")
         replace_bytes(candidate,staged_candidate.read_bytes())
