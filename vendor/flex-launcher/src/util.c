@@ -168,6 +168,10 @@ int config_handler(void *user, const char *section, const char *name, const char
             config.live_optical_state = strdup(value);
             clean_path(config.live_optical_state);
         }
+        else if (MATCH(name, "LiveActivityState")) {
+            config.live_activity_state = strdup(value);
+            clean_path(config.live_activity_state);
+        }
     }
 
     else if (MATCH(section, "Layout")) {

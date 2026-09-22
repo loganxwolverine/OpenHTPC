@@ -1493,6 +1493,7 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
     }.get(canonical, "ÉTAT INCONNU")
     optical_icon = icon_dir / media["icon"]
     live_optical_state = write_live_optical_state(home, optical, optical_icon)
+    live_activity_state = home / ".local/state/openhtpc/media/activity-state"
     ready = canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"}
     entries = [
         f"Entry1={ini_value(str(disc_state)) if ready else 'LECTEUR · ' + ini_value(str(disc_state))};{optical_icon};:submenu DISQUE",
@@ -1676,6 +1677,7 @@ ResetOnBack=true
 MouseSelect=true
 InhibitOSScreensaver=true
 LiveOpticalState={live_optical_state}
+LiveActivityState={live_activity_state}
 
 {theme.background_block(install, 52)}
 

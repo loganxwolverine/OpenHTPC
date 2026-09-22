@@ -47,6 +47,8 @@ static void draw_screen(void);
 static void handle_keypress(SDL_Keysym *key);
 static void execute_command(const char *command);
 static void refresh_live_optical_state(void);
+static void refresh_live_activity_state(void);
+static void draw_activity_overlay(void);
 static void refresh_disc_sheet_background(void);
 static void reload_menu_section(Menu *menu);
 static void reload_media_menu_sections(void);
@@ -137,6 +139,7 @@ Config config = {
     .startup_cmd                      = NULL,
     .quit_cmd                         = NULL,
     .live_optical_state               = NULL,
+    .live_activity_state              = NULL,
     .screensaver_enabled              = false,
     .screensaver_idle_time            = DEFAULT_SCREENSAVER_IDLE_TIME*1000,
     .screensaver_intensity_str[0]     = '\0',
@@ -200,6 +203,10 @@ SDL_Event event;
 SDL_SysWMinfo wm_info;
 SDL_DisplayMode display_mode;
 TextInfo title_info;
+SDL_Texture *activity_texture          = NULL;
+SDL_Rect activity_text_rect            = {0};
+bool activity_visible                  = false;
+int activity_level                     = 0;
 Ticks ticks;
 Geometry geo;
 Uint32 refresh_period;
@@ -344,6 +351,12 @@ static void cleanup()
     SDL_WaitThread(Slideshowhread, NULL);
     SDL_WaitThread(clock_thread, NULL);
     
+    // Destroy renderer-owned live activity texture before the renderer.
+    if (activity_texture != NULL) {
+        SDL_DestroyTexture(activity_texture);
+        activity_texture = NULL;
+    }
+
     // Destroy renderer and window
     if (renderer != NULL) {
         SDL_DestroyRenderer(renderer);
@@ -376,6 +389,7 @@ static void cleanup()
     free(config.gamepad_mappings_file);
     free(config.startup_cmd);
     free(config.quit_cmd);
+    free(config.live_activity_state);
     free(highlight);
     free(scroll);
     free(screensaver);
@@ -1963,6 +1977,163 @@ static void refresh_live_optical_state(void)
     observed_mtime = info.st_mtime; observed_size = info.st_size;
 }
 
+static void clear_live_activity_overlay(void)
+{
+    if (activity_texture != NULL) {
+        SDL_DestroyTexture(activity_texture);
+        activity_texture = NULL;
+    }
+    activity_text_rect = (SDL_Rect) {0, 0, 0, 0};
+    activity_visible = false;
+    activity_level = 0;
+}
+
+static void refresh_live_activity_state(void)
+{
+    static ino_t observed_inode = 0;
+    static time_t observed_mtime = 0;
+    static off_t observed_size = 0;
+
+    if (config.live_activity_state == NULL) {
+        if (activity_visible)
+            clear_live_activity_overlay();
+        return;
+    }
+
+    struct stat info;
+    if (stat(config.live_activity_state, &info) != 0) {
+        observed_inode = 0;
+        observed_mtime = 0;
+        observed_size = 0;
+        if (activity_visible)
+            clear_live_activity_overlay();
+        return;
+    }
+
+    if (info.st_ino == observed_inode
+        && info.st_mtime == observed_mtime
+        && info.st_size == observed_size)
+        return;
+
+    observed_inode = info.st_ino;
+    observed_mtime = info.st_mtime;
+    observed_size = info.st_size;
+
+    FILE *stream = fopen(config.live_activity_state, "r");
+    if (stream == NULL) {
+        clear_live_activity_overlay();
+        return;
+    }
+
+    char state_name[32] = "";
+    char message[512] = "";
+    char serial[64] = "";
+    bool complete = (
+        fgets(state_name, sizeof(state_name), stream) != NULL
+        && fgets(message, sizeof(message), stream) != NULL
+        && fgets(serial, sizeof(serial), stream) != NULL
+    );
+    fclose(stream);
+
+    if (!complete) {
+        clear_live_activity_overlay();
+        return;
+    }
+
+    state_name[strcspn(state_name, "\r\n")] = 0;
+    message[strcspn(message, "\r\n")] = 0;
+    serial[strcspn(serial, "\r\n")] = 0;
+
+    bool serial_valid = serial[0] != '\0';
+    for (size_t i = 0; serial_valid && serial[i] != '\0'; i++) {
+        if (serial[i] < '0' || serial[i] > '9')
+            serial_valid = false;
+    }
+
+    bool state_valid = (
+        !strcmp(state_name, "IDLE")
+        || !strcmp(state_name, "RUNNING")
+        || !strcmp(state_name, "SUCCESS")
+        || !strcmp(state_name, "FAILED")
+    );
+    if (!state_valid || !serial_valid || !strcmp(state_name, "IDLE") || message[0] == '\0') {
+        clear_live_activity_overlay();
+        return;
+    }
+
+    TextInfo activity_info = title_info;
+    activity_info.max_width = (geo.screen_width * 42) / 100;
+    activity_info.oversize_mode = OVERSIZE_SHRINK;
+
+    SDL_Rect next_rect = {0};
+    int text_height = 0;
+    SDL_Texture *next_texture = render_text_texture(
+        message,
+        &activity_info,
+        &next_rect,
+        &text_height
+    );
+    if (next_texture == NULL) {
+        clear_live_activity_overlay();
+        return;
+    }
+
+    int pad_h = (geo.screen_width * 12) / 1000;
+    int pad_v = (geo.screen_height * 8) / 1000;
+    if (pad_h < 10) pad_h = 10;
+    if (pad_v < 6) pad_v = 6;
+
+    next_rect.x = geo.screen_width - geo.screen_margin - pad_h - next_rect.w;
+    next_rect.y = geo.screen_height - geo.screen_margin - pad_v - next_rect.h;
+
+    if (activity_texture != NULL)
+        SDL_DestroyTexture(activity_texture);
+    activity_texture = next_texture;
+    activity_text_rect = next_rect;
+    activity_visible = true;
+    activity_level = !strcmp(state_name, "RUNNING") ? 1
+                   : !strcmp(state_name, "SUCCESS") ? 2
+                   : 3;
+}
+
+static void draw_activity_overlay(void)
+{
+    if (!activity_visible || activity_texture == NULL)
+        return;
+
+    int pad_h = (geo.screen_width * 12) / 1000;
+    int pad_v = (geo.screen_height * 8) / 1000;
+    int accent_w = (geo.screen_width * 4) / 1000;
+    if (pad_h < 10) pad_h = 10;
+    if (pad_v < 6) pad_v = 6;
+    if (accent_w < 4) accent_w = 4;
+
+    SDL_Rect card = {
+        activity_text_rect.x - pad_h,
+        activity_text_rect.y - pad_v,
+        activity_text_rect.w + (2 * pad_h),
+        activity_text_rect.h + (2 * pad_v)
+    };
+    SDL_Rect shadow = {
+        card.x - 3,
+        card.y + 3,
+        card.w + 6,
+        card.h + 4
+    };
+    SDL_Color accent = activity_level == 2
+        ? (SDL_Color) {72, 180, 110, 220}
+        : activity_level == 3
+            ? (SDL_Color) {210, 72, 72, 220}
+            : (SDL_Color) {55, 185, 220, 220};
+
+    fill_rounded_rect(renderer, &shadow, 13, (SDL_Color) {0, 0, 0, 120});
+    fill_rounded_rect(renderer, &card, 12, (SDL_Color) {20, 24, 32, 225});
+
+    SDL_Rect accent_rect = {card.x, card.y, accent_w, card.h};
+    fill_rounded_rect(renderer, &accent_rect, 4, accent);
+    SDL_RenderCopy(renderer, activity_texture, NULL, &activity_text_rect);
+}
+
 /* The non-graphical metadata worker atomically replaces this image.  Reload
  * only on the SDL/UI thread and only after a complete replacement exists. */
 static void refresh_disc_sheet_background(void)
@@ -2419,6 +2590,10 @@ static void draw_screen()
             }
             entry = entry-> next;
         }
+
+        // Draw non-blocking OPENHTPC activity feedback above the menu, but
+        // below the screensaver. It never participates in input/navigation.
+        draw_activity_overlay();
 
         // Draw screensaver
         if (state.screensaver_active)
@@ -2913,6 +3088,7 @@ void quit(int status)
     if (config.quit_cmd != NULL) {
         execute_command(config.quit_cmd);
         free(config.quit_cmd);
+        config.quit_cmd = NULL;
     }
     cleanup();
     exit(status);
@@ -3164,6 +3340,7 @@ int main(int argc, char *argv[])
 
         // Post-event loop updates
         refresh_live_optical_state();
+        refresh_live_activity_state();
         if (!(state.application_running || state.application_launching)) {
             refresh_disc_sheet_background();
             refresh_current_menu_background_and_entries();

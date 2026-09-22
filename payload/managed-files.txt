@@ -151,6 +151,7 @@ openhtpc-media-artwork.py
 openhtpc-media-db.py
 openhtpc-media-enrich.py
 openhtpc-media-action-control.py
+openhtpc-media-activity.py
 openhtpc-media-action-request
 openhtpc-media-ingest.py
 openhtpc-media-library-update

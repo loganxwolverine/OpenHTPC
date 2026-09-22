@@ -319,6 +319,7 @@ typedef struct {
     char *startup_cmd;
     char *quit_cmd;
     char *live_optical_state;
+    char *live_activity_state;
     ModeOnLaunch on_launch;
     bool screensaver_enabled;
     Uint32 screensaver_idle_time;
