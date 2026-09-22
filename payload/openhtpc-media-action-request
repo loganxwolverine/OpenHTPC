@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# Copyright 2026 Steve Dehanne
+# SPDX-License-Identifier: Apache-2.0
+#
+# Part of the OPENHTPC project.
+# Original project by Steve Dehanne.
+"""Submit one fast media action request to the running HOME controller."""
+
+import importlib.util
+import os
+from pathlib import Path
+import sys
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        return 2
+    home = Path(os.environ.get("OPENHTPC_HOME", Path.home()))
+    path = Path(__file__).with_name("openhtpc-media-action-control.py")
+    spec = importlib.util.spec_from_file_location("openhtpc_media_action_control", path)
+    if spec is None or spec.loader is None:
+        return 1
+    control = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(control)
+    if not control.valid_action_token(argv[0]):
+        return 2
+    return 0 if control.request_action(home, argv[0]) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

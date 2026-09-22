@@ -389,7 +389,7 @@ def build_resolver_menu_sections(
 
     res_entries: list[tuple[str, Path, str]] = []
     helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-match-ui"
-    enrich_helper_path = "$HOME/.local/lib/openhtpc/openhtpc-media-enrich.py"
+    action_request_path = "$HOME/.local/lib/openhtpc/openhtpc-media-action-request"
 
     for i, cand in enumerate(candidates, 1):
         cand_id = cand["id"]
@@ -423,7 +423,7 @@ def build_resolver_menu_sections(
         res_entries.append((cand_label, icon, conf_cmd))
 
         # Build confirmation screen
-        dispatch_cmd = f":applyback {enrich_helper_path} --token {action_token}"
+        dispatch_cmd = f":applyback {action_request_path} {action_token}"
         if not needs_replace:
             if same_work and state == "AUTO_MATCHED":
                 conf_title = "CONFIRMER CETTE IDENTIFICATION"

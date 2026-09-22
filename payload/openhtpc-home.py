@@ -75,6 +75,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "--regenerate-only":
 
 disc_view = install / "openhtpc-disc-view.py"
 media_control = load("media_update_control", install / "openhtpc-media-update-control.py")
+media_action_control = load("media_action_control", install / "openhtpc-media-action-control.py")
 enricher = None
 current_enrichment_generation = None
 completed_enrichment_generation = None
@@ -190,7 +191,9 @@ regenerator_started = None
 pending_auto_open_generation = 0
 pending_eject_home_generation = 0
 update_controller = media_control.UpdateController(home, install)
+action_controller = media_action_control.ActionController(home, install)
 atexit.register(update_controller.close)
+atexit.register(action_controller.close)
 stop_requested = False
 
 def stop_home(_signal, _frame):
@@ -221,6 +224,7 @@ while proc.poll() is None and not stop_requested:
     if stop_requested:
         break
     update_controller.poll()
+    action_controller.poll()
     if enricher is not None and enricher.poll() is not None:
         completed_enrichment_generation = current_enrichment_generation
         enricher = None
@@ -265,6 +269,7 @@ while proc.poll() is None and not stop_requested:
         if runtime:
             runtime.log(home, "ui", "OPTICAL_GENERATION_DEFERRED", flex_pid=proc.pid, action_type="STATE_UPDATE", source_page="ANY", destination_page="CURRENT", optical_generation=optical_state().get("generation", 0))
 
+action_controller.close()
 update_controller.close()
 if runtime:
     runtime.record_flex_exit(home, proc.returncode, time.monotonic() - started)
