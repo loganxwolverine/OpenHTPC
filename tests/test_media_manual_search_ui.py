@@ -1180,11 +1180,13 @@ def test_44_case4_manual_search_invokes_tmdb_provider_network(sandbox):
             with mock.patch.object(manual_search_ui, "_load_media_match_ui", return_value=None):
                 with mock.patch.object(media_match, "_load_tmdb_provider", return_value=mock_provider_mod):
                     with mock.patch.object(manual_search_ui, "_load_media_match", return_value=media_match):
-                        rc = manual_search_ui.orchestrate_manual_search(
+                        rc = manual_search_ui.execute_manual_search(
                             media_version_id=mv_id,
+                            title="Live TMDb Film",
+                            year=2025,
                             home=sandbox["home"],
                             install=sandbox["install"],
-                            custom_db_path=sandbox["db_file"],
+                            db_path=sandbox["db_file"],
                         )
                         assert rc == 0
                         # Verify provider search_movies was called with queried title and year

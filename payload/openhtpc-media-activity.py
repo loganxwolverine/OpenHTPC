@@ -23,6 +23,7 @@ VALID_STATES = {"IDLE", "RUNNING", "SUCCESS", "FAILED"}
 
 _LIBRARY = "library"
 _ACTION = "action"
+_SEARCH = "search"
 
 _MESSAGES = {
     (_LIBRARY, "RUNNING"): "Médiathèque · mise à jour en cours…",
@@ -31,6 +32,9 @@ _MESSAGES = {
     (_ACTION, "RUNNING"): "Fiche du film · mise à jour en cours…",
     (_ACTION, "SUCCESS"): "Fiche du film · mise à jour terminée",
     (_ACTION, "FAILED"): "Fiche du film · échec de la mise à jour",
+    (_SEARCH, "RUNNING"): "Recherche TMDb · en cours…",
+    (_SEARCH, "SUCCESS"): "Recherche TMDb · terminée",
+    (_SEARCH, "FAILED"): "Recherche TMDb · échec de la recherche",
 }
 
 
@@ -39,13 +43,21 @@ def state_path(home: Path) -> Path:
 
 
 def _status_path(home: Path, kind: str) -> Path:
-    name = "library-update-status.json" if kind == _LIBRARY else "media-action-status.json"
-    return Path(home) / ".local/state/openhtpc/media" / name
+    names = {
+        _LIBRARY: "library-update-status.json",
+        _ACTION: "media-action-status.json",
+        _SEARCH: "media-search-status.json",
+    }
+    return Path(home) / ".local/state/openhtpc/media" / names[kind]
 
 
 def _lock_path(home: Path, kind: str) -> Path:
-    name = "library-update.lock" if kind == _LIBRARY else "media-action.lock"
-    return Path(home) / ".local/state/openhtpc/media" / name
+    names = {
+        _LIBRARY: "library-update.lock",
+        _ACTION: "media-action.lock",
+        _SEARCH: "media-search.lock",
+    }
+    return Path(home) / ".local/state/openhtpc/media" / names[kind]
 
 
 def _read_status(path: Path) -> dict | None:
@@ -85,7 +97,7 @@ def _read_status(path: Path) -> dict | None:
 def _fingerprint(kind: str, status: dict | None) -> tuple | None:
     if status is None:
         return None
-    operation = status.get("operation_id") if kind == _ACTION else None
+    operation = status.get("operation_id") if kind in {_ACTION, _SEARCH} else None
     if not operation:
         operation = f"{status.get('pid') or ''}:{status.get('started_at') or ''}"
     return (
@@ -169,7 +181,7 @@ class ActivityPublisher:
         self.visible: tuple[str, str] | None = None
         self.toast: tuple[str, str, float] | None = None
         self.seen: dict[str, tuple | None] = {}
-        for kind in (_LIBRARY, _ACTION):
+        for kind in (_LIBRARY, _ACTION, _SEARCH):
             self.seen[kind] = _fingerprint(kind, _read_status(_status_path(self.home, kind)))
         self._publish("IDLE", "")
 
@@ -188,7 +200,7 @@ class ActivityPublisher:
         return True
 
     def _statuses(self) -> dict[str, dict | None]:
-        return {kind: _read_status(_status_path(self.home, kind)) for kind in (_LIBRARY, _ACTION)}
+        return {kind: _read_status(_status_path(self.home, kind)) for kind in (_LIBRARY, _ACTION, _SEARCH)}
 
     def poll(self) -> None:
         now = float(self.clock())

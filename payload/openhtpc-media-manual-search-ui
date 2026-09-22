@@ -261,6 +261,24 @@ def _load_media_match_ui(install: Path | None = None):
     return None
 
 
+def _load_search_control(install: Path | None = None):
+    candidates = [
+        install / "openhtpc-media-search-control.py" if install else None,
+        Path(__file__).resolve().parent / "openhtpc-media-search-control.py",
+    ]
+    for path in candidates:
+        if path and path.is_file():
+            try:
+                spec = importlib.util.spec_from_file_location("openhtpc_media_search_control", path)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+            except Exception:
+                pass
+    return None
+
+
 def get_prefill_hints(
     db: sqlite3.Connection,
     media_version_id: int,
@@ -696,6 +714,68 @@ def show_error_window(
         app.exec()
 
 
+def execute_manual_search(
+    *,
+    media_version_id: int,
+    title: str,
+    year: int | None,
+    home: Path,
+    install: Path,
+    db_path: Path | None = None,
+    search_fn: Any | None = None,
+    display_error: bool = False,
+    env: dict[str, str] | None = None,
+    platform_arg: str | None = None,
+) -> int:
+    """Execute exactly one provider-authorized manual search and rebuild resolver on success."""
+    target_db = db_path or (home / ".local/share/openhtpc/media/media.db")
+    try:
+        with sqlite3.connect(str(target_db), timeout=10.0) as rw_db:
+            rw_db.execute("PRAGMA foreign_keys = ON;")
+            rw_db.execute("PRAGMA busy_timeout = 5000;")
+            if search_fn is not None:
+                res = search_fn(
+                    db=rw_db,
+                    media_version_id=media_version_id,
+                    title=title,
+                    year=year,
+                    home=home,
+                )
+            else:
+                match_mod = _load_media_match(install)
+                if not match_mod:
+                    print("ERROR: openhtpc-media-match module unavailable", file=sys.stderr)
+                    return 2
+                res = match_mod.manual_search_media_version(
+                    db=rw_db,
+                    media_version_id=media_version_id,
+                    title=title,
+                    year=year,
+                    home=home,
+                )
+    except sqlite3.Error as exc:
+        print(f"ERROR: Database transaction failed: {exc}", file=sys.stderr)
+        return 2
+
+    if not res.get("ok"):
+        if display_error:
+            show_error_window(
+                message="Vérifiez la connexion réseau ou la configuration TMDb.",
+                env=env,
+                install=install,
+                platform_arg=platform_arg,
+            )
+            return 0
+        return 3
+
+    match_ui = _load_media_match_ui(install)
+    if match_ui and hasattr(match_ui, "_regenerate_ui"):
+        match_ui._regenerate_ui(home, install)
+    else:
+        print("WARNING: openhtpc-media-match-ui unavailable for UI regeneration", file=sys.stderr)
+    return 0
+
+
 def orchestrate_manual_search(
     media_version_id: int | None = None,
     home: Path | None = None,
@@ -708,41 +788,30 @@ def orchestrate_manual_search(
     source_root: Path | None = None,
     probe_func: Any | None = None,
 ) -> int:
-    """Main orchestration flow for living-room manual search."""
+    """Living-room title/year confirmation followed by async HOME submission."""
     if home is None:
         home = Path(os.environ.get("OPENHTPC_HOME", Path.home()))
     if install is None:
         install = Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
 
     db_path = custom_db_path or (home / ".local/share/openhtpc/media/media.db")
-
     if media_version_id is None:
         if token:
             media_version_id = resolve_media_version_from_token(
-                token=token,
-                home=home,
-                install=install,
-                db_path=db_path,
-                probe_func=probe_func,
+                token=token, home=home, install=install, db_path=db_path, probe_func=probe_func,
             )
         elif file_path and source_root:
             media_version_id = ingest_and_get_media_version(
-                file_path=file_path,
-                source_root=source_root,
-                db_path=db_path,
-                install=install,
-                probe_func=probe_func,
+                file_path=file_path, source_root=source_root, db_path=db_path,
+                install=install, probe_func=probe_func,
             )
-
     if media_version_id is None:
         print("ERROR: media_version_id could not be resolved", file=sys.stderr)
         return 1
-
     if not db_path.is_file():
         print(f"ERROR: Database not found at {db_path}", file=sys.stderr)
         return 1
 
-    # Step 1: Read prefill hints from database (Read-only)
     try:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as ro_db:
             initial_title, initial_year = get_prefill_hints(ro_db, media_version_id)
@@ -751,21 +820,11 @@ def orchestrate_manual_search(
         return 1
 
     env = resolve_graphical_env(install)
-
-    # Step 2: Loop title -> year -> confirmation
-    current_title = initial_title
-    current_year = initial_year
-
+    current_title, current_year = initial_title, initial_year
     while True:
-        # Title Entry
         t_res = invoke_text_entry(
-            title="OPENHTPC — Titre du film",
-            initial=current_title,
-            max_length=255,
-            submit_label="SUIVANT",
-            install=install,
-            env=env,
-            platform_arg=platform_arg,
+            title="OPENHTPC — Titre du film", initial=current_title, max_length=255,
+            submit_label="SUIVANT", install=install, env=env, platform_arg=platform_arg,
         )
         if t_res.get("cancelled") or not t_res.get("ok"):
             return 0
@@ -774,37 +833,25 @@ def orchestrate_manual_search(
             return 0
         current_title = entered_title
 
-        # Year Entry
         y_res = invoke_text_entry(
-            title="OPENHTPC — Année (optionnelle)",
-            initial=current_year,
-            max_length=4,
-            submit_label="VALIDER",
-            install=install,
-            env=env,
-            platform_arg=platform_arg,
+            title="OPENHTPC — Année (optionnelle)", initial=current_year, max_length=4,
+            submit_label="VALIDER", install=install, env=env, platform_arg=platform_arg,
         )
         if y_res.get("cancelled") or not y_res.get("ok"):
             return 0
         current_year = y_res.get("text", "").strip()
 
-        # Confirmation Dialog
         decision = show_confirmation_window(
-            title=current_title,
-            year=current_year,
-            env=env,
-            install=install,
+            title=current_title, year=current_year, env=env, install=install,
             platform_arg=platform_arg,
         )
-
         if decision == "CANCEL":
             return 0
-        elif decision == "MODIFY":
+        if decision == "MODIFY":
             continue
-        elif decision == "SEARCH":
+        if decision == "SEARCH":
             break
 
-    # Step 3: Network authority gate — exactly ONE call to DEV5C3A manual search
     clean_year_val: int | None = None
     if current_year:
         try:
@@ -812,54 +859,20 @@ def orchestrate_manual_search(
         except ValueError:
             clean_year_val = None
 
-    try:
-        with sqlite3.connect(str(db_path), timeout=10.0) as rw_db:
-            rw_db.execute("PRAGMA foreign_keys = ON;")
-            rw_db.execute("PRAGMA busy_timeout = 5000;")
-
-            if mock_search_fn is not None:
-                res = mock_search_fn(
-                    db=rw_db,
-                    media_version_id=media_version_id,
-                    title=current_title,
-                    year=clean_year_val,
-                    home=home,
-                )
-            else:
-                match_mod = _load_media_match(install)
-                if not match_mod:
-                    print("ERROR: openhtpc-media-match module unavailable", file=sys.stderr)
-                    return 1
-                res = match_mod.manual_search_media_version(
-                    db=rw_db,
-                    media_version_id=media_version_id,
-                    title=current_title,
-                    year=clean_year_val,
-                    home=home,
-                )
-    except sqlite3.Error as exc:
-        print(f"ERROR: Database transaction failed: {exc}", file=sys.stderr)
-        return 1
-
-    # Step 4: Handle result
-    if not res.get("ok"):
-        # Provider failure: zero database mutation, display living-room error screen
-        show_error_window(
-            message="Vérifiez la connexion réseau ou la configuration TMDb.",
-            env=env,
-            install=install,
-            platform_arg=platform_arg,
+    # Preserve the existing hermetic seam synchronously; production never
+    # performs provider I/O in the foreground helper.
+    if mock_search_fn is not None:
+        return execute_manual_search(
+            media_version_id=media_version_id, title=current_title, year=clean_year_val,
+            home=home, install=install, db_path=db_path, search_fn=mock_search_fn,
+            display_error=True, env=env, platform_arg=platform_arg,
         )
-        return 0
 
-    # Step 5: Success (either candidates stored or OK_NO_RESULTS) -> regenerate Flex UI
-    match_ui = _load_media_match_ui(install)
-    if match_ui and hasattr(match_ui, "_regenerate_ui"):
-        match_ui._regenerate_ui(home, install)
-    else:
-        print("WARNING: openhtpc-media-match-ui unavailable for UI regeneration", file=sys.stderr)
-
-    return 0
+    control = _load_search_control(install)
+    if control is None or not hasattr(control, "request_search"):
+        print("ERROR: media search controller unavailable", file=sys.stderr)
+        return 1
+    return 0 if control.request_search(home, media_version_id, current_title, clean_year_val) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -872,6 +885,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", type=Path, default=None, help="OpenHTPC home directory")
     parser.add_argument("--install-dir", type=Path, default=None, help="OpenHTPC install directory")
     parser.add_argument("-platform", default=None, help="Qt platform (e.g. offscreen, wayland)")
+    parser.add_argument("--worker-search", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--media-version-id", dest="worker_media_version_id", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--title", dest="worker_title", help=argparse.SUPPRESS)
+    parser.add_argument("--year", dest="worker_year", type=int, help=argparse.SUPPRESS)
 
     raw_args = list(sys.argv[1:] if argv is None else argv)
     platform_val = None
@@ -887,6 +904,21 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(raw_args)
     except SystemExit as exc:
         return exc.code
+
+    if args.worker_search:
+        worker_home = args.home or Path(os.environ.get("OPENHTPC_HOME", Path.home()))
+        worker_install = args.install_dir or Path(
+            os.environ.get("OPENHTPC_INSTALL_DIR", worker_home / ".local/lib/openhtpc")
+        )
+        if args.worker_media_version_id is None or args.worker_media_version_id <= 0 or not args.worker_title:
+            return 2
+        return execute_manual_search(
+            media_version_id=args.worker_media_version_id,
+            title=args.worker_title,
+            year=args.worker_year,
+            home=worker_home,
+            install=worker_install,
+        )
 
     raw_token = args.token
     if not raw_token and args.action_or_id and str(args.action_or_id).startswith("mact_"):

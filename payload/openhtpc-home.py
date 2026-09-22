@@ -76,6 +76,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "--regenerate-only":
 disc_view = install / "openhtpc-disc-view.py"
 media_control = load("media_update_control", install / "openhtpc-media-update-control.py")
 media_action_control = load("media_action_control", install / "openhtpc-media-action-control.py")
+media_search_control = load("media_search_control", install / "openhtpc-media-search-control.py")
 media_activity = load("media_activity", install / "openhtpc-media-activity.py")
 enricher = None
 current_enrichment_generation = None
@@ -193,9 +194,11 @@ pending_auto_open_generation = 0
 pending_eject_home_generation = 0
 update_controller = media_control.UpdateController(home, install)
 action_controller = media_action_control.ActionController(home, install)
+search_controller = media_search_control.SearchController(home, install)
 activity_publisher = media_activity.ActivityPublisher(home)
 atexit.register(update_controller.close)
 atexit.register(action_controller.close)
+atexit.register(search_controller.close)
 atexit.register(activity_publisher.close)
 stop_requested = False
 
@@ -228,6 +231,7 @@ while proc.poll() is None and not stop_requested:
         break
     update_controller.poll()
     action_controller.poll()
+    search_controller.poll()
     activity_publisher.poll()
     if enricher is not None and enricher.poll() is not None:
         completed_enrichment_generation = current_enrichment_generation
@@ -274,6 +278,7 @@ while proc.poll() is None and not stop_requested:
             runtime.log(home, "ui", "OPTICAL_GENERATION_DEFERRED", flex_pid=proc.pid, action_type="STATE_UPDATE", source_page="ANY", destination_page="CURRENT", optical_generation=optical_state().get("generation", 0))
 
 activity_publisher.close()
+search_controller.close()
 action_controller.close()
 update_controller.close()
 if runtime:
