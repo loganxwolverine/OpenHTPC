@@ -121,6 +121,27 @@ class RunningFlexMediaSync(unittest.TestCase):
         self.assertIn("media_generation_changed", watcher)
         self.assertIn("reload_media_menu_sections();", watcher)
 
+    def test_launcher_defers_offscreen_render_and_keeps_navigation_lazy(self):
+        source = LAUNCHER.read_text()
+        reload_start = source.index("static void reload_menu_section(Menu *menu)\n{")
+        reload = source[reload_start:source.index("static bool is_media_menu_name", reload_start)]
+        load_start = source.index("static int load_menu(Menu *menu, bool set_back_menu, bool reset_position)\n{")
+        load_menu = source[load_start:source.index("static void publish_media_page", load_start)]
+        submenu_start = source.index("static void load_submenu(const char *submenu)\n{")
+        navigation = source[submenu_start:source.index("static void draw_screen", submenu_start)]
+
+        # Replacing entries destroys their old textures and leaves rendered=false.
+        self.assertLess(reload.index("free_menu_entries(menu)"), reload.index("menu->first_entry = new_first"))
+        self.assertNotIn("render_buttons(menu);", reload)
+
+        # The visible menu still traverses the existing lazy-render path now.
+        self.assertIn("if (current_menu == menu) {\n            load_menu(menu, false, false);", reload)
+        self.assertIn("if (current_menu->rendered == false)\n        render_buttons(current_menu);", load_menu)
+
+        # Both forward and back navigation retain the same lazy load authority.
+        self.assertIn("load_menu_by_name(submenu, true, true);", navigation)
+        self.assertIn("load_menu(menu->back, false, config.reset_on_back);", navigation)
+
 
 if __name__ == "__main__":
     unittest.main()

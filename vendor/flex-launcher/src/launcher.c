@@ -1723,7 +1723,6 @@ static void reload_menu_section(Menu *menu)
         menu->first_entry = new_first;
         menu->num_entries = count;
         assemble_menu_synopsis(menu);
-        render_buttons(menu);
         menu->root_entry = menu->first_entry;
         menu->last_selected_entry = menu->first_entry;
         menu->highlight_position = 0;
@@ -1750,8 +1749,10 @@ static void reload_menu_section(Menu *menu)
             }
             free(saved_cmd);
         }
-        /* The logical DISQUE entry list is stable (e.g. LIRE LE DVD).  Updating its
-                 * presentation must not rewrite page/selection ownership. */
+        /* The logical DISQUE entry list is stable (e.g. LIRE LE DVD).  Updating
+         * its presentation must not rewrite page/selection ownership.
+         * Keep refreshed off-screen menus unrendered.  load_menu() renders them
+         * when entered, while the visible menu is rendered immediately below. */
         if (current_menu == menu) {
             load_menu(menu, false, false);
         }
