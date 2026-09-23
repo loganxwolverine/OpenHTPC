@@ -69,6 +69,7 @@ Config config = {
     .background_image                 = NULL,
     .slideshow_directory              = NULL,
     .title_font_path                  = NULL,
+    .title_fallback_font_path         = NULL,
     .vsync                            = true,
     .fps_limit                        = -1,
     .application_timeout              = DEFAULT_APPLICATION_TIMEOUT * 1000,
@@ -327,6 +328,7 @@ static void init_sdl_ttf()
         .font_size = (int) config.title_font_size,
         .shadow = config.title_shadows,
         .font_path = &config.title_font_path,
+        .fallback_font_path = &config.title_fallback_font_path,
         .max_width = config.icon_size,
         .oversize_mode = config.title_oversize_mode,
         .color = &config.title_font_color
@@ -383,6 +385,7 @@ static void cleanup()
     free(config.default_menu);
     free(config.background_image);
     free(config.title_font_path);
+    free(config.title_fallback_font_path);
     free(config.exe_path);
     free(config.slideshow_directory);
     free(config.clock_font_path);
@@ -1411,6 +1414,8 @@ static void render_buttons(Menu *menu)
             menu->detail_title_texture = render_text_wrapped(
                 menu->detail_title,
                 title_font,
+                config.title_fallback_font_path,
+                title_pt,
                 (SDL_Color){255, 255, 255, 255},
                 text_max_w,
                 (geo.screen_height * 18) / 100,
@@ -1434,6 +1439,8 @@ static void render_buttons(Menu *menu)
             menu->detail_original_title_texture = render_text_wrapped(
                 menu->detail_original_title,
                 orig_font,
+                config.title_fallback_font_path,
+                orig_pt,
                 (SDL_Color){160, 160, 160, 255},
                 text_max_w,
                 (geo.screen_height * 6) / 100,
@@ -1457,6 +1464,8 @@ static void render_buttons(Menu *menu)
             menu->detail_metadata_texture = render_text_wrapped(
                 menu->detail_metadata,
                 meta_font,
+                config.title_fallback_font_path,
+                meta_pt,
                 (SDL_Color){190, 200, 210, 255},
                 text_max_w,
                 (geo.screen_height * 8) / 100,
@@ -1482,6 +1491,8 @@ static void render_buttons(Menu *menu)
                 menu->detail_synopsis_texture = render_text_wrapped(
                     menu->detail_synopsis,
                     syn_font,
+                    config.title_fallback_font_path,
+                    syn_pt,
                     (SDL_Color){215, 215, 215, 255},
                     text_max_w,
                     avail_h,

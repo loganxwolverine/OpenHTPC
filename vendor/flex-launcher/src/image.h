@@ -14,6 +14,7 @@ typedef struct {
     TTF_Font *font;
     int font_size;
     char **font_path;
+    char **fallback_font_path;
     SDL_Color *color;
     bool shadow;
     SDL_Color *shadow_color;
@@ -34,4 +35,4 @@ SDL_Texture *rasterize_svg_from_file(const char *path, int w, int h, SDL_Rect *r
 SDL_Texture *render_highlight(int width, int height, SDL_Rect *rect);
 SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *text_height);
 SDL_Texture *render_text_texture(const char *text, TextInfo *info, SDL_Rect *rect, int *text_height);
-SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, SDL_Color color, int wrap_width, int max_height, SDL_Rect *out_rect);
+SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, const char *fallback_font_path, int font_size, SDL_Color color, int wrap_width, int max_height, SDL_Rect *out_rect);

@@ -131,6 +131,7 @@ void debug_settings()
     log_debug("======================== Titles ========================\n");
     DEBUG_BOOL(SETTING_TITLES_ENABLED, config.titles_enabled);
     DEBUG_STR(SETTING_TITLE_FONT, config.title_font_path);
+    DEBUG_STR(SETTING_TITLE_FALLBACK_FONT, config.title_fallback_font_path);
     DEBUG_INT(SETTING_TITLE_FONT_SIZE, config.title_font_size);
     DEBUG_COLOR(SETTING_TITLE_FONT_COLOR, config.title_font_color);
     DEBUG_BOOL(SETTING_TITLE_SHADOWS, config.title_shadows);

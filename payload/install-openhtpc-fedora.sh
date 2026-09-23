@@ -364,7 +364,7 @@ stage SYSTÈME
 preflight_updates
 stage DÉPENDANCES
 
-packages=(pciutils procps-ng python3 python3-pillow python3-pyside6 mpv libva-utils vulkan-tools mesa-vulkan-drivers SDL2 SDL2_image SDL2_ttf kdialog)
+packages=(pciutils procps-ng python3 python3-pillow python3-pyside6 mpv libva-utils vulkan-tools mesa-vulkan-drivers SDL2 SDL2_image SDL2_ttf kdialog google-noto-sans-cjk-vf-fonts)
 command -v ffmpeg >/dev/null 2>&1 || packages+=(ffmpeg-free)
 gpu_inventory="$(lspci -nn 2>/dev/null | grep -Ei 'VGA compatible|3D controller|Display controller' || true)"
 intel_gpu_present=false amd_gpu_present=false nvidia_gpu_present=false

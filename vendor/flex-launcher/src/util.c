@@ -243,6 +243,10 @@ int config_handler(void *user, const char *section, const char *name, const char
             config.title_font_path = strdup(value);
             clean_path(config.title_font_path);
         }
+        else if (MATCH(name, SETTING_TITLE_FALLBACK_FONT)) {
+            config.title_fallback_font_path = strdup(value);
+            clean_path(config.title_fallback_font_path);
+        }
         else if (MATCH(name, SETTING_TITLE_FONT_SIZE))
             config.title_font_size = (unsigned int) atoi(value);
         else if (MATCH(name, SETTING_TITLE_FONT_COLOR))

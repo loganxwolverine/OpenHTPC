@@ -1456,9 +1456,20 @@ def write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[path
         return _write_flex_config(path, home, sources, install, expected_optical_generation, media_generation)
 
 
+def flex_cjk_fallback_font() -> pathlib.Path | None:
+    """Return the Fedora system CJK font used only when Open Sans lacks a glyph."""
+    candidates = (
+        pathlib.Path("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc"),
+        pathlib.Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
+        pathlib.Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
 def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None, media_generation: str | None = None) -> bool:
     install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
+    fallback_font = flex_cjk_fallback_font()
     icon_dir = install / "assets/ui"
     optical_empty_icon = icon_dir / "optical-empty.png"
     dvd_icon = icon_dir / "optical-dvd.png"
@@ -1687,7 +1698,7 @@ IconSize={scale['icon']}
 IconSpacing=3%
 VCenter=50%
 
-{theme.title_block(font, scale['title'], scale['padding'])}
+{theme.title_block(font, scale['title'], scale['padding'], fallback_font)}
 
 {theme.highlight_block()}
 

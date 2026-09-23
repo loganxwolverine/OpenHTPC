@@ -303,18 +303,110 @@ void render_scroll_indicators(Scroll *scroll, int height, Geometry *geo)
     scroll->rect_left.x = geo->screen_margin;
 }
 
+static bool next_utf8_codepoint(const unsigned char **cursor, Uint32 *codepoint)
+{
+    const unsigned char *p = *cursor;
+    if (*p == '\0')
+        return false;
+
+    if (p[0] < 0x80) {
+        *codepoint = p[0];
+        *cursor = p + 1;
+        return true;
+    }
+
+    int length = 0;
+    Uint32 value = 0;
+    Uint32 minimum = 0;
+    if ((p[0] & 0xE0) == 0xC0) {
+        length = 2; value = p[0] & 0x1F; minimum = 0x80;
+    } else if ((p[0] & 0xF0) == 0xE0) {
+        length = 3; value = p[0] & 0x0F; minimum = 0x800;
+    } else if ((p[0] & 0xF8) == 0xF0) {
+        length = 4; value = p[0] & 0x07; minimum = 0x10000;
+    } else {
+        *cursor = p + 1;
+        *codepoint = 0xFFFD;
+        return true;
+    }
+
+    for (int i = 1; i < length; i++) {
+        if (p[i] == '\0' || (p[i] & 0xC0) != 0x80) {
+            *cursor = p + 1;
+            *codepoint = 0xFFFD;
+            return true;
+        }
+        value = (value << 6) | (p[i] & 0x3F);
+    }
+
+    if (value < minimum || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF))
+        value = 0xFFFD;
+    *cursor = p + length;
+    *codepoint = value;
+    return true;
+}
+
+static bool font_supports_utf8(TTF_Font *font, const char *text)
+{
+    if (font == NULL || text == NULL)
+        return false;
+    const unsigned char *cursor = (const unsigned char *) text;
+    Uint32 codepoint = 0;
+    while (next_utf8_codepoint(&cursor, &codepoint)) {
+        if (codepoint == '\n' || codepoint == '\r' || codepoint == '\t')
+            continue;
+        if (TTF_GlyphIsProvided32(font, codepoint) == 0)
+            return false;
+    }
+    return true;
+}
+
+static TTF_Font *fallback_font_for_text(
+    TTF_Font *primary,
+    const char *text,
+    const char *fallback_path,
+    int font_size
+)
+{
+    if (primary == NULL || text == NULL || fallback_path == NULL || fallback_path[0] == '\0')
+        return NULL;
+    if (font_supports_utf8(primary, text))
+        return NULL;
+
+    TTF_Font *fallback = TTF_OpenFont(fallback_path, font_size);
+    if (fallback == NULL)
+        return NULL;
+    if (!font_supports_utf8(fallback, text)) {
+        TTF_CloseFont(fallback);
+        return NULL;
+    }
+    return fallback;
+}
+
 // A function to render text
 SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *text_height)
 {
     TTF_Font *output_font = NULL;
     TTF_Font *reduced_font = NULL; // Font for Shrink text oversize mode
+    TTF_Font *fallback_font = NULL;
     int w, h;
 
     // Copy text into new buffer in case we need to manipulate it
     char *text_buffer = strdup(text);
 
+    const char *fallback_path = (
+        info->fallback_font_path != NULL && *info->fallback_font_path != NULL
+    ) ? *info->fallback_font_path : NULL;
+    fallback_font = fallback_font_for_text(
+        info->font, text_buffer, fallback_path, info->font_size
+    );
+    TTF_Font *base_font = fallback_font != NULL ? fallback_font : info->font;
+    const char *base_font_path = (
+        fallback_font != NULL && fallback_path != NULL
+    ) ? fallback_path : *info->font_path;
+
     // Calculate size of the rendered title
-    TTF_SizeUTF8(info->font, text_buffer, &w, &h);
+    TTF_SizeUTF8(base_font, text_buffer, &w, &h);
 
     // If title is too large to fit
     if (info->oversize_mode != OVERSIZE_NONE && w > info->max_width) {
@@ -322,13 +414,13 @@ SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *
         // Truncate mode:
         if (info->oversize_mode == OVERSIZE_TRUNCATE) {
             utf8_truncate(text_buffer, w, info->max_width);
-            TTF_SizeUTF8(info->font, text_buffer, &w, &h);
+            TTF_SizeUTF8(base_font, text_buffer, &w, &h);
         }
 
         // Shrink mode:
         else if (info->oversize_mode == OVERSIZE_SHRINK) {
             int reduced_font_size = (int) info->font_size - 1;
-            reduced_font = TTF_OpenFont(*info->font_path, reduced_font_size);
+            reduced_font = TTF_OpenFont(base_font_path, reduced_font_size);
             TTF_SizeUTF8(reduced_font, text_buffer, &w, &h);
 
             // Keep trying smaller font until it fits
@@ -336,7 +428,7 @@ SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *
                 TTF_CloseFont(reduced_font);
                 reduced_font = NULL;
                 reduced_font_size--;
-                reduced_font = TTF_OpenFont(*info->font_path, reduced_font_size);
+                reduced_font = TTF_OpenFont(base_font_path, reduced_font_size);
                 TTF_SizeUTF8(reduced_font, text_buffer, &w, &h);
             }
 
@@ -347,7 +439,7 @@ SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *
         }
     }
     if (reduced_font == NULL)
-        output_font = info->font;
+        output_font = base_font;
 
     // Render surface
     SDL_Surface *surface = NULL;
@@ -393,6 +485,8 @@ SDL_Surface *render_text(const char *text, TextInfo *info, SDL_Rect *rect, int *
     // Clean up
     if (reduced_font != NULL)
         TTF_CloseFont(reduced_font);
+    if (fallback_font != NULL)
+        TTF_CloseFont(fallback_font);
     free(text_buffer);
     
     return surface;
@@ -406,7 +500,16 @@ SDL_Texture *render_text_texture(const char *text, TextInfo *info, SDL_Rect *rec
 }
 
 // A function to render multi-line word-wrapped UTF-8 text into a texture
-SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, SDL_Color color, int wrap_width, int max_height, SDL_Rect *out_rect)
+SDL_Texture *render_text_wrapped(
+    const char *text,
+    TTF_Font *font,
+    const char *fallback_font_path,
+    int font_size,
+    SDL_Color color,
+    int wrap_width,
+    int max_height,
+    SDL_Rect *out_rect
+)
 {
     if (out_rect != NULL) {
         out_rect->w = 0;
@@ -421,7 +524,11 @@ SDL_Texture *render_text_wrapped(const char *text, TTF_Font *font, SDL_Color col
     if (*p == '\0')
         return NULL;
 
-    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(font, p, color, (Uint32) wrap_width);
+    TTF_Font *fallback_font = fallback_font_for_text(font, p, fallback_font_path, font_size);
+    TTF_Font *output_font = fallback_font != NULL ? fallback_font : font;
+    SDL_Surface *surface = TTF_RenderUTF8_Blended_Wrapped(output_font, p, color, (Uint32) wrap_width);
+    if (fallback_font != NULL)
+        TTF_CloseFont(fallback_font);
     if (surface == NULL) {
         log_error("Could not render wrapped text: %s", TTF_GetError());
         return NULL;

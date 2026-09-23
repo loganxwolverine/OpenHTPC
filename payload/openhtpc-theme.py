@@ -44,10 +44,16 @@ def highlight_block(accent: bool = False) -> str:
     )
 
 
-def title_block(font: pathlib.Path, size: int, padding: int) -> str:
+def title_block(
+    font: pathlib.Path,
+    size: int,
+    padding: int,
+    fallback_font: pathlib.Path | None = None,
+) -> str:
+    fallback = f"FallbackFont={fallback_font}\n" if fallback_font is not None else ""
     return (
         "[Titles]\nEnabled=true\n"
-        f"Font={font}\nFontSize={size}\nColor={COLORS['text']}\nOpacity=100%\n"
+        f"Font={font}\n{fallback}FontSize={size}\nColor={COLORS['text']}\nOpacity=100%\n"
         "Shadows=true\nShadowColor=#000000\nOversizeMode=Shrink\n"
         f"Padding={padding}"
     )

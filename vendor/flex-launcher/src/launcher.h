@@ -290,6 +290,7 @@ typedef struct {
     char icon_spacing_str[PERCENT_MAX_CHARS];
     bool titles_enabled;
     char *title_font_path; // Path to title TTF font file
+    char *title_fallback_font_path; // Optional Unicode/CJK fallback font
     unsigned int title_font_size;
     SDL_Color title_font_color; // Color struct for title text
     bool title_shadows;
