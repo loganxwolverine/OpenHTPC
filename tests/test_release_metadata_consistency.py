@@ -117,6 +117,13 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         self.assertIn('"physical_qualification": "PENDING"', builder)
         self.assertIn('"media_audio_fix": "HD_BITSTREAM_DISPLAY_RESYNC_LIFECYCLE"', builder)
 
+    def test_1_2_0_rc8_builder_records_completed_physical_qualification(self):
+        builder = (ROOT / "tools/build-1.2.0-rc8.py").read_text(encoding="utf-8")
+        self.assertIn('BUILD = "public-release-1.2.0-rc8"', builder)
+        self.assertIn('"physical_qualification":"PASS_REFERENCE_BENCH"', builder)
+        self.assertIn('"human_physical_validation_required":False', builder)
+        self.assertIn('"unicode_cjk":"PASS"', builder)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,14 +2,16 @@
 
 # OPENHTPC 1.2.0 Release Candidate 8 — 1.2.0-rc8
 
-- Implements Media Foundation persistent SQLite database with schema v3 (WAL mode, transactional consistency).
-- Introduces normalized media probe and incremental filesystem scanner.
-- Adds heuristic movie matcher and living-room interactive identity resolver within Flex Launcher.
-- Implements on-screen manual movie search with full keyboard entry and safe navigation trampoline.
-- Adds TMDb provider adapter for localized metadata snapshots and content-addressed poster cache.
-- Displays cached movie posters in Flex Launcher via atomic short symlink projections in /tmp.
-- Enforces strict zero-network invariant for living-room browsing, poster display, and media playback.
-- Hardens runtime graphical context detection and Wayland/X11 socket validation for headless environments.
+- Implements Media Foundation persistent SQLite database with schema v3 and transactional consistency.
+- Adds normalized media probing, incremental source scanning and cached poster presentation.
+- Adds the living-room À identifier workflow, movie detail pages and explicit human identity resolution.
+- Adds on-screen manual TMDb search without requiring filenames to be renamed.
+- Makes library updates, identity enrichment and manual TMDb searches asynchronous so Flex remains responsive.
+- Adds unobtrusive live activity feedback for running, successful and failed media operations.
+- Adds Unicode/CJK font fallback through Noto Sans CJK while preserving Open Sans for the normal interface.
+- Keeps local browsing and playback network-independent; TMDb access remains scoped to enrichment/search operations.
+- Preserves RC7 frame-rate matching, display resync and HDMI audio lifecycle behavior.
+- Passes the RC8 reference physical qualification on Fedora 44 KDE Plasma/Wayland with Ryzen 3 PRO 3200GE / Radeon Vega 3 and Denon AVR-X1800H.
 
 # OPENHTPC 1.2.0 Release Candidate 7 — 1.2.0-rc7
 

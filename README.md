@@ -10,7 +10,7 @@ Original project by Steve Dehanne.
 
 Version: `1.2.0-rc8`
 Build: `public-release-1.2.0-rc8`
-Status: **Release Candidate / prerelease — physical validation pending**
+Status: **Release Candidate / prerelease — reference physical validation PASS**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
 Flex Launcher provides the ten-foot interface and MPV provides playback. The
@@ -26,8 +26,10 @@ bitstream passthrough by sharing dynamic PipeWire IEC958 sink preparation with
 local media playback. RC7 added automatic frame-rate matching, dynamic display
 settings synchronization, and protected optical / local playback display resync
 audio stability. RC8 introduces the Media Foundation persistent database,
-normalized media probe, living-room movie matcher and resolver, on-screen manual
-search, and cached poster rendering in Flex Launcher.
+normalized media probe, living-room movie matcher and resolver, cached poster
+rendering, asynchronous library/identity/TMDb operations with live activity
+feedback, and Unicode/CJK fallback rendering while preserving Open Sans as the
+primary interface font.
 
 ## Verify the download
 
@@ -63,7 +65,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted RC5 directory:
+From the extracted RC8 directory:
 
 ```bash
 ./update.sh
@@ -129,7 +131,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [RC3 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC3-FR-EN.md),
+See [RC8 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC8-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).
