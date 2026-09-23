@@ -21,6 +21,7 @@ CONTRACTS = {
     "SDL2": ("LIBRARY", ("SDL2-2.0",)),
     "SDL2_image": ("LIBRARY", ("SDL2_image-2.0",)),
     "SDL2_ttf": ("LIBRARY", ("SDL2_ttf-2.0",)),
+    "google-noto-sans-cjk-vf-fonts": ("PACKAGE", ("google-noto-sans-cjk-vf-fonts",)),
     "kdialog": ("COMMAND", ("kdialog",)),
     "ffmpeg-free": ("COMMAND", ("ffmpeg",)),
     "libva-intel-media-driver": ("PACKAGE", ("libva-intel-media-driver",)),

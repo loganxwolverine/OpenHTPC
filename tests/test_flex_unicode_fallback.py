@@ -91,7 +91,9 @@ def test_wrapped_movie_detail_text_uses_same_fallback_contract():
 
 def test_installer_guarantees_noto_cjk_package():
     installer = (PAYLOAD / "install-openhtpc-fedora.sh").read_text(encoding="utf-8")
+    dependencies = (PAYLOAD / "openhtpc-fedora-dependencies.py").read_text(encoding="utf-8")
     assert "google-noto-sans-cjk-vf-fonts" in installer
+    assert '"google-noto-sans-cjk-vf-fonts": ("PACKAGE", ("google-noto-sans-cjk-vf-fonts",))' in dependencies
 
 
 def test_real_sdl_ttf_fonts_confirm_hangul_fallback():
