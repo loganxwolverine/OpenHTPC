@@ -1,42 +1,239 @@
 #!/usr/bin/env python3
-"""Build the deterministic OPENHTPC 1.2.0 RC8 qualified release candidate."""
+"""Build the deterministic OPENHTPC 1.2.0 RC8 qualified release candidate.
+
+The public archive is exported from the exact Git commit. Flex is rebuilt from
+that exported source tree and its schema-2 provenance is generated before the
+manifest and archive are written. A stale repository prebuilt Flex binary is
+never trusted for a public release.
+"""
 # Copyright 2026 Steve Dehanne
 # SPDX-License-Identifier: Apache-2.0
 # Part of the OPENHTPC project. Original project by Steve Dehanne.
 from __future__ import annotations
-import gzip,hashlib,json,os,pathlib,subprocess,tarfile,tempfile
+
+import gzip
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import tarfile
+import tempfile
+from typing import Any
+
 import openhtpc_release_metadata as release_metadata
 
-ROOT=pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 NAME = "OpenHTPC-1.2.0-RC8"
 BUILD = "public-release-1.2.0-rc8"
-ARTIFACTS=ROOT/"artifacts"
-EXCLUDED={".git","artifacts","__pycache__","diagnostics",".pytest_cache",".openhtpc-autopilot"}
-def digest(path):
- value=hashlib.sha256()
- with path.open("rb") as stream:
-  for chunk in iter(lambda:stream.read(1024*1024),b""):value.update(chunk)
- return value.hexdigest()
-def files():return sorted((p for p in ROOT.rglob("*") if p.is_file() and not EXCLUDED.intersection(p.relative_to(ROOT).parts)),key=lambda p:p.relative_to(ROOT).as_posix())
-def write_manifest():
- paths=[p for p in files() if p.name!="MANIFEST.sha256"];(ROOT/"MANIFEST.sha256").write_text("".join(f"{digest(p)}  {p.relative_to(ROOT).as_posix()}\n" for p in paths),encoding="utf-8")
+ARTIFACTS = ROOT / "artifacts"
+DEV_TRANCHE = "PUBLIC_RC8"
+WORKSTREAM = "MEDIA_LIBRARY_BOOTSTRAP"
+
+
+def load_devctl():
+    path = ROOT / "tools/openhtpc-devctl"
+    loader = importlib.machinery.SourceFileLoader("openhtpc_devctl_release", str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise RuntimeError("RC8_DEVCTL_SPEC_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+devctl = load_devctl()
+
+
+def digest(path: pathlib.Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def exact_head() -> str:
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=ROOT, text=True,
+        capture_output=True, check=True,
+    ).stdout
+    if status.strip():
+        raise RuntimeError("RC8_RELEASE_WORKTREE_DIRTY")
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+        capture_output=True, check=True,
+    ).stdout.strip()
+    if not devctl.COMMIT_PATTERN.fullmatch(commit):
+        raise RuntimeError("RC8_RELEASE_COMMIT_INVALID")
+    return commit
+
+
+def write_manifest(staging: pathlib.Path) -> None:
+    files = sorted(
+        (path for path in staging.rglob("*") if path.is_file() and path.name != "MANIFEST.sha256"),
+        key=lambda path: path.relative_to(staging).as_posix(),
+    )
+    (staging / "MANIFEST.sha256").write_text(
+        "".join(f"{digest(path)}  {path.relative_to(staging).as_posix()}\n" for path in files),
+        encoding="utf-8",
+    )
+
+
+def write_deterministic_archive(staging: pathlib.Path, archive: pathlib.Path) -> None:
+    with tempfile.NamedTemporaryFile(dir=ARTIFACTS, prefix=NAME + ".", delete=False) as raw:
+        temporary = pathlib.Path(raw.name)
+    try:
+        with temporary.open("wb") as target, gzip.GzipFile(
+            filename="", mode="wb", fileobj=target, mtime=0
+        ) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w") as output:
+                for path in sorted(
+                    (p for p in staging.rglob("*") if p.is_file()),
+                    key=lambda p: p.relative_to(staging).as_posix(),
+                ):
+                    relative = path.relative_to(staging)
+                    info = output.gettarinfo(
+                        str(path), arcname=f"{NAME}/{relative.as_posix()}"
+                    )
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = "root"
+                    info.mtime = 0
+                    with path.open("rb") as stream:
+                        output.addfile(info, stream)
+        os.replace(temporary, archive)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def stage_exact_release(commit: str, staging: pathlib.Path, scratch: pathlib.Path) -> dict[str, Any]:
+    devctl._export_commit(commit, staging, scratch)
+    metadata = release_metadata.validate_tree(staging, BUILD)
+
+    flex_source = staging / "vendor/flex-launcher"
+    fingerprint = devctl._source_fingerprint(flex_source)
+    upstream = (flex_source / "UPSTREAM_COMMIT").read_text(encoding="utf-8").strip()
+    if not devctl.COMMIT_PATTERN.fullmatch(upstream):
+        raise RuntimeError("RC8_FLEX_UPSTREAM_INVALID")
+
+    built = devctl._build_flex(flex_source, scratch / "flex-build")
+    staged_binary = staging / "payload/flex/bin/flex-launcher"
+    staged_binary.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(built, staged_binary)
+    staged_binary.chmod(0o755)
+    if digest(staged_binary) != digest(built):
+        raise RuntimeError("RC8_FLEX_STAGE_MISMATCH")
+
+    flex_metadata: dict[str, Any] = {
+        "schema": 2,
+        "binary_sha256": digest(staged_binary),
+        "elf_build_id": devctl._elf_build_id(staged_binary),
+        "source_commit": commit,
+        "source_revision": f"upstream-{upstream}+openhtpc-{commit}",
+        "upstream_commit": upstream,
+        "flex_source_fingerprint": fingerprint,
+        "artifact_build_id": BUILD,
+        "dev_tranche": DEV_TRANCHE,
+        "workstream": WORKSTREAM,
+        "product_version": metadata["top_version"],
+    }
+    devctl._validate_flex_metadata(flex_metadata)
+    (staging / "payload/flex/BUILD-METADATA.json").write_text(
+        json.dumps(flex_metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    # Fail closed if the two RC8 UI features previously lost by stale packaging
+    # are not present in the newly built binary.
+    strings = subprocess.run(
+        ["strings", str(staged_binary)], text=True, capture_output=True, check=True
+    ).stdout
+    for marker in ("LiveActivityState", "FallbackFont"):
+        if marker not in strings:
+            raise RuntimeError(f"RC8_FLEX_REQUIRED_MARKER_MISSING:{marker}")
+
+    write_manifest(staging)
+    return {"release": metadata, "flex": flex_metadata}
+
+
 def build():
- metadata=release_metadata.validate_tree(ROOT,BUILD);write_manifest();ARTIFACTS.mkdir(exist_ok=True)
- archive=ARTIFACTS/f"{NAME}.tar.gz";checksum=pathlib.Path(str(archive)+".sha256");validation=ARTIFACTS/f"{NAME}.validation.json";report=ARTIFACTS/f"{NAME}-report.json"
- for p in (archive,checksum,validation,report):p.unlink(missing_ok=True)
- with tempfile.NamedTemporaryFile(dir=ARTIFACTS,prefix=NAME+".",delete=False) as raw:temporary=pathlib.Path(raw.name)
- try:
-  with temporary.open("wb") as target,gzip.GzipFile(filename="",mode="wb",fileobj=target,mtime=0) as compressed:
-   with tarfile.open(fileobj=compressed,mode="w") as output:
-    for path in files():
-     relative=path.relative_to(ROOT);info=output.gettarinfo(str(path),arcname=f"{NAME}/{relative.as_posix()}");info.uid=info.gid=0;info.uname=info.gname="root";info.mtime=0
-     with path.open("rb") as stream:output.addfile(info,stream)
-  os.replace(temporary,archive)
- finally:temporary.unlink(missing_ok=True)
- release_metadata.validate_archive(archive,BUILD);sha=digest(archive);checksum.write_text(f"{sha}  {archive.name}\n",encoding="utf-8");commit=subprocess.run(["git","rev-parse","HEAD"],cwd=ROOT,text=True,capture_output=True,check=True).stdout.strip()
- common={"schema":1,"version":metadata["top_version"],"commit":commit,"artifact":archive.name,"sha256":sha,"physical_qualification":"PASS_REFERENCE_BENCH","media_foundation":"ASYNC_LIBRARY_IDENTITY_TMDB_WITH_LIVE_ACTIVITY","unicode_cjk":"PASS"}
- validation.write_text(json.dumps({**common,"build":BUILD,"installation_method":"install.sh/update.sh","human_physical_validation_required":False,"decisive_test":"DEV6C3U_RYZEN3_MEDIA_FOUNDATION_CJK"},indent=2,sort_keys=True)+"\n",encoding="utf-8")
- report.write_text(json.dumps({**common,"build_id":BUILD,"reference_platform":"Fedora 44 KDE Wayland / Ryzen 3 PRO 3200GE / Radeon Vega 3 / Denon AVR-X1800H","status":"OPENHTPC_1_2_0_RC8_QUALIFIED_FOR_PRERELEASE"},indent=2,sort_keys=True)+"\n",encoding="utf-8")
- return archive,checksum,validation,report
-if __name__=="__main__":
- for item in build():print(item)
+    commit = exact_head()
+    ARTIFACTS.mkdir(exist_ok=True)
+    archive = ARTIFACTS / f"{NAME}.tar.gz"
+    checksum = pathlib.Path(str(archive) + ".sha256")
+    validation = ARTIFACTS / f"{NAME}.validation.json"
+    report = ARTIFACTS / f"{NAME}-report.json"
+    for path in (archive, checksum, validation, report):
+        path.unlink(missing_ok=True)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="openhtpc-rc8-release-") as raw:
+            scratch = pathlib.Path(raw)
+            staging = scratch / "stage"
+            staging.mkdir()
+            staged = stage_exact_release(commit, staging, scratch)
+            write_deterministic_archive(staging, archive)
+
+        release_metadata.validate_archive(archive, BUILD)
+        sha = digest(archive)
+        checksum.write_text(f"{sha}  {archive.name}\n", encoding="utf-8")
+
+        common = {
+            "schema": 1,
+            "version": staged["release"]["top_version"],
+            "commit": commit,
+            "artifact": archive.name,
+            "sha256": sha,
+            "physical_qualification": "PASS_REFERENCE_BENCH",
+            "media_foundation": "ASYNC_LIBRARY_IDENTITY_TMDB_WITH_LIVE_ACTIVITY",
+            "unicode_cjk": "PASS",
+            "flex_binary_sha256": staged["flex"]["binary_sha256"],
+            "flex_source_commit": staged["flex"]["source_commit"],
+            "dev_tranche": DEV_TRANCHE,
+            "workstream": WORKSTREAM,
+        }
+        validation.write_text(
+            json.dumps(
+                {
+                    **common,
+                    "build": BUILD,
+                    "installation_method": "install.sh/update.sh",
+                    "human_physical_validation_required": False,
+                    "decisive_test": "DEV6C3U_RYZEN3_MEDIA_FOUNDATION_CJK",
+                },
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        report.write_text(
+            json.dumps(
+                {
+                    **common,
+                    "build_id": BUILD,
+                    "reference_platform": "Fedora 44 KDE Wayland / Ryzen 3 PRO 3200GE / Radeon Vega 3 / Denon AVR-X1800H",
+                    "status": "OPENHTPC_1_2_0_RC8_QUALIFIED_FOR_PRERELEASE",
+                },
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+
+        errors = devctl._verify_artifact(archive)
+        if errors:
+            raise RuntimeError("RC8_RELEASE_VERIFY_FAILED: " + "; ".join(errors))
+    except Exception:
+        for path in (archive, checksum, validation, report):
+            path.unlink(missing_ok=True)
+        raise
+
+    return archive, checksum, validation, report
+
+
+if __name__ == "__main__":
+    for item in build():
+        print(item)

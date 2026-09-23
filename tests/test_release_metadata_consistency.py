@@ -120,9 +120,19 @@ class ReleaseMetadataConsistency(unittest.TestCase):
     def test_1_2_0_rc8_builder_records_completed_physical_qualification(self):
         builder = (ROOT / "tools/build-1.2.0-rc8.py").read_text(encoding="utf-8")
         self.assertIn('BUILD = "public-release-1.2.0-rc8"', builder)
-        self.assertIn('"physical_qualification":"PASS_REFERENCE_BENCH"', builder)
-        self.assertIn('"human_physical_validation_required":False', builder)
-        self.assertIn('"unicode_cjk":"PASS"', builder)
+        self.assertIn('"physical_qualification": "PASS_REFERENCE_BENCH"', builder)
+        self.assertIn('"human_physical_validation_required": False', builder)
+        self.assertIn('"unicode_cjk": "PASS"', builder)
+
+    def test_1_2_0_rc8_builder_rebuilds_flex_from_exact_commit_and_fails_closed(self):
+        builder = (ROOT / "tools/build-1.2.0-rc8.py").read_text(encoding="utf-8")
+        self.assertIn("devctl._export_commit(commit, staging, scratch)", builder)
+        self.assertIn("devctl._build_flex(flex_source", builder)
+        self.assertIn('"schema": 2', builder)
+        self.assertIn('"source_commit": commit', builder)
+        self.assertIn('for marker in ("LiveActivityState", "FallbackFont")', builder)
+        self.assertIn("devctl._verify_artifact(archive)", builder)
+        self.assertNotIn("for path in files():", builder)
 
 
 if __name__ == "__main__":
