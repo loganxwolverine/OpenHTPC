@@ -393,6 +393,21 @@ def test_unidentified_rows_explain_candidate_state_and_offer_direct_context_acti
     assert ";:submenu MEDIA_R" in manual and manual.endswith(";IDENTIFIER LE FILM")
 
 
+def test_unidentified_long_row_preserves_media_type_and_review_hint(env):
+    filename = ("Very.Long.Release.Name." * 8) + "mkv"
+    _seed_movie(env, filename=filename, work_id=1, state="UNMATCHED")
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    row = next(
+        line for line in _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+        if ":submenu MEDIA_D" in line
+    )
+    assert "MKV  ·  recherche manuelle" in row
+    assert len(row.encode("utf-8")) <= 198
+
+
 def test_unidentified_entry_absent_when_no_db_unmatched(env):
     _seed_movie(env, state="AUTO_MATCHED")
     _root, sections = session_engine.media_menu_sections(

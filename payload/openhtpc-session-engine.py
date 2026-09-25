@@ -1121,8 +1121,13 @@ def bounded_flex_entry(
         ellipsis = "…"
         media_suffix = ""
         if "  ·  " in label:
-            head, tail = label.rsplit("  ·  ", 1)
-            media_suffix = f"  ·  {tail}"
+            parts = label.split("  ·  ")
+            if len(parts) >= 3:
+                head = "  ·  ".join(parts[:-2])
+                media_suffix = "  ·  " + "  ·  ".join(parts[-2:])
+            else:
+                head, tail = parts
+                media_suffix = f"  ·  {tail}"
             encoded = head.encode("utf-8")
         reserved = len((ellipsis + media_suffix).encode("utf-8"))
         if budget < reserved:
