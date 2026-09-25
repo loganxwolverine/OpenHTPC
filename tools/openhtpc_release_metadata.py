@@ -46,8 +46,13 @@ def validate_tree(root: pathlib.Path, expected_build_id: str) -> dict[str, str]:
     if values["build_id"] != expected_build_id:
         raise ValueError(f"RELEASE_METADATA_BUILD_ID_MISMATCH expected={expected_build_id} actual={values['build_id']}")
     rc_match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)-rc([0-9]+)", values["top_version"], re.IGNORECASE)
+    stable_match = re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", values["top_version"])
+    expected_product = None
     if rc_match:
         expected_product = f"OPENHTPC {rc_match.group(1)} Release Candidate {int(rc_match.group(2))}"
+    elif stable_match:
+        expected_product = f"OPENHTPC {values['top_version']}"
+    if expected_product is not None:
         if values["product"] != expected_product:
             raise ValueError(
                 f"RELEASE_METADATA_PRODUCT_MISMATCH expected={expected_product} actual={values['product']}"
@@ -67,6 +72,8 @@ def propagate(root: pathlib.Path, build_id: str) -> dict[str, str]:
     rc_match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)-rc([0-9]+)", version, re.IGNORECASE)
     if rc_match:
         metadata["product"] = f"OPENHTPC {rc_match.group(1)} Release Candidate {int(rc_match.group(2))}"
+    elif re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        metadata["product"] = f"OPENHTPC {version}"
     json_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     installer_path = root / "payload/install-openhtpc-fedora.sh"
     installer = installer_path.read_text(encoding="utf-8")
