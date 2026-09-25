@@ -254,7 +254,7 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         )
         self.assertEqual(model["magnificence"]["profile_id"], "intel_n150_8086_46d4_sd_1080p")
         self.assertEqual(model["magnificence"]["selected_label"], "KrigBilateral")
-        self.assertIn("Réserve GPU", model["magnificence"]["reason_fr"])
+        self.assertIn("réserve GPU", model["magnificence"]["reason_fr"])
 
     def test_validator_exception_and_unavailable_fail_closed(self):
         node = self.dev_root / "dri/renderD129"

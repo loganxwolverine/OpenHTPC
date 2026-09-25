@@ -46,6 +46,89 @@ def config_path(home: pathlib.Path) -> pathlib.Path:
     return home / ".config/openhtpc/user-config.json"
 
 
+def _normalize_hex_id(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = value.strip().lower().replace("0x", "")
+    match = re.search(r"([0-9a-f]{4})$", compact)
+    return match.group(1) if match else None
+
+
+def _magnificence_source_scope(kind: str, probe: dict | None) -> str | None:
+    """Map current media to the first Magnificence scope: DVD / SD film."""
+    if kind == "dvd":
+        return "DVD_PAL_FILM"
+    if kind != "local" or not isinstance(probe, dict):
+        return None
+    streams = probe.get("streams", [])
+    video = next(
+        (item for item in streams if isinstance(item, dict) and item.get("codec_type") == "video"),
+        None,
+    )
+    if not video:
+        return None
+    try:
+        width = int(video.get("width") or 0)
+        height = int(video.get("height") or 0)
+    except (TypeError, ValueError):
+        return None
+    if width and height and width <= 720 and height <= 576:
+        return "DVD_PAL_FILM"
+    return None
+
+
+def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> dict | None:
+    """Return the qualified hardware/output recipe, or None for safe PURE fallback."""
+    scope = _magnificence_source_scope(kind, probe)
+    if scope is None:
+        return None
+    try:
+        caps = json.loads((home / ".config/openhtpc/runtime/capabilities.json").read_text(encoding="utf-8"))
+        graphics = caps.get("graphics", {}).get("devices", [])
+        gpu = next((item for item in graphics if isinstance(item, dict) and item.get("active")), None)
+        if gpu is None:
+            gpu = next((item for item in graphics if isinstance(item, dict)), None)
+        mode = caps.get("display", {}).get("active_output", {}).get("current_mode", {})
+        if not gpu or not mode.get("width") or not mode.get("height"):
+            return None
+        vendor_id = _normalize_hex_id(gpu.get("vendor_id"))
+        device_id = _normalize_hex_id(gpu.get("device_id"))
+        resolution = f"{int(mode['width'])}x{int(mode['height'])}"
+
+        install = pathlib.Path(__file__).resolve().parent
+        db = json.loads((install / "assets/magnificence_profiles.json").read_text(encoding="utf-8"))
+        for profile_id, profile in db.get("profiles", {}).items():
+            profile_gpu = profile.get("gpu", {})
+            pci_id = str(profile_gpu.get("pci_id", "")).lower().split(":")
+            if len(pci_id) != 2:
+                continue
+            if vendor_id != _normalize_hex_id(pci_id[0]) or device_id != _normalize_hex_id(pci_id[1]):
+                continue
+            if profile.get("display_scope", {}).get("resolution") != resolution:
+                continue
+            if profile.get("source_scope", {}).get("class") != scope:
+                continue
+
+            mag = profile.get("magnificence", {})
+            if not str(mag.get("status", "")).startswith("TECHNICALLY_QUALIFIED"):
+                continue
+            shader_names = [str(item) for item in mag.get("selected_shaders", []) if item]
+            shader_paths = [install / "assets/shaders" / name for name in shader_names]
+            if any(not path.is_file() for path in shader_paths):
+                return None
+            return {
+                "profile_id": profile_id,
+                "recipe_id": mag.get("selected_recipe", "RECIPE_0_PURE"),
+                "label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
+                "shader_files": [str(path) for path in shader_paths],
+                "source_scope": scope,
+                "display": resolution,
+            }
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    return None
+
+
 def _load_audio_module():
     try:
         import openhtpc_audio
@@ -1231,7 +1314,25 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
     prefs = read_preferences(home)
     if probe is None and media is not None: probe = probe_media(media)
     requested = prefs["presentation_mode"]
-    presentation = {"requested": requested, "resolved": "PURE", "reason": "requested_pure" if requested == "PURE" else "no_qualified_local_auto_scope"}
+    magnificence_choice = None
+    presentation = {
+        "requested": requested,
+        "resolved": "PURE",
+        "reason": "requested_pure" if requested == "PURE" else "no_qualified_magnificence_profile",
+    }
+    if requested == "CINEMA_AUTO":
+        magnificence_choice = _magnificence_choice(home, kind, probe)
+        if magnificence_choice is not None:
+            presentation = {
+                "requested": requested,
+                "resolved": magnificence_choice["recipe_id"],
+                "reason": "magnificence_profile",
+                "profile_id": magnificence_choice["profile_id"],
+                "label": magnificence_choice["label"],
+                "source_scope": magnificence_choice["source_scope"],
+                "display": magnificence_choice["display"],
+                "shader_files": magnificence_choice["shader_files"],
+            }
     audio = choose_audio(prefs["audio_language_policy"], probe)
     source_audio_tracks = _typed_streams(probe or {}, "audio")
     if not source_audio_tracks and kind == "dvd" and isinstance(optical_state, dict):
@@ -1444,7 +1545,19 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
         decode_policy["diagnostic_limits"] = diagnostic_limits
 
     mpv_gpu_args = list((gpu_binding or {}).get("mpv_args", []))
-    mpv_args = [*mpv_gpu_args, *mpv_decode_args, *audio["mpv_args"], *audio_output["mpv_args"], *mpv_device_args, *subtitle["mpv_args"]]
+    magnificence_args: list[str] = []
+    if magnificence_choice is not None and magnificence_choice.get("shader_files"):
+        shader_value = ":".join(magnificence_choice["shader_files"])
+        magnificence_args.append(f"--glsl-shaders={shader_value}")
+    mpv_args = [
+        *mpv_gpu_args,
+        *mpv_decode_args,
+        *magnificence_args,
+        *audio["mpv_args"],
+        *audio_output["mpv_args"],
+        *mpv_device_args,
+        *subtitle["mpv_args"],
+    ]
     return {
         "presentation": presentation,
         "audio": audio,

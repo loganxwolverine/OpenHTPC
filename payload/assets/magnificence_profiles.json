@@ -116,7 +116,10 @@
           "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable but ~1.64x PURE workload; reserve judged too small for default N150 policy.",
           "RECIPE_C2_DVD_FSRCNNX_16": "Dropped frames.",
           "RECIPE_C2_DVD_ARTCNN_C4F16": "Dropped frames."
-        }
+        },
+        "selected_shaders": [
+          "KrigBilateral.glsl"
+        ]
       },
       "reference_sources": {
         "intel_spec": "https://www.intel.com/content/www/us/en/products/sku/241636/intel-processor-n150-6m-cache-up-to-3-60-ghz/specifications.html",

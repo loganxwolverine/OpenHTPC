@@ -77,66 +77,8 @@ policy_args=()
 while IFS= read -r policy_opt; do [[ -n $policy_opt ]] && policy_args+=("$policy_opt"); done < <(python3 -c 'import json,sys
 for value in json.loads(sys.argv[1]).get("mpv_args",[]): print(value)' "$policy_json" 2>/dev/null)
 
-shader_args=()
-resolved_presentation=PURE
-presentation_reason=requested_pure
-if [[ "$video_profile" == "CINEMA_AUTO" ]]; then
-    # Resolve recipe for DVD_PAL_FILM scope
-    cinema_result="$(python3 "$INSTALL/openhtpc-cinema-auto.py" --scope DVD_PAL_FILM --json 2>/dev/null || true)"
-    if [[ -n "$cinema_result" ]]; then
-        recipe_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("recipe_id","RECIPE_0_PURE"))' "$cinema_result" 2>/dev/null || printf 'RECIPE_0_PURE')"
-        presentation_reason=qualified_recipe
-        printf '%s kind=dvd c4_profile=CINEMA_AUTO c4_recipe=%q\n' "$(date --iso-8601=seconds)" "$recipe_id" >> "$log"
-        if [[ "$recipe_id" != "RECIPE_0_PURE" ]]; then
-            resolved_presentation="$recipe_id"
-            # Get shader files from catalog
-            shaders_json="$(python3 -c '
-import json, pathlib, sys
-install = pathlib.Path(sys.argv[1])
-catalog_path = install / "assets" / "c3_calibration_catalog.json"
-recipe_id = sys.argv[2]
-try:
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    for scope_def in catalog.get("scopes", {}).values():
-        for cand in scope_def.get("candidates", []):
-            if cand.get("recipe_id") == recipe_id:
-                print(json.dumps(cand.get("shader_ids", [])))
-                raise SystemExit(0)
-except SystemExit:
-    raise
-except Exception:
-    pass
-print("[]")' "$INSTALL" "$recipe_id" 2>/dev/null || printf '[]')"
-            shader_count="$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$shaders_json" 2>/dev/null || printf '0')"
-            if [[ "$shader_count" -gt 0 ]]; then
-                while IFS= read -r shader_opt; do
-                    [[ -n "$shader_opt" ]] && shader_args+=("$shader_opt")
-                done < <(python3 -c '
-import json, pathlib, sys
-install = pathlib.Path(sys.argv[1])
-shaders_dir = install / "assets" / "shaders"
-shaders = json.loads(sys.argv[2])
-opt_prefix = "glsl" + "-shaders"
-all_valid = True
-opts = []
-for s in shaders:
-    sp = shaders_dir / s
-    if sp.is_file():
-        opts.append(f"--{opt_prefix}={sp}")
-    else:
-        all_valid = False
-        break
-if all_valid:
-    for o in opts:
-        print(o)
-' "$INSTALL" "$shaders_json" 2>/dev/null)
-                if [[ ${#shader_args[@]} -eq 0 && "$shader_count" -gt 0 ]]; then
-                    printf '%s kind=dvd c4_shader_missing fallback=PURE\n' "$(date --iso-8601=seconds)" >> "$log"
-                fi
-            fi
-        fi
-    fi
-fi
+resolved_presentation="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["presentation"]["resolved"])' "$policy_json" 2>/dev/null || printf PURE)"
+presentation_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["presentation"].get("reason","policy_fallback"))' "$policy_json" 2>/dev/null || printf policy_fallback)"
 
 presentation_label="PURE"
 [[ "$video_profile" != "CINEMA_AUTO" ]] || presentation_label="MAGNIFICENCE"
@@ -206,7 +148,7 @@ PY
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
 refresh_runner=()
 [[ ! -f $INSTALL/openhtpc-refresh-match.py ]] || refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --)
-"${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${shader_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
+"${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --force-window=immediate --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
 audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" "$rc" "${dispatch_id:-}" <<'PY'
 import importlib.util,json,pathlib,sys
