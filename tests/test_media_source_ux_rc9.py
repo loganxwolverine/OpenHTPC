@@ -76,7 +76,8 @@ def test_source_kind_uses_longest_mount_and_recognizes_network(tmp_path):
     info = tmp_path / "mountinfo"
     info.write_text(
         f"1 0 8:1 / {root} rw - ext4 /dev/sda1 rw\n"
-        f"2 1 0:32 / {network} rw - cifs //nas/Media rw\n",
+        f"2 1 0:54 / {network} rw - autofs systemd-1 rw\n"
+        f"3 2 0:32 / {network} rw - cifs //nas/Media rw\n",
         encoding="utf-8",
     )
     assert session._source_filesystem_type(movie, info) == "cifs"

@@ -275,7 +275,7 @@ def _source_filesystem_type(
         resolved = path.resolve()
     except OSError:
         resolved = path
-    best: tuple[int, str] | None = None
+    best: tuple[int, int, str] | None = None
     try:
         lines = mountinfo_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -295,9 +295,17 @@ def _source_filesystem_type(
             contains = False
         if contains:
             score = len(str(mountpoint))
-            if best is None or score > best[0]:
-                best = (score, right_fields[0].casefold())
-    return best[1] if best is not None else None
+            filesystem = right_fields[0].casefold()
+            if filesystem in NETWORK_MEDIA_FILESYSTEMS:
+                priority = 2
+            elif filesystem == "autofs":
+                priority = 0
+            else:
+                priority = 1
+            candidate = (score, priority, filesystem)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+    return best[2] if best is not None else None
 
 
 def _source_kind_label(path: pathlib.Path) -> str:
