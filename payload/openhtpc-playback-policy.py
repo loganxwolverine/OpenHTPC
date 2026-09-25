@@ -1461,7 +1461,7 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
 
 def osd_text(decision: dict) -> str:
     p = decision["presentation"]; a = decision["audio"]; s = decision["subtitle"]
-    requested = "CINÉMA AUTO" if p["requested"] == "CINEMA_AUTO" else "PURE"
+    requested = "MAGNIFICENCE" if p["requested"] == "CINEMA_AUTO" else "PURE"
     audio = "Français" if a["resolved"].startswith("AID_") and a["requested"] == "FR" else "Piste par défaut" if a["requested"] == "DEFAULT" else "Auto"
     if s["requested"] == "OFF": subtitles = "Désactivés"
     elif s["resolved"] == "NONE": subtitles = "Aucun"

@@ -95,7 +95,9 @@
         "fallback_recipe": "RECIPE_0_PURE",
         "status": "TECHNICALLY_MEASURED_PROVISIONAL",
         "reason": "KrigBilateral is the lowest-cost shader retained from the prior C2 visual set on this N150 measurement; FSRCNNX-8 leaves substantially less reserve.",
-        "visual_basis": "C2 prior visual qualification; 1080p-specific visual confirmation still pending"
+        "visual_basis": "C2 prior visual qualification; 1080p-specific visual confirmation still pending",
+        "selected_label": "KrigBilateral",
+        "ui_reason_fr": "Réserve GPU préservée pour fluidité, décodage et traitements vidéo."
       },
       "reference_sources": {
         "intel_spec": "https://www.intel.com/content/www/us/en/products/sku/241636/intel-processor-n150-6m-cache-up-to-3-60-ghz/specifications.html",

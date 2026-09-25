@@ -139,7 +139,7 @@ if all_valid:
 fi
 
 presentation_label="PURE"
-[[ "$video_profile" != "CINEMA_AUTO" ]] || presentation_label="CINÉMA AUTO"
+[[ "$video_profile" != "CINEMA_AUTO" ]] || presentation_label="MAGNIFICENCE"
 osd_text="$(python3 -c 'import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location("policy",sys.argv[1]);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 decision=json.loads(sys.argv[2]);decision["presentation"]["resolved"]=sys.argv[3];print(module.osd_text(decision))' "$INSTALL/openhtpc-playback-policy.py" "$policy_json" "$resolved_presentation" 2>/dev/null || printf 'Politique vidéo : %s\nProfil appliqué : %s\nAudio : Auto\nSous-titres : Auto' "$presentation_label" "$resolved_presentation")"

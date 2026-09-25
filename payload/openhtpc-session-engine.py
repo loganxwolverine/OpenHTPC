@@ -1359,19 +1359,6 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
             }
             entries.append((f"{media_name} · {reason_labels.get(decision['playback_reason'],'LECTURE NON DISPONIBLE')}", media_play_icon, ":fork true"))
 
-    if state == "DVD_VIDEO":
-        presentation = "PURE"
-        try:
-            policy_path = install / "openhtpc-playback-policy.py"
-            spec = importlib.util.spec_from_file_location("openhtpc_dvd_playback_policy", policy_path)
-            policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
-            presentation = policy.read_preferences(home or pathlib.Path.home())["presentation_mode"]
-        except (OSError, AttributeError, ImportError, KeyError):
-            pass
-        label = "CINÉMA AUTO" if presentation == "CINEMA_AUTO" else "PURE"
-        insert_at = next((index + 1 for index, item in enumerate(entries) if item[0] == "LIRE LE DVD"), len(entries))
-        entries.insert(insert_at, (f"MODE VIDÉO : {label}", video_icon, ":submenu DVD_VIDEO_MODE"))
-
     device = shlex.quote(str(optical.get("device") or ""))
     entries.append(("ÉJECTER", action_eject_icon, f":fork env OPENHTPC_RETURN_UI=/bin/true {install/'openhtpc-eject'} {device}" if device else ":fork true"))
     entries.append(("RETOUR", action_back_icon, ":back"))
@@ -1420,7 +1407,7 @@ def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Pa
 
 
 def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon: pathlib.Path) -> str:
-    """Generate dynamic [SYSTEM_PROCESSING] entries for C4 CINÉMA AUTO state machine."""
+    """Generate dynamic [SYSTEM_PROCESSING] entries for C4 MAGNIFICENCE state machine."""
     # Read current video profile (never probes hardware)
     vp_path = home / ".config/openhtpc/video-profile.json"
     try:
@@ -1472,7 +1459,7 @@ def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon
         else:
             # State A: Fresh install / No calibration
             # Exactly ONE primary action (no conflicting USE AUTO / ANALYZE buttons)
-            lines.append(f"Entry{idx}=CONFIGURER CINÉMA AUTO;{local_icon};{cal_ui}")
+            lines.append(f"Entry{idx}=CONFIGURER MAGNIFICENCE;{local_icon};{cal_ui}")
             idx += 1
     elif map_stale:
         # State G: Stale map
@@ -1482,12 +1469,12 @@ def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon
             lines.append(f"Entry{idx}=UTILISER PURE;{local_icon};:fork {vp_cmd} set PURE")
             idx += 1
         else:
-            lines.append(f"Entry{idx}=UTILISER CINÉMA AUTO;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
+            lines.append(f"Entry{idx}=UTILISER MAGNIFICENCE;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
             idx += 1
     else:
         # State D/E/F: Map present and valid
         if active == "PURE":
-            lines.append(f"Entry{idx}=UTILISER CINÉMA AUTO;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
+            lines.append(f"Entry{idx}=UTILISER MAGNIFICENCE;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
             idx += 1
         else:
             lines.append(f"Entry{idx}=UTILISER PURE;{local_icon};:fork {vp_cmd} set PURE")
@@ -1514,7 +1501,7 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: 
         prefs = policy.read_preferences(home)
     except (OSError, AttributeError, ImportError):
         prefs = {"presentation_mode":"PURE","audio_language_policy":"AUTO","audio_output_mode":"PCM","subtitle_policy":"AUTO"}
-    presentation = "CINÉMA AUTO" if prefs["presentation_mode"] == "CINEMA_AUTO" else "PURE"
+    presentation = "MAGNIFICENCE" if prefs["presentation_mode"] == "CINEMA_AUTO" else "PURE"
     audio = {"AUTO":"AUTO","FR":"FRANÇAIS","DEFAULT":"PISTE PAR DÉFAUT"}[prefs["audio_language_policy"]]
     subtitle = {"AUTO":"AUTO","OFF":"DÉSACTIVÉS","FR_FORCED":"FRANÇAIS FORCÉS","FR_FULL":"FRANÇAIS COMPLETS"}[prefs["subtitle_policy"]]
     root = os.linesep.join((
@@ -1527,7 +1514,7 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: 
     ))
     video = os.linesep.join((
         f"Entry1=PURE;{video_icon};:applyback {setting} presentation_mode PURE",
-        f"Entry2=CINÉMA AUTO;{video_icon};:applyback {setting} presentation_mode CINEMA_AUTO",
+        f"Entry2=MAGNIFICENCE;{video_icon};:applyback {setting} presentation_mode CINEMA_AUTO",
         f"Entry3=RETOUR;{back_icon};:back",
     ))
     audio_menu = os.linesep.join((
@@ -1966,12 +1953,6 @@ Entry1=RETOUR;{icon_back};:back
 [DISQUE]
 BackgroundImage={disc_sheet}
 {disc_menu_entries(optical, install, (media_icon, media_icon, eject_icon, icon_back), home)}
-
-[DVD_VIDEO_MODE]
-BackgroundImage={disc_sheet}
-Entry1=PURE;{playback_icons['video']};:applyback {install/'openhtpc-playback-setting'} presentation_mode PURE
-Entry2=CINÉMA AUTO;{playback_icons['video']};:applyback {install/'openhtpc-playback-setting'} presentation_mode CINEMA_AUTO
-Entry3=RETOUR;{icon_back};:back
 
 {media_sections}
 

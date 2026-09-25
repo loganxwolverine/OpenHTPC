@@ -222,6 +222,40 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         self.assertIn("Arc A310", model["overview"]["gpu"])
         self.assertEqual([g["pci"] for g in model["hardware"]["gpus"] if g["role"] == "GPU actif"], ["0000:03:00.0"])
 
+    def test_n150_magnificence_profile_is_exposed_for_1080p(self):
+        n150 = dict(self.capabilities["graphics"]["devices"][0])
+        n150.update({
+            "pci_address": "0000:00:02.0",
+            "model": "Intel Corporation Alder Lake-N [Intel Graphics]",
+            "device_id": "0x46d4",
+            "kernel_driver": "i915",
+            "memory_type": "shared",
+        })
+        self.capabilities["graphics"]["devices"] = [n150]
+        (self.home / ".config/openhtpc/runtime/capabilities.json").write_text(
+            json.dumps(self.capabilities), encoding="utf-8"
+        )
+        self.gpu_runtime.resolve_display_gpu.return_value = (
+            {"pci_address": "0000:00:02.0", "model": n150["model"]},
+            "RESOLVED",
+        )
+        display = {
+            "active_output": {
+                "connector": "HDMI-A-1",
+                "current_mode": {"width": 1920, "height": 1080, "refresh_hz": 60.0},
+            }
+        }
+        model = sys_model.build(
+            self.home,
+            self.install,
+            self.health,
+            self.version,
+            display_snapshot=display,
+        )
+        self.assertEqual(model["magnificence"]["profile_id"], "intel_n150_8086_46d4_sd_1080p")
+        self.assertEqual(model["magnificence"]["selected_label"], "KrigBilateral")
+        self.assertIn("Réserve GPU", model["magnificence"]["reason_fr"])
+
     def test_validator_exception_and_unavailable_fail_closed(self):
         node = self.dev_root / "dri/renderD129"
         node.parent.mkdir()

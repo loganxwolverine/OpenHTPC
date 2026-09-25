@@ -92,15 +92,17 @@ class OsdAndPreservedPolicy(unittest.TestCase):
 
     def test_auto_pure_osd(self):
         self.assertEqual(policy.osd_text(self.decision("CINEMA_AUTO")),
-            "Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Désactivés")
+            "Mode vidéo : MAGNIFICENCE\nAudio : Français\nSous-titres : Désactivés")
 
-    def test_logs_and_dvd_global_shortcut_remain(self):
+    def test_logs_remain_and_video_mode_has_single_system_entry(self):
         for player in ("openhtpc-play", "openhtpc-play-dvd"):
             source = (PAYLOAD / player).read_text(encoding="utf-8")
             self.assertIn("presentation_requested", source)
             self.assertIn("presentation_resolved", source)
         session_source = (PAYLOAD / "openhtpc-session-engine.py").read_text(encoding="utf-8")
-        self.assertIn(":submenu DVD_VIDEO_MODE", session_source)
+        self.assertNotIn(":submenu DVD_VIDEO_MODE", session_source)
+        self.assertIn("[PLAYBACK_VIDEO]", session_source)
+        self.assertIn("Entry2=MAGNIFICENCE", session_source)
         self.assertIn("presentation_mode CINEMA_AUTO", session_source)
 
     def test_policy_failure_fallback_remains_multiline(self):

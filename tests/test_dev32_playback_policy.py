@@ -119,7 +119,7 @@ class EndToEndContract(unittest.TestCase):
             home=pathlib.Path(value);policy.write_preference(home,"presentation_mode","CINEMA_AUTO")
             result=policy.resolve(home,probe={"streams":[]})
             self.assertEqual((result["presentation"]["requested"],result["presentation"]["resolved"]),("CINEMA_AUTO","PURE"))
-            self.assertIn("Mode vidéo : CINÉMA AUTO",policy.osd_text(result))
+            self.assertIn("Mode vidéo : MAGNIFICENCE",policy.osd_text(result))
 
     def test_real_dispatcher_command_reaches_mpv(self):
         with tempfile.TemporaryDirectory() as value:
@@ -134,7 +134,7 @@ class EndToEndContract(unittest.TestCase):
             env.pop("DISPLAY",None);env.pop("WAYLAND_DISPLAY",None)
             result=subprocess.run([str(PAYLOAD/"openhtpc-play"),str(media)],env=env,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
-            raw_args=arglog.read_text();args=raw_args.splitlines();self.assertIn("--aid=2",args);self.assertIn("--sid=1",args);self.assertIn("--osd-playing-msg=Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Français forcés",raw_args)
+            raw_args=arglog.read_text();args=raw_args.splitlines();self.assertIn("--aid=2",args);self.assertIn("--sid=1",args);self.assertIn("--osd-playing-msg=Mode vidéo : MAGNIFICENCE\nAudio : Français\nSous-titres : Français forcés",raw_args)
             records=[json.loads(line) for line in (home/".local/state/openhtpc/runtime.log").read_text().splitlines()]
             event=next(item for item in records if item["event"]=="PLAYBACK_POLICY");self.assertEqual((event["audio_resolved"],event["subtitle_resolved"]),("AID_2","SID_1"))
 
@@ -143,7 +143,7 @@ class EndToEndContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             root=pathlib.Path(value);home=root/"home";install=root/"install";install.mkdir();shutil.copy2(PAYLOAD/"openhtpc-playback-policy.py",install/"openhtpc-playback-policy.py")
             sections="\n".join(session._playback_policy_sections(home,install,pathlib.Path("icon.png")))
-            for label in ("PURE","CINÉMA AUTO","FRANÇAIS","PISTE PAR DÉFAUT","DÉSACTIVÉS","FRANÇAIS FORCÉS","FRANÇAIS COMPLETS"):
+            for label in ("PURE","MAGNIFICENCE","FRANÇAIS","PISTE PAR DÉFAUT","DÉSACTIVÉS","FRANÇAIS FORCÉS","FRANÇAIS COMPLETS"):
                 self.assertIn(label,sections)
 
     def test_update_and_setup_preserve_preferences(self):

@@ -28,8 +28,8 @@ policy = load("dev34_policy", PAYLOAD / "openhtpc-playback-policy.py")
 class PresentationTruth(unittest.TestCase):
     def test_status_card_ends_before_action_zone(self):
         source = (PAYLOAD / "openhtpc-ui.py").read_text(encoding="utf-8")
-        self.assertIn('card((70, 170, 1780, 360), "LECTURE — PRÉFÉRENCES ACTIVES"', source)
-        self.assertIn('txt((90, 590), "ACTIONS"', source)
+        self.assertIn('card((70, 170, 1780, 500), "LECTURE — PRÉFÉRENCES ACTIVES"', source)
+        self.assertIn('txt((90, 715), "ACTIONS"', source)
         for label in ("Mode vidéo", "Langue audio", "Sous-titres", "Application", "Persistance"):
             self.assertIn(label, source)
 
@@ -69,19 +69,19 @@ class OsdTransport(unittest.TestCase):
 
     def test_multiline_utf8_arrow_and_no_broken_escape(self):
         text = policy.osd_text(self.decision())
-        self.assertEqual(text, "Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Désactivés")
+        self.assertEqual(text, "Mode vidéo : MAGNIFICENCE\nAudio : Français\nSous-titres : Désactivés")
         self.assertNotIn("\\N", text)
         self.assertNotIn("broken escape sequence", text)
 
     def test_apostrophe_and_all_required_labels_remain_plain_utf8(self):
-        samples = ("l'audio Français", "CINÉMA AUTO", "Français", "Désactivés", "Aucun", "Français forcés", "→")
+        samples = ("l'audio Français", "MAGNIFICENCE", "Français", "Désactivés", "Aucun", "Français forcés", "→")
         for sample in samples:
             self.assertEqual(sample.encode("utf-8").decode("utf-8"), sample)
 
     def test_requested_resolved_match_log_and_osd_contract(self):
         auto = self.decision("CINEMA_AUTO")
         pure = self.decision("PURE")
-        self.assertIn("Mode vidéo : CINÉMA AUTO", policy.osd_text(auto))
+        self.assertIn("Mode vidéo : MAGNIFICENCE", policy.osd_text(auto))
         self.assertIn("Mode vidéo : PURE", policy.osd_text(pure))
         source = (PAYLOAD / "openhtpc-play").read_text(encoding="utf-8")
         self.assertIn('presentation_requested=decision["presentation"]["requested"]', source)

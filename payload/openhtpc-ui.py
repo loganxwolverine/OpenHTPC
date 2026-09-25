@@ -541,14 +541,14 @@ def system_page_png(
             badge_text = "PURE (Actif)"
             desc_text = "Image de référence directe, sans traitement vidéo additionnel."
         elif map_present and not map_stale:
-            badge_text = "CINÉMA AUTO (Actif — Prêt)"
+            badge_text = "MAGNIFICENCE (Actif — Prêt)"
             desc_text = "OPENHTPC adapte automatiquement le rendu au matériel et au contenu."
         elif not map_present:
-            badge_text = "CINÉMA AUTO (Configuration requise)"
+            badge_text = "MAGNIFICENCE (Configuration requise)"
             profile_color = "#ffad42"
             desc_text = "Une courte analyse locale du matériel est nécessaire pour activer ce mode."
         else:
-            badge_text = "CINÉMA AUTO (Recalibration requise)"
+            badge_text = "MAGNIFICENCE (Recalibration requise)"
             profile_color = "#ffad42"
             desc_text = "L'affichage ou le matériel a changé ; une recalibration est nécessaire."
 
@@ -601,7 +601,7 @@ def system_page_png(
         draw.line((xy(98), xy(644), xy(900), xy(644)), fill="#12304d", width=1)
 
         # CINEMA AUTO section
-        txt((98, 664), "CINÉMA AUTO (Mode adaptatif)", 20, "#22c7ff" if active_vp == "CINEMA_AUTO" else "#f4f8ff", True)
+        txt((98, 664), "MAGNIFICENCE (Mode adaptatif)", 20, "#22c7ff" if active_vp == "CINEMA_AUTO" else "#f4f8ff", True)
         txt((98, 698), "Choisit automatiquement le rendu le plus qualifié et stable.", 17, "#b8cce0", False)
         txt((98, 728), "Analyse 100% locale, sans terminal ni compte requis.", 16, "#8298b0", False)
 
@@ -627,7 +627,7 @@ def system_page_png(
                 txt((988, 542), "Analyse matérielle", 18, "#93a9c2", False)
                 txt((1220, 540), "Non effectuée", 20, "#ffad42", True)
                 txt((988, 592), "Action requise", 18, "#93a9c2", False)
-                txt((1220, 590), "CONFIGURER CINÉMA AUTO", 20, "#22c7ff", True)
+                txt((1220, 590), "CONFIGURER MAGNIFICENCE", 20, "#22c7ff", True)
                 txt((988, 642), "Durée estimée", 18, "#93a9c2", False)
                 txt((1220, 640), "Quelques dizaines de secondes", 19, "#f4f8ff", False)
         elif map_stale:
@@ -643,7 +643,7 @@ def system_page_png(
             txt((988, 592), "Choix DVD PAL", 18, "#93a9c2", False)
             txt((1220, 590), f"Rendu {decision}", 20, "#22c7ff", True)
             txt((988, 642), "Changer de profil", 18, "#93a9c2", False)
-            next_action = "UTILISER PURE" if active_vp == "CINEMA_AUTO" else "UTILISER CINÉMA AUTO"
+            next_action = "UTILISER PURE" if active_vp == "CINEMA_AUTO" else "UTILISER MAGNIFICENCE"
             txt((1220, 640), f"{next_action} ci-dessous", 19, "#f4f8ff", False)
 
         # Navigation row
@@ -652,18 +652,36 @@ def system_page_png(
         txt((1220, 728), "Entrée : Valider  |  Échap : Retour", 19, "#93a9c2", False)
     elif page == "playback":
         p = model.get("playback_policy", {})
-        presentation = "CINÉMA AUTO" if p.get("presentation_mode") == "CINEMA_AUTO" else "PURE"
+        mag = model.get("magnificence", {})
+        presentation = "MAGNIFICENCE" if p.get("presentation_mode") == "CINEMA_AUTO" else "PURE"
         audio = {"AUTO":"Auto","FR":"Français","DEFAULT":"Piste par défaut"}.get(p.get("audio_language_policy"), "Auto")
         subtitle = {"AUTO":"Auto","OFF":"Désactivés","FR_FORCED":"Français forcés","FR_FULL":"Français complets"}.get(p.get("subtitle_policy"), "Auto")
-        card((70, 170, 1780, 360), "LECTURE — PRÉFÉRENCES ACTIVES", [
-            ("Mode vidéo", presentation, "#78d9ae" if presentation == "PURE" else "#22c7ff"),
-            ("Langue audio", audio, None),
-            ("Sous-titres", subtitle, None),
-            ("Application", "À la prochaine lecture", None),
-            ("Persistance", "Configuration utilisateur", None),
-        ])
-        txt((90, 590), "ACTIONS", 20, "#22c7ff", True)
-        txt((90, 632), "Choisissez un réglage ci-dessous — la zone d’état est actualisée dès votre retour.", 18, "#93a9c2", False)
+        if presentation == "MAGNIFICENCE":
+            treatment = mag.get("selected_label") or "PURE"
+            if mag.get("status") == "NO_PROFILE":
+                treatment = "PURE (repli de sécurité)"
+            rows = [
+                ("Mode vidéo", presentation, "#22c7ff"),
+                ("Matériel", mag.get("gpu") or model.get("overview", {}).get("gpu") or "GPU détecté", None),
+                ("Traitement DVD / SD", treatment, "#22c7ff" if treatment != "PURE (repli de sécurité)" else "#78d9ae"),
+                ("Pourquoi", mag.get("reason_fr") or "Choix automatique selon le matériel et l'affichage.", None),
+                ("Langue audio", audio, None),
+                ("Sous-titres", subtitle, None),
+                ("Application", "À la prochaine lecture", None),
+            ]
+        else:
+            rows = [
+                ("Mode vidéo", "PURE", "#78d9ae"),
+                ("Traitement image", "Aucun shader Magnificence", None),
+                ("Pourquoi", "Restitution sans amélioration volontaire", None),
+                ("Langue audio", audio, None),
+                ("Sous-titres", subtitle, None),
+                ("Application", "À la prochaine lecture", None),
+                ("Persistance", "Configuration utilisateur", None),
+            ]
+        card((70, 170, 1780, 500), "LECTURE — PRÉFÉRENCES ACTIVES", rows)
+        txt((90, 715), "ACTIONS", 20, "#22c7ff", True)
+        txt((90, 755), "PURE ou MAGNIFICENCE se règle uniquement ici — OPENHTPC adapte ensuite le traitement automatiquement.", 18, "#93a9c2", False)
     elif page == "about":
         version = model.get("technical", {}).get("version", "1.1.2-dev1")
         card(

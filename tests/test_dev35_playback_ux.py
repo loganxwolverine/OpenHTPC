@@ -70,7 +70,7 @@ class EffectiveOsd(unittest.TestCase):
 
     def test_auto_and_pure_show_policy_and_effective_mode(self):
         expected = {
-            "CINEMA_AUTO": "Mode vidéo : CINÉMA AUTO\nAudio : Auto\nSous-titres : Désactivés",
+            "CINEMA_AUTO": "Mode vidéo : MAGNIFICENCE\nAudio : Auto\nSous-titres : Désactivés",
             "PURE": "Mode vidéo : PURE\nAudio : Auto\nSous-titres : Désactivés",
         }
         for requested in ("CINEMA_AUTO", "PURE"):
@@ -87,8 +87,8 @@ class EffectiveOsd(unittest.TestCase):
             self.assertIn("presentation_resolved", source)
 
 
-class DvdGlobalShortcut(unittest.TestCase):
-    def test_dvd_reads_current_global_presentation_mode(self):
+class VideoModeSingleEntryPoint(unittest.TestCase):
+    def test_dvd_menu_does_not_expose_video_mode(self):
         with tempfile.TemporaryDirectory() as value:
             home = pathlib.Path(value); install = pathlib.Path(value) / "install"
             (install / "assets/ui").mkdir(parents=True)
@@ -98,23 +98,23 @@ class DvdGlobalShortcut(unittest.TestCase):
             icons = tuple(pathlib.Path(f"i{i}.png") for i in range(4))
             menu = session.disc_menu_entries(optical, install, icons, home)
             self.assertIn("LIRE LE DVD", menu)
-            self.assertIn("MODE VIDÉO : CINÉMA AUTO", menu)
-            self.assertLess(menu.index("LIRE LE DVD"), menu.index("MODE VIDÉO"))
-            self.assertIn(":submenu DVD_VIDEO_MODE", menu)
+            self.assertNotIn("MODE VIDÉO", menu)
+            self.assertNotIn("DVD_VIDEO_MODE", menu)
 
-    def test_dvd_change_updates_same_config_and_derived_label(self):
+    def test_global_setting_does_not_recreate_dvd_shortcut(self):
         with tempfile.TemporaryDirectory() as value:
             home = pathlib.Path(value); config = home / ".config/openhtpc"; config.mkdir(parents=True)
             flex = config / "flex-v1.ini"
-            flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=MODE VIDÉO : CINÉMA AUTO;i;:submenu DVD_VIDEO_MODE\nEntry3=RETOUR;i;:back\n", encoding="utf-8")
+            flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=RETOUR;i;:back\n", encoding="utf-8")
             env = {**os.environ, "HOME":str(home), "OPENHTPC_HOME":str(home), "OPENHTPC_INSTALL_DIR":str(PAYLOAD)}
             env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
             subprocess.run([str(PAYLOAD / "openhtpc-playback-setting"), "presentation_mode", "PURE"], env=env, check=True)
             self.assertEqual(policy.read_preferences(home)["presentation_mode"], "PURE")
-            self.assertIn("MODE VIDÉO : PURE", flex.read_text(encoding="utf-8"))
             subprocess.run([str(PAYLOAD / "openhtpc-playback-setting"), "presentation_mode", "CINEMA_AUTO"], env=env, check=True)
             self.assertEqual(policy.read_preferences(home)["presentation_mode"], "CINEMA_AUTO")
-            self.assertIn("MODE VIDÉO : CINÉMA AUTO", flex.read_text(encoding="utf-8"))
+            text = flex.read_text(encoding="utf-8")
+            self.assertNotIn("MODE VIDÉO", text)
+            self.assertNotIn("DVD_VIDEO_MODE", text)
 
     def test_audio_and_subtitle_parent_render_refresh_without_display_probe(self):
         with tempfile.TemporaryDirectory() as value:

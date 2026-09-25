@@ -47,7 +47,7 @@ def refresh_dvd_mode_label(home: pathlib.Path, value: str) -> None:
         lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
     except OSError:
         return
-    label = "CINÉMA AUTO" if value == "CINEMA_AUTO" else "PURE"
+    label = "MAGNIFICENCE" if value == "CINEMA_AUTO" else "PURE"
     section = ""
     changed = False
     for index, line in enumerate(lines):

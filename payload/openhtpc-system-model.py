@@ -164,6 +164,14 @@ def normalize_pci_address(value: Any) -> str | None:
     return f"{domain:04x}:{bus:02x}:{dev:02x}.{fn:x}".lower()
 
 
+def normalize_device_id(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = value.strip().lower().replace("0x", "")
+    match = re.search(r"([0-9a-f]{4})$", compact)
+    return match.group(1) if match else None
+
+
 def clean_gpu_display_name(raw: Any) -> str:
     if not isinstance(raw, str) or not raw.strip():
         return "Indéterminé"
@@ -735,6 +743,49 @@ def build(
         "decision": decision_human,
         "cal_ui_status": cal_ui_status,
     }
+
+    # Magnificence profile explanation: same hardware/output database used for
+    # automatic image treatment selection.  Never probe here; consume the
+    # already-normalized SYSTÈME model only.
+    magnificence = {
+        "profile_id": None,
+        "status": "NO_PROFILE",
+        "selected_recipe": "RECIPE_0_PURE",
+        "selected_label": "PURE",
+        "reason_fr": "Aucun profil Magnificence qualifié pour cette combinaison matériel / affichage.",
+    }
+    try:
+        active_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
+        active_device_id = normalize_device_id(active_gpu.get("device_id"))
+        active_resolution = (
+            f"{mode.get('width')}x{mode.get('height')}"
+            if mode.get("width") and mode.get("height")
+            else None
+        )
+        db = read_json(install / "assets/magnificence_profiles.json")
+        for profile_id, profile_data in db.get("profiles", {}).items():
+            profile_gpu = profile_data.get("gpu", {})
+            profile_display = profile_data.get("display_scope", {})
+            profile_device_id = normalize_device_id(profile_gpu.get("pci_id"))
+            if active_device_id != profile_device_id:
+                continue
+            if active_resolution != profile_display.get("resolution"):
+                continue
+            mag = profile_data.get("magnificence", {})
+            magnificence = {
+                "profile_id": profile_id,
+                "status": mag.get("status", "UNKNOWN"),
+                "selected_recipe": mag.get("selected_recipe", "RECIPE_0_PURE"),
+                "selected_label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
+                "reason_fr": mag.get("ui_reason_fr", "Profil sélectionné automatiquement selon le matériel et l'affichage."),
+                "gpu": clean_gpu_display_name(profile_gpu.get("model")),
+                "display": profile_display.get("resolution"),
+                "source_class": profile_data.get("source_scope", {}).get("class"),
+            }
+            break
+    except Exception:
+        pass
+    result["magnificence"] = magnificence
     # Also update top-level profile key to reflect actual active C4 profile
     result["profile"] = active_profile
     # Update processing section
