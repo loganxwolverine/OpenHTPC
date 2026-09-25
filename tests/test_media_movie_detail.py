@@ -327,8 +327,8 @@ def test_unidentified_view_contains_only_db_unmatched_with_raw_titles(env):
     assert any("À identifier — 2" in row and ":submenu MEDIA_UNMATCHED" in row for row in root)
     assert unidentified[0].endswith(";:back")
     assert len(unidentified) == 3
-    assert any("Raw.Unmatched.Release  ·  MKV" in row for row in unidentified[1:])
-    assert any("Another.Raw.File  ·  AVI" in row for row in unidentified[1:])
+    assert any("À rechercher  ·  Raw.Unmatched.Release" in row for row in unidentified[1:])
+    assert any("À rechercher  ·  Another.Raw.File" in row for row in unidentified[1:])
     assert all("Presented Matched" not in row and "Canonical User" not in row
                and "Stale Foreign Work" not in row and "Unrelated Work" not in row
                for row in unidentified)
@@ -366,7 +366,7 @@ def test_media_root_exposes_authoritative_library_summary(env):
     )
 
 
-def test_unidentified_rows_explain_candidate_state_and_offer_direct_context_action(env):
+def test_unidentified_rows_explain_candidate_state_concisely(env):
     _seed_movie(env, filename="Suggested.Movie.mkv", work_id=1, state="UNMATCHED")
     _seed_movie(env, filename="Manual.Movie.mkv", work_id=2, external_id="2002", state="UNMATCHED")
     with closing(media_db.connect(env["db_file"])) as db:
@@ -387,13 +387,13 @@ def test_unidentified_rows_explain_candidate_state_and_offer_direct_context_acti
     rows = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     suggested = next(row for row in rows if "Suggested.Movie" in row)
     manual = next(row for row in rows if "Manual.Movie" in row)
-    assert "1 proposition  ·  Suggested.Movie  ·  MKV" in suggested
-    assert "Recherche manuelle  ·  Manual.Movie  ·  MKV" in manual
+    assert "1 proposition  ·  Suggested.Movie" in suggested
+    assert "À rechercher  ·  Manual.Movie" in manual
     assert "IDENTIFIER LE FILM" not in suggested
     assert "IDENTIFIER LE FILM" not in manual
 
 
-def test_unidentified_long_row_preserves_media_type_and_review_hint(env):
+def test_unidentified_long_row_preserves_review_hint_and_title_budget(env):
     filename = ("Very.Long.Release.Name." * 8) + "mkv"
     _seed_movie(env, filename=filename, work_id=1, state="UNMATCHED")
 
@@ -404,8 +404,8 @@ def test_unidentified_long_row_preserves_media_type_and_review_hint(env):
         line for line in _get_section_lines(sections, "[MEDIA_UNMATCHED]")
         if ":submenu MEDIA_D" in line
     )
-    assert "Recherche manuelle  ·  " in row
-    assert row.index("Recherche manuelle") < row.index("  ·  MKV")
+    assert "À rechercher  ·  " in row
+    assert "MKV" not in row
     assert len(row.encode("utf-8")) <= 198
 
 
@@ -431,7 +431,7 @@ def test_unidentified_view_includes_item_beyond_normal_depth(env):
     assert "À identifier — 1" in sections
     unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     assert len(unidentified) == 2
-    assert "Deep.Raw.Release  ·  MKV" in unidentified[1]
+    assert "À rechercher  ·  Deep.Raw.Release" in unidentified[1]
     detail_id = unidentified[1].split(";:submenu ", 1)[1].split(";", 1)[0]
     assert _get_section_lines(sections, f"[{detail_id}]")
     manifest = json.loads(session_engine.current_media_manifest(env["home"]).read_text())
@@ -439,7 +439,7 @@ def test_unidentified_view_includes_item_beyond_normal_depth(env):
                and item.get("page_id") == detail_id
                and item.get("parent_page_id") == "MEDIA_UNMATCHED"
                for item in manifest["items"].values())
-    assert "Deep.Raw.Release  ·  MKV" not in "\n".join(
+    assert "À rechercher  ·  Deep.Raw.Release" not in "\n".join(
         row for row in sections.splitlines() if row != unidentified[1]
     )
 
@@ -456,8 +456,8 @@ def test_unidentified_view_includes_item_beyond_64_directories(env):
     assert "À identifier — 1" in sections
     unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     assert len(unidentified) == 2
-    assert "Beyond.Limit  ·  MKV" in unidentified[1]
-    assert "Beyond.Limit  ·  MKV" not in "\n".join(
+    assert "À rechercher  ·  Beyond.Limit" in unidentified[1]
+    assert "À rechercher  ·  Beyond.Limit" not in "\n".join(
         row for row in sections.splitlines() if row != unidentified[1]
     )
 
@@ -475,7 +475,7 @@ def test_unidentified_view_exposes_all_63_versions(env):
     assert len(unidentified) == 64
     assert sum(":submenu MEDIA_D" in row for row in unidentified) == 63
     for work_id in range(1, 64):
-        assert sum(f"Raw.Release.{work_id:03}  ·  MKV" in row for row in unidentified) == 1
+        assert sum(f"À rechercher  ·  Raw.Release.{work_id:03}" in row for row in unidentified) == 1
 
 
 def test_unidentified_view_excludes_missing_unknown_and_absent_resources(env):

@@ -1119,9 +1119,9 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         elif candidate_count > 1:
             hint = f"{candidate_count} propositions"
         else:
-            hint = "Recherche manuelle"
+            hint = "À rechercher"
         unmatched_entries.append((
-            f"{hint}  ·  {title}  ·  {ext[1:].upper()}",
+            f"{hint}  ·  {title}",
             entry_icon,
             f":submenu {detail_menu}",
         ))
