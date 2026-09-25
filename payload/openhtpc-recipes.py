@@ -20,13 +20,39 @@ RECIPES_STATE_PATH = STATE_DIR / "video_recipes.json"
 
 UPSTREAM_COMMIT = "e2bfe0ccd7eb7b404f9262365bed88771f69a291"
 
+def detect_active_output() -> dict:
+    """Return the active KDE output recorded by KWin, with safe unknown fallback."""
+    result = {
+        "resolution": "UNKNOWN",
+        "refresh_rate_hz": None,
+        "bit_depth": None,
+        "connector": "UNKNOWN",
+    }
+    try:
+        cfg = pathlib.Path.home() / ".config" / "kwinoutputconfig.json"
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        for block in data if isinstance(data, list) else []:
+            for output in block.get("data", []) if isinstance(block, dict) else []:
+                mode = output.get("mode") if isinstance(output, dict) else None
+                if isinstance(mode, dict) and mode.get("width") and mode.get("height"):
+                    width = int(mode["width"])
+                    height = int(mode["height"])
+                    refresh = mode.get("refreshRate")
+                    result["resolution"] = f"{width}x{height}"
+                    result["refresh_rate_hz"] = round(float(refresh) / 1000.0, 3) if refresh else None
+                    result["connector"] = output.get("connectorName", "UNKNOWN")
+                    return result
+    except Exception:
+        pass
+    return result
+
 DVD_PAL_RECIPES = [
     {
         "recipe_id": "RECIPE_0_PURE",
         "recipe_version": "1.0",
         "name": "PURE Baseline",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": [],
         "runtime_options": {},
         "description": "Immutable PURE comparison baseline (gpu-next native scaling + dithering)",
@@ -37,7 +63,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "CfL Prediction Lite",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["CfL_Prediction_Lite.glsl"],
         "runtime_options": {},
         "description": "Chroma-from-Luma prediction for DVD 4:2:0 color reconstruction",
@@ -48,7 +74,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "KrigBilateral Chroma",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["KrigBilateral.glsl"],
         "runtime_options": {},
         "description": "Luma-guided bilateral filter chroma upsampler",
@@ -59,7 +85,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "RAVU Lite AR r4",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["ravu-lite-ar-r4.hook"],
         "runtime_options": {},
         "description": "Fast 2x neural luma prescaler with anti-ringing heuristics",
@@ -70,7 +96,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "FSRCNNX 8-0-4-1",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["FSRCNNX_x2_8-0-4-1.glsl"],
         "runtime_options": {},
         "description": "8-feature convolutional neural network 2x prescaler",
@@ -81,7 +107,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "ArtCNN C4F16",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["ArtCNN_C4F16.glsl"],
         "runtime_options": {},
         "description": "Modern 4-layer 16-feature CNN upscaler for natural edge restoration",
@@ -92,7 +118,7 @@ DVD_PAL_RECIPES = [
         "recipe_version": "1.0",
         "name": "FSRCNNX 16-0-4-1",
         "source_class": "DVD_PAL_CLASS",
-        "output_class": "UHD_4K60",
+        "output_class": "ACTIVE_DISPLAY",
         "ordered_shaders": ["FSRCNNX_x2_16-0-4-1.glsl"],
         "runtime_options": {},
         "description": "Heavy 16-feature CNN 2x prescaler (computational ceiling stress-test)",
@@ -382,6 +408,15 @@ def execute_all_dvd_recipes(repeats: int = 3, dry_run: bool = False) -> dict:
 
     catalog = load_shader_catalog()
 
+    active_output = detect_active_output()
+    resolution = active_output.get("resolution", "UNKNOWN")
+    width = height = None
+    if "x" in resolution:
+        try:
+            width, height = (int(v) for v in resolution.split("x", 1))
+        except ValueError:
+            pass
+
     result = {
         "schema_version": 2,
         "catalog_version": "v1.1.0",
@@ -391,15 +426,11 @@ def execute_all_dvd_recipes(repeats: int = 3, dry_run: bool = False) -> dict:
         "source_class": "DVD_PAL_CLASS",
         "render_target": {
             "mode": "FULLSCREEN",
-            "width": 3840,
-            "height": 2160,
-            "surface_geometry": "3840x2160"
+            "width": width,
+            "height": height,
+            "surface_geometry": resolution
         },
-        "output_signature": {
-            "resolution": "3840x2160",
-            "refresh_rate_hz": 60.0,
-            "bit_depth": 10
-        },
+        "output_signature": active_output,
         "recipes": []
     }
 

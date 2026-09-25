@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "policy": "PURE_OR_MAGNIFICENCE",
+  "profiles": {
+    "intel_n150_8086_46d4_sd_1080p": {
+      "gpu": {
+        "vendor": "Intel",
+        "model": "Intel Processor N150 Graphics",
+        "pci_id": "8086:46d4",
+        "execution_units": 24,
+        "max_dynamic_frequency_mhz": 1000
+      },
+      "reference_platform": "ZimaBoard 2",
+      "software": {
+        "os": "Fedora 44",
+        "kernel": "7.2.7-200.fc44.x86_64",
+        "mesa": "26.2.3-1.fc44",
+        "session": "KDE/Wayland"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "1920x1080",
+        "refresh_hz": 60.0
+      },
+      "measurement": {
+        "date": "2026-09-25",
+        "repeats": 1,
+        "recipes": {
+          "RECIPE_0_PURE": {
+            "p95_ms": 12.78,
+            "relative_to_pure": 1.0,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_CFL_LITE": {
+            "p95_ms": 14.16,
+            "relative_to_pure": 1.108,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_KRIG_BILATERAL": {
+            "p95_ms": 13.565,
+            "relative_to_pure": 1.061,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_RAVU_LITE": {
+            "p95_ms": 15.746,
+            "relative_to_pure": 1.232,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_8": {
+            "p95_ms": 23.947,
+            "relative_to_pure": 1.874,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_ARTCNN_C4F16": {
+            "p95_ms": 1116.327,
+            "relative_to_pure": 87.35,
+            "technical_verdict": "TECH_FAIL_DROPS",
+            "vo_drops": 13,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_16": {
+            "p95_ms": 111.727,
+            "relative_to_pure": 8.742,
+            "technical_verdict": "TECH_FAIL_DROPS",
+            "vo_drops": 204,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          }
+        }
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_C2_DVD_KRIG_BILATERAL",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "TECHNICALLY_MEASURED_PROVISIONAL",
+        "reason": "KrigBilateral is the lowest-cost shader retained from the prior C2 visual set on this N150 measurement; FSRCNNX-8 leaves substantially less reserve.",
+        "visual_basis": "C2 prior visual qualification; 1080p-specific visual confirmation still pending"
+      },
+      "reference_sources": {
+        "intel_spec": "https://www.intel.com/content/www/us/en/products/sku/241636/intel-processor-n150-6m-cache-up-to-3-60-ghz/specifications.html",
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
+    }
+  }
+}
