@@ -37,11 +37,23 @@ update = load("p1b_update", "openhtpc-media-library-update")
 control = load("p1b_control", "openhtpc-media-update-control.py")
 
 
-def test_media_entry_is_unconditional_and_uses_short_helper(tmp_path):
-    engine = load("p1b_menu_engine", "openhtpc-session-engine.py")
+def test_media_entry_guides_empty_configuration_before_update(tmp_path):
+    engine = load("p1b_menu_engine_empty", "openhtpc-session-engine.py")
     _root, sections = engine.media_menu_sections(tmp_path, [], tmp_path / "icon")
     root = sections.split("\n\n", 1)[0]
-    assert "Entry1=METTRE À JOUR LA MÉDIATHÈQUE" in root
+    assert "Entry1=+ AJOUTER UNE SOURCE MÉDIA" in root
+    assert "METTRE À JOUR LA MÉDIATHÈQUE" not in root
+    assert "ANALYSER MES MÉDIAS" not in root
+    assert "openhtpc-media-update-request" not in root
+
+
+def test_first_scan_entry_uses_short_helper_when_source_exists(tmp_path):
+    engine = load("p1b_menu_engine_first_scan", "openhtpc-session-engine.py")
+    source = tmp_path / "Movies"
+    source.mkdir()
+    _root, sections = engine.media_menu_sections(tmp_path, [source], tmp_path / "icon")
+    root = sections.split("\n\n", 1)[0]
+    assert "Entry1=ANALYSER MES MÉDIAS" in root
     assert ":fork " + str(tmp_path / ".local/lib/openhtpc/openhtpc-media-update-request") in root
     assert "openhtpc-media-library-update" not in root
 

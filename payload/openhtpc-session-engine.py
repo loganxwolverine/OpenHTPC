@@ -1011,18 +1011,19 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         sections.append(f"[{name}]\n{body}")
         return name
 
-    roots = [("METTRE À JOUR LA MÉDIATHÈQUE", icon,
-              f":fork {install / 'openhtpc-media-update-request'}")]
-    if library_summary is not None and library_summary[0] > 0:
-        total, identified, review = library_summary
-        roots.append((
-            f"MÉDIATHÈQUE — {total} médias · {identified} identifiés · {review} à vérifier",
-            icon,
-            ":fork true",
-        ))
+    has_indexed_media = library_summary is not None and library_summary[0] > 0
     if not sources:
-        roots.append(("+ AJOUTER UNE SOURCE MÉDIA", add_icon, f"{picker_bin}"))
+        roots = [("+ AJOUTER UNE SOURCE MÉDIA", add_icon, f"{picker_bin}")]
     else:
+        update_label = "METTRE À JOUR LA MÉDIATHÈQUE" if has_indexed_media else "ANALYSER MES MÉDIAS"
+        roots = [(update_label, icon, f":fork {install / 'openhtpc-media-update-request'}")]
+        if has_indexed_media:
+            total, identified, review = library_summary
+            roots.append((
+                f"MÉDIATHÈQUE — {total} médias · {identified} identifiés · {review} à vérifier",
+                icon,
+                ":fork true",
+            ))
         for source in sources:
             try:canonical=source.resolve(strict=True)
             except OSError:canonical=None

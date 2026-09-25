@@ -360,6 +360,8 @@ def test_media_root_exposes_authoritative_library_summary(env):
         env["home"], [env["sources_dir"]], env["media_icon"],
     )
     root = _get_section_lines(sections, "[MEDIA_ROOT]")
+    assert any("METTRE À JOUR LA MÉDIATHÈQUE" in row for row in root)
+    assert all("ANALYSER MES MÉDIAS" not in row for row in root)
     assert any(
         "MÉDIATHÈQUE — 3 médias · 2 identifiés · 1 à vérifier" in row
         for row in root
