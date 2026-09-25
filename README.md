@@ -6,10 +6,10 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.2.0 RC8
+# OPENHTPC 1.2.0 RC9
 
-Version: `1.2.0-rc8`
-Build: `public-release-1.2.0-rc8`
+Version: `1.2.0-rc9`
+Build: `public-release-1.2.0-rc9`
 Status: **Release Candidate / prerelease — reference physical validation PASS**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
@@ -25,23 +25,25 @@ effective PipeWire IEC958 SPA parameter verification, and RC6 recovered MEDIA
 bitstream passthrough by sharing dynamic PipeWire IEC958 sink preparation with
 local media playback. RC7 added automatic frame-rate matching, dynamic display
 settings synchronization, and protected optical / local playback display resync
-audio stability. RC8 introduces the Media Foundation persistent database,
+audio stability. RC8 introduced the Media Foundation persistent database,
 normalized media probe, living-room movie matcher and resolver, cached poster
 rendering, asynchronous library/identity/TMDb operations with live activity
-feedback, and Unicode/CJK fallback rendering while preserving Open Sans as the
-primary interface font.
+feedback, and Unicode/CJK fallback rendering. RC9 keeps that foundation intact
+and focuses on couch usability: an authoritative library summary, clearer
+unidentified-media review, mounted NAS/network source discovery, and contextual
+first-use guidance from source selection through the first media analysis.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.2.0-RC8.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0-RC9.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.2.0-RC8.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.2.0-RC9.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -65,7 +67,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted RC8 directory:
+From the extracted RC9 directory:
 
 ```bash
 ./update.sh
@@ -131,7 +133,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [RC8 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC8-FR-EN.md),
+See [RC9 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC9-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).

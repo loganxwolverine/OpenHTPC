@@ -12,7 +12,7 @@ TOOL = ROOT / "tools/openhtpc_release_metadata.py"
 SPEC = importlib.util.spec_from_file_location("release_metadata", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC); assert SPEC.loader; SPEC.loader.exec_module(MODULE)
 BUILD_ID = "amd-codec-release-metadata-consistency-dev5"
-CURRENT_BUILD_ID = "public-release-1.2.0-rc8"
+CURRENT_BUILD_ID = "public-release-1.2.0-rc9"
 
 
 def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
@@ -70,7 +70,7 @@ class ReleaseMetadataConsistency(unittest.TestCase):
 
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
-        self.assertEqual(values["top_version"], "1.2.0-rc8")
+        self.assertEqual(values["top_version"], "1.2.0-rc9")
 
     def test_current_distribution_readme_matches_release_identity(self):
         version = MODULE.canonical_version(ROOT)
@@ -133,6 +133,25 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         self.assertIn('for marker in ("LiveActivityState", "FallbackFont")', builder)
         self.assertIn("devctl._verify_artifact(archive)", builder)
         self.assertNotIn("for path in files():", builder)
+
+    def test_1_2_0_rc9_builder_records_completed_reference_qualification(self):
+        builder = (ROOT / "tools/build-1.2.0-rc9.py").read_text(encoding="utf-8")
+        self.assertIn('BUILD = "public-release-1.2.0-rc9"', builder)
+        self.assertIn('"physical_qualification": "PASS_REFERENCE_BENCH"', builder)
+        self.assertIn('"human_physical_validation_required": False', builder)
+        self.assertIn('"media_ux": "LIBRARY_SUMMARY_UNMATCHED_REVIEW_SOURCE_DISCOVERY_FIRST_USE"', builder)
+        self.assertIn('"regression_vs_rc8": "NO_NEW_FAILURES_2164_PASS_2_SKIP_16_BASELINE_FAILURES"', builder)
+
+    def test_1_2_0_rc9_builder_rebuilds_flex_and_fails_closed_on_rc9_ux(self):
+        builder = (ROOT / "tools/build-1.2.0-rc9.py").read_text(encoding="utf-8")
+        self.assertIn("devctl._export_commit(commit, staging, scratch)", builder)
+        self.assertIn("devctl._build_flex(flex_source", builder)
+        self.assertIn('"source_commit": commit', builder)
+        self.assertIn('"MÉDIATHÈQUE —"', builder)
+        self.assertIn('"À rechercher"', builder)
+        self.assertIn('"ANALYSER MES MÉDIAS"', builder)
+        self.assertIn('"NAS / RÉSEAU"', builder)
+        self.assertIn("devctl._verify_artifact(archive)", builder)
 
 
 if __name__ == "__main__":

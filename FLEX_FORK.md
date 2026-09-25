@@ -1,7 +1,7 @@
 # Flex Launcher provenance
 
 The tracked `payload/flex/bin/flex-launcher` is a historical repository
-payload. It is not authoritative for new RC8 artifact builds. Its tracked
+payload. It is not authoritative for new RC9 artifact builds. Its tracked
 `BUILD-METADATA.json` is also historical and is not artifact provenance.
 
 - Upstream: `complexlogic/flex-launcher`
@@ -25,7 +25,7 @@ retained; stale or removed MEDIA sections cannot remain selectable.
 Flex Launcher is distributed under The Unlicense. NanoSVG/NanoSVGRast notices
 for code incorporated into the binary are provided separately.
 
-The active RC8 `openhtpc-devctl build` path exports the exact Git commit,
+The active RC9 public builder path exports the exact Git commit,
 compiles Flex from that exported vendor source in a fresh temporary directory,
 and replaces the staging copy of the executable. It generates staged
 `payload/flex/BUILD-METADATA.json` from that exact staged ELF and source,

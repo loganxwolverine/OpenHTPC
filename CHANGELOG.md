@@ -1,5 +1,17 @@
 # Changelog
 
+# OPENHTPC 1.2.0 Release Candidate 9 — 1.2.0-rc9
+
+- Adds an authoritative couch-visible library summary with total, identified and review-needed counts.
+- Makes successful library updates report useful found / identified / to-review counts in the live activity banner.
+- Clarifies the `À identifier` queue with compact `À rechercher`, `1 proposition` and `N propositions` states.
+- Exposes already-mounted CIFS/SMB, NFS and SSHFS sources as `NAS / RÉSEAU` without taking ownership of the mount.
+- Correctly recognizes real network filesystems hidden behind systemd autofs mountpoints.
+- Guides first use contextually: add a media source first, then `ANALYSER MES MÉDIAS`, then normal library updates.
+- Preserves the RC8 Media Foundation, asynchronous TMDb workflows, Unicode/CJK fallback and playback stack.
+- Validated on Fedora 44 KDE Plasma/Wayland with Intel Core i5-6500, Intel Arc A310 and Denon AVR-X1800H.
+- Full current-tree regression introduces no new failure versus the frozen RC8 baseline: 2164 passed, 2 skipped, and the same 16 historical boundary-contract failures already present on RC8.
+
 # OPENHTPC 1.2.0 Release Candidate 8 — 1.2.0-rc8
 
 - Implements Media Foundation persistent SQLite database with schema v3 and transactional consistency.

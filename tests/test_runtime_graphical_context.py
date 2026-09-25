@@ -293,7 +293,7 @@ class TestRuntimeGraphicalContext(unittest.TestCase):
         db_mod = _load_module("openhtpc_media_db_test", PAYLOAD / "openhtpc-media-db.py")
         self.assertEqual(db_mod.SCHEMA_VERSION, 4)
         version_text = (ROOT / "VERSION").read_text().strip()
-        self.assertEqual(version_text, "1.2.0-rc8")
+        self.assertEqual(version_text, "1.2.0-rc9")
 
         import contextlib
         db_path = self.home / "media.db"
