@@ -85,3 +85,11 @@ def test_pure_never_adds_magnificence_shader():
         assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
     finally:
         temp.cleanup()
+
+
+def test_magnificence_database_is_installed():
+    installer = (PAYLOAD / "install-openhtpc-fedora.sh").read_text(encoding="utf-8")
+    manifest = (PAYLOAD / "managed-files.txt").read_text(encoding="utf-8")
+    assert 'assets/magnificence_profiles.json' in manifest
+    assert 'assets/magnificence_profiles.json' in installer
+    assert '$INSTALL_DIR/assets/magnificence_profiles.json' in installer

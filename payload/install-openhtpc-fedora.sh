@@ -623,6 +623,9 @@ done
 if [[ -f "$SCRIPT_DIR/assets/c3_calibration_catalog.json" ]]; then
     install -Dm 0644 "$SCRIPT_DIR/assets/c3_calibration_catalog.json" "$INSTALL_DIR/assets/c3_calibration_catalog.json"
 fi
+if [[ -f "$SCRIPT_DIR/assets/magnificence_profiles.json" ]]; then
+    install -Dm 0644 "$SCRIPT_DIR/assets/magnificence_profiles.json" "$INSTALL_DIR/assets/magnificence_profiles.json"
+fi
 install -m 0644 "$SCRIPT_DIR/managed-files.txt" "$INSTALL_DIR/.openhtpc-managed-files"
 
 
