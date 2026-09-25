@@ -110,13 +110,14 @@ class Rc7KdeLauncherIntegrationTest(unittest.TestCase):
         # Also verify autostart desktop entry
         autostart_path = self.autostart_dir / "openhtpc.desktop"
         autostart_raw = autostart_path.read_text(encoding="utf-8")
-        self.assertIn("Exec=openhtpc start\n", autostart_raw)
+        expected_autostart_exec = f"{self.bin_dir / 'openhtpc'} start"
+        self.assertIn(f"Exec={expected_autostart_exec}\n", autostart_raw)
         auto_parser = configparser.ConfigParser(interpolation=None)
         auto_parser.read_string(autostart_raw)
         auto_entry = auto_parser["Desktop Entry"]
         self.assertEqual(auto_entry.get("Type"), "Application")
         self.assertEqual(auto_entry.get("Name"), "OPENHTPC Basic")
-        self.assertEqual(auto_entry.get("Exec"), "openhtpc start")
+        self.assertEqual(auto_entry.get("Exec"), expected_autostart_exec)
         self.assertEqual(auto_entry.get("Terminal"), "false")
         self.assertEqual(auto_entry.get("X-KDE-autostart-after"), "panel")
         self.assertEqual(auto_entry.get("X-OPENHTPC-Managed"), "true")
@@ -343,6 +344,26 @@ raise SystemExit(0)
         result = self._run_installer(self.home)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.home / ".local/share/applications/openhtpc.desktop").is_file())
+
+    def test_14_systemd_generator_accepts_autostart_without_local_bin_in_path(self):
+        generator = pathlib.Path("/usr/lib/systemd/user-generators/systemd-xdg-autostart-generator")
+        if not generator.is_file():
+            self.skipTest("systemd-xdg-autostart-generator unavailable")
+        result = self._run_installer(self.home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        normal, early, late = (self.root / name for name in ("gen", "early", "late"))
+        for directory in (normal, early, late):
+            directory.mkdir()
+        env = {**os.environ, "HOME": str(self.home),
+               "XDG_CONFIG_HOME": str(self.home / ".config"), "PATH": "/usr/bin:/bin"}
+        generated = subprocess.run(
+            [str(generator), str(normal), str(early), str(late)],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        unit = late / "app-openhtpc@autostart.service"
+        self.assertTrue(unit.is_file(), generated.stderr)
+        self.assertNotIn("Exec binary 'openhtpc' does not exist", generated.stderr)
 
 
 if __name__ == "__main__":

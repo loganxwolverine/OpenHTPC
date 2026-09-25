@@ -637,7 +637,7 @@ cat >"$AUTOSTART_PATH" <<EOF
 [Desktop Entry]
 Type=Application
 Name=OPENHTPC Basic
-Exec=openhtpc start
+Exec=${OPENHTPC_COMMAND_PATH} start
 Terminal=false
 X-KDE-autostart-after=panel
 X-OPENHTPC-Managed=true
