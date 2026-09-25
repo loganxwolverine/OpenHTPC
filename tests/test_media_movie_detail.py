@@ -351,6 +351,21 @@ def test_unidentified_view_contains_only_db_unmatched_with_raw_titles(env):
         ).fetchall() == resources_before
 
 
+def test_media_root_exposes_authoritative_library_summary(env):
+    _seed_movie(env, filename="Auto.mkv", work_id=1, state="AUTO_MATCHED")
+    _seed_movie(env, filename="User.mkv", work_id=2, external_id="2002", state="USER_MATCHED")
+    _seed_movie(env, filename="Review.mkv", work_id=3, external_id="3003", state="UNMATCHED")
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    root = _get_section_lines(sections, "[MEDIA_ROOT]")
+    assert any(
+        "MÉDIATHÈQUE — 3 médias · 2 identifiés · 1 à vérifier" in row
+        for row in root
+    )
+
+
 def test_unidentified_entry_absent_when_no_db_unmatched(env):
     _seed_movie(env, state="AUTO_MATCHED")
     _root, sections = session_engine.media_menu_sections(

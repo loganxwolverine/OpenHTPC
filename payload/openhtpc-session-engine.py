@@ -694,6 +694,15 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     media_db_path = home / ".local/share/openhtpc/media/media.db"
     identity_map: dict[tuple[str, str], dict[str, Any]] = {}
     work_posters: dict[int, pathlib.Path] = {}
+    library_summary: tuple[int, int, int] | None = None
+    configured_source_ids: set[str] = set()
+    for source in sources:
+        try:
+            canonical_source = source.resolve(strict=True)
+        except OSError:
+            continue
+        if canonical_source.is_dir():
+            configured_source_ids.add(media_source_id(canonical_source))
     if media_db_path.is_file():
         pres_map: dict[int, dict[str, Any]] = {}
         try:
@@ -721,6 +730,31 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "original_title": r[8],
                         "candidate_count": r[9] or 0,
                     }
+
+                if configured_source_ids:
+                    placeholders = ",".join("?" for _ in configured_source_ids)
+                    summary_row = db.execute(
+                        f"""
+                        SELECT
+                            COUNT(DISTINCT mv.id),
+                            COUNT(DISTINCT CASE
+                                WHEN mv.identification_state IN ('AUTO_MATCHED', 'USER_MATCHED')
+                                THEN mv.id END),
+                            COUNT(DISTINCT CASE
+                                WHEN mv.identification_state = 'UNMATCHED'
+                                THEN mv.id END)
+                        FROM media_versions mv
+                        JOIN resources r ON r.media_version_id = mv.id
+                        WHERE r.resource_kind = 'FILE'
+                          AND r.availability_status = 'AVAILABLE'
+                          AND r.source_id IN ({placeholders})
+                        """,
+                        tuple(sorted(configured_source_ids)),
+                    ).fetchone()
+                    if summary_row is not None:
+                        total, identified, review = (int(value or 0) for value in summary_row)
+                        if total >= 0 and identified >= 0 and review >= 0 and identified + review <= total:
+                            library_summary = (total, identified, review)
 
                 unmatched_resources = db.execute(
                     """
@@ -923,6 +957,13 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
 
     roots = [("METTRE À JOUR LA MÉDIATHÈQUE", icon,
               f":fork {install / 'openhtpc-media-update-request'}")]
+    if library_summary is not None and library_summary[0] > 0:
+        total, identified, review = library_summary
+        roots.append((
+            f"MÉDIATHÈQUE — {total} médias · {identified} identifiés · {review} à vérifier",
+            icon,
+            ":fork true",
+        ))
     if not sources:
         roots.append(("+ AJOUTER UNE SOURCE MÉDIA", add_icon, f"{picker_bin}"))
     else:

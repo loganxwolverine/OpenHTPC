@@ -38,6 +38,25 @@ _MESSAGES = {
 }
 
 
+def _final_message(kind: str, state: str, status: dict | None = None) -> str:
+    """Return a couch-friendly final message without exposing paths or provider details."""
+    if kind == _LIBRARY and state == "SUCCESS" and type(status) is dict:
+        summary = status.get("summary")
+        if type(summary) is dict:
+            found = summary.get("files_discovered")
+            review = summary.get("still_unmatched")
+            if (
+                type(found) is int and type(review) is int
+                and found >= 0 and 0 <= review <= found
+            ):
+                identified = found - review
+                return (
+                    f"Médiathèque · {found} médias trouvés · "
+                    f"{identified} identifiés · {review} à vérifier"
+                )
+    return _MESSAGES[(kind, state)]
+
+
 def state_path(home: Path) -> Path:
     return Path(home) / ".local/state/openhtpc/media/activity-state"
 
@@ -206,7 +225,7 @@ class ActivityPublisher:
         now = float(self.clock())
         statuses = self._statuses()
 
-        finals: list[tuple[str, str, str]] = []
+        finals: list[tuple[str, str, str, dict]] = []
         for kind, status in statuses.items():
             fingerprint = _fingerprint(kind, status)
             if fingerprint != self.seen.get(kind):
@@ -215,13 +234,14 @@ class ActivityPublisher:
                         str(status.get("finished_at") or status.get("started_at") or ""),
                         kind,
                         str(status["state"]),
+                        status,
                     ))
                 self.seen[kind] = fingerprint
 
         if finals:
-            _stamp, kind, final_state = max(finals, key=lambda item: item[0])
+            _stamp, kind, final_state, final_status = max(finals, key=lambda item: item[0])
             ttl = self.success_ttl if final_state == "SUCCESS" else self.failure_ttl
-            self.toast = (final_state, _MESSAGES[(kind, final_state)], now + ttl)
+            self.toast = (final_state, _final_message(kind, final_state, final_status), now + ttl)
 
         running: list[tuple[str, str]] = []
         for kind, status in statuses.items():

@@ -48,7 +48,7 @@ def media_dir(home: Path) -> Path:
     return target
 
 
-def write_status(home: Path, kind: str, state: str, *, started: str, finished=None, pid=111, operation=None):
+def write_status(home: Path, kind: str, state: str, *, started: str, finished=None, pid=111, operation=None, summary=None):
     name = "library-update-status.json" if kind == "library" else "media-action-status.json"
     value = {
         "state": state,
@@ -60,6 +60,8 @@ def write_status(home: Path, kind: str, state: str, *, started: str, finished=No
     }
     if operation is not None:
         value["operation_id"] = operation
+    if summary is not None:
+        value["summary"] = summary
     path = media_dir(home) / name
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
@@ -155,6 +157,37 @@ def test_success_ttl_is_three_seconds_then_idle(tmp_path):
     assert live(home)[0][0] == "SUCCESS"
     clock.advance(0.01); pub.poll()
     assert live(home)[0][:2] == ["IDLE", ""]
+
+
+def test_library_success_surfaces_pedagogical_scan_summary(tmp_path):
+    home = tmp_path / "home"
+    pub = activity.ActivityPublisher(home)
+    write_status(
+        home, "library", "SUCCESS",
+        started="2026-09-25T12:00:00+00:00",
+        finished="2026-09-25T12:00:05+00:00",
+        pid=303,
+        summary={"files_discovered": 150, "still_unmatched": 62},
+    )
+    pub.poll()
+    assert live(home)[0][:2] == [
+        "SUCCESS",
+        "Médiathèque · 150 médias trouvés · 88 identifiés · 62 à vérifier",
+    ]
+
+
+def test_library_success_invalid_summary_falls_back_to_generic_message(tmp_path):
+    home = tmp_path / "home"
+    pub = activity.ActivityPublisher(home)
+    write_status(
+        home, "library", "SUCCESS",
+        started="2026-09-25T12:01:00+00:00",
+        finished="2026-09-25T12:01:05+00:00",
+        pid=304,
+        summary={"files_discovered": 2, "still_unmatched": 9},
+    )
+    pub.poll()
+    assert live(home)[0][:2] == ["SUCCESS", "Médiathèque · mise à jour terminée"]
 
 
 def test_failed_ttl_is_six_seconds_then_idle(tmp_path):
