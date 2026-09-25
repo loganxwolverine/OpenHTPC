@@ -257,6 +257,54 @@ def media_source_id(path: pathlib.Path) -> str:
     return hashlib.blake2s(os.fsencode(path), digest_size=8).hexdigest()
 
 
+NETWORK_MEDIA_FILESYSTEMS = {"cifs", "smb3", "nfs", "nfs4", "fuse.sshfs", "sshfs"}
+
+
+def _decode_mountinfo_path(value: str) -> pathlib.Path:
+    for encoded, decoded in ((r"\040", " "), (r"\011", "\t"), (r"\012", "\n"), (r"\134", chr(92))):
+        value = value.replace(encoded, decoded)
+    return pathlib.Path(value)
+
+
+def _source_filesystem_type(
+    path: pathlib.Path,
+    mountinfo_path: pathlib.Path = pathlib.Path("/proc/self/mountinfo"),
+) -> str | None:
+    """Return the filesystem type of the longest mount containing path."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    best: tuple[int, str] | None = None
+    try:
+        lines = mountinfo_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        left, sep, right = line.partition(" - ")
+        if not sep:
+            continue
+        left_fields = left.split()
+        right_fields = right.split()
+        if len(left_fields) < 5 or not right_fields:
+            continue
+        mountpoint = _decode_mountinfo_path(left_fields[4])
+        try:
+            contains = resolved == mountpoint or mountpoint in resolved.parents
+        except (OSError, RuntimeError):
+            contains = False
+        if contains:
+            score = len(str(mountpoint))
+            if best is None or score > best[0]:
+                best = (score, right_fields[0].casefold())
+    return best[1] if best is not None else None
+
+
+def _source_kind_label(path: pathlib.Path) -> str:
+    filesystem = _source_filesystem_type(path)
+    return "NAS / RÉSEAU" if filesystem in NETWORK_MEDIA_FILESYSTEMS else "LOCAL"
+
+
 def media_item_id(source_id: str, relative_path: pathlib.PurePath, item_type: str) -> str:
     value=f"media:{source_id}:{item_type}:{relative_path.as_posix()}"
     return hashlib.blake2s(value.encode("utf-8"),digest_size=12).hexdigest()
@@ -975,10 +1023,14 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
             if canonical is not None and canonical.is_dir():
                 source_roots[sid] = canonical
             inventory.append({"source_id":sid,"configured_path":str(source),"canonical_path":str(canonical) if canonical is not None else None})
-            label = ini_value(source.name or str(source)) + ("" if target else " — indisponible")
-            source_cmd = f":submenu {target}" if target else ":fork true"
-            context_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-media-remove \"{str(source)}\""
-            roots.append((label, folder_icon, source_cmd, context_cmd, "RETIRER LA SOURCE"))
+            source_name = ini_value(source.name or str(source))
+            if target and canonical is not None:
+                label = f"{source_name}  ·  {_source_kind_label(canonical)}"
+                roots.append((label, folder_icon, f":submenu {target}"))
+            else:
+                label = f"{source_name}  ·  INDISPONIBLE"
+                context_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-media-remove \"{str(source)}\""
+                roots.append((label, folder_icon, ":fork true", context_cmd, "RETIRER LA SOURCE"))
         roots.append(("+ AJOUTER UNE SOURCE", add_icon, f"{picker_bin}"))
 
     # The unmatched view is sourced from the DB, independent of the bounded folder graph.

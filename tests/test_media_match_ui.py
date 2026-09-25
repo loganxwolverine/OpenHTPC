@@ -1120,11 +1120,11 @@ def test_52_existing_media_picker_regression(sandbox):
 
 def test_53_existing_media_remove_regression(sandbox):
     """53. Existing media-remove regression."""
-    # When sources exist, RETIRER LA SOURCE context action remains present
+    # When sources exist, the safe removal action remains available inside the source.
     root_name, content = session_engine.media_menu_sections(
         sandbox["home"], [sandbox["sources_dir"]], sandbox["media_icon"], "gen53"
     )
-    assert "RETIRER LA SOURCE" in content
+    assert "RETIRER CETTE SOURCE D'OPENHTPC" in content
     assert "openhtpc-media-remove" in content
 
 

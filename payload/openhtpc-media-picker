@@ -23,11 +23,61 @@ def load_theme(install: pathlib.Path):
     raise RuntimeError("Theme module unavailable")
 
 
-def get_roots(home: pathlib.Path) -> list[tuple[str, pathlib.Path]]:
+NETWORK_MEDIA_FILESYSTEMS = {"cifs", "smb3", "nfs", "nfs4", "fuse.sshfs", "sshfs"}
+
+
+def _decode_mountinfo_path(value: str) -> pathlib.Path:
+    for encoded, decoded in ((r"\040", " "), (r"\011", "\t"), (r"\012", "\n"), (r"\134", chr(92))):
+        value = value.replace(encoded, decoded)
+    return pathlib.Path(value)
+
+
+def get_network_mount_roots(
+    mountinfo_path: pathlib.Path = pathlib.Path("/proc/self/mountinfo"),
+) -> list[tuple[str, pathlib.Path]]:
+    """Expose already-mounted network filesystems without managing the mount itself."""
+    roots: list[tuple[str, pathlib.Path]] = []
+    try:
+        lines = mountinfo_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return roots
+    seen: set[pathlib.Path] = set()
+    for line in lines:
+        left, sep, right = line.partition(" - ")
+        if not sep:
+            continue
+        left_fields = left.split()
+        right_fields = right.split()
+        if len(left_fields) < 5 or not right_fields:
+            continue
+        filesystem = right_fields[0].casefold()
+        if filesystem not in NETWORK_MEDIA_FILESYSTEMS:
+            continue
+        mountpoint = _decode_mountinfo_path(left_fields[4])
+        try:
+            resolved = mountpoint.resolve(strict=True)
+        except OSError:
+            continue
+        if not resolved.is_dir() or resolved in seen:
+            continue
+        seen.add(resolved)
+        name = mountpoint.name or str(mountpoint)
+        roots.append((f"NAS / RÉSEAU — {name}", mountpoint))
+    return sorted(roots, key=lambda item: str(item[1]).casefold())
+
+
+def get_roots(
+    home: pathlib.Path,
+    mountinfo_path: pathlib.Path = pathlib.Path("/proc/self/mountinfo"),
+) -> list[tuple[str, pathlib.Path]]:
     roots = []
     # User home
     roots.append(("Dossier personnel", home))
     
+    # Already-mounted NAS/network shares are first-class roots. OPENHTPC
+    # only exposes them here; it does not create or alter network mounts.
+    roots.extend(get_network_mount_roots(mountinfo_path))
+
     # Common user media directories
     for name, label in (("Movies", "Films"), ("Videos", "Vidéos"), ("Vidéos", "Vidéos")):
         p = home / name
