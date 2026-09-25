@@ -71,6 +71,26 @@ class ReleaseMetadataConsistency(unittest.TestCase):
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
         self.assertEqual(values["top_version"], "1.2.0-rc9")
+        self.assertEqual(values["product"], "OPENHTPC 1.2.0 Release Candidate 9")
+        self.assertEqual(values["build_date"], "2026-09-25")
+
+    def test_rc_product_identity_is_guarded(self):
+        root = self.temporary()
+        fixture(
+            root,
+            top="1.2.0-rc9",
+            payload="1.2.0-rc9",
+            json_version="1.2.0-rc9",
+            installer="1.2.0-rc9",
+            build_id=CURRENT_BUILD_ID,
+        )
+        metadata_path = root / "payload/version.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["product"] = "OPENHTPC 1.2.0 Release Candidate 8"
+        metadata["build_date"] = "2026-09-25"
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "RELEASE_METADATA_PRODUCT_MISMATCH"):
+            MODULE.validate_tree(root, CURRENT_BUILD_ID)
 
     def test_current_distribution_readme_matches_release_identity(self):
         version = MODULE.canonical_version(ROOT)
