@@ -208,7 +208,7 @@ def build():
             "media_ux": "LIBRARY_SUMMARY_UNMATCHED_REVIEW_SOURCE_DISCOVERY_FIRST_USE",
             "network_sources": "MOUNTED_NETWORK_DISCOVERY_WITHOUT_MOUNT_OWNERSHIP",
             "unicode_cjk": "PASS",
-            "regression_vs_rc8": "NO_NEW_FAILURES_2164_PASS_2_SKIP_16_BASELINE_FAILURES",
+            "regression_vs_rc8": "NO_NEW_FAILURES_2171_PASS_2_SKIP_16_BASELINE_FAILURES",
             "flex_binary_sha256": staged["flex"]["binary_sha256"],
             "flex_source_commit": staged["flex"]["source_commit"],
             "dev_tranche": DEV_TRANCHE,

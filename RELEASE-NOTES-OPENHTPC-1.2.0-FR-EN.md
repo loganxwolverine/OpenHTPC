@@ -37,7 +37,7 @@ Validated on:
 
 The real reference library contained 150 available media versions: 92 identified and 58 requiring review. RC9 Dev8 was installed from its generated artifact, the couch UI was visually checked at 4K, network-source classification was verified on a real CIFS source, and `openhtpc doctor` returned `Overall: READY`.
 
-The current-tree regression suite collected 2182 tests. RC9 produced 2164 PASS, 2 SKIP and 16 historical failures. Running those exact 16 test nodes on the frozen RC8 release commit produced the same 16 failures, so RC9 introduces no new full-suite regression relative to RC8.
+The stable current-tree regression suite collected 2189 tests: 2171 PASS, 2 SKIP and the same 16 historical boundary-contract failures. Comparison with the final RC9 failure set found no stable-only failure, so the stable promotion introduces no new full-suite regression.
 
 ### Preserved from RC8
 - Persistent local Media Foundation database and incremental scanning.
@@ -78,7 +78,7 @@ Validé sur :
 
 La médiathèque réelle du banc de référence contenait 150 versions média disponibles : 92 identifiées et 58 à vérifier. RC9 Dev8 a été installée depuis son artefact généré, l'interface canapé a été contrôlée visuellement en 4K, la détection de la source réseau a été vérifiée sur un vrai montage CIFS et `openhtpc doctor` a retourné `Overall: READY`.
 
-La suite courante contient 2182 tests. RC9 obtient 2164 PASS, 2 SKIP et 16 échecs historiques. L'exécution de ces 16 tests exactement sur le commit RC8 gelé produit les mêmes 16 échecs : RC9 n'introduit donc aucune nouvelle régression globale par rapport à RC8.
+La suite complète du candidat stable contient 2189 tests : 2171 PASS, 2 SKIP et les mêmes 16 échecs historiques de contrat. La comparaison avec l'ensemble des échecs de la RC9 finale ne montre aucun échec propre au stable : la promotion n'introduit donc aucune nouvelle régression globale.
 
 ### Préservé depuis RC8
 - Base locale Media Foundation persistante et scan incrémental.
