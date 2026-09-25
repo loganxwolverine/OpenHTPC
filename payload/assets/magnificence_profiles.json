@@ -87,17 +87,36 @@
             "vo_drops": 204,
             "decoder_drops": 0,
             "delayed_frames": 0
+          },
+          "RECIPE_MAG_SD_RAVU_KRIG": {
+            "p95_ms_runs": [
+              20.694,
+              21.511,
+              20.487
+            ],
+            "p95_ms_avg": 20.897,
+            "relative_to_pure": 1.635,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0,
+            "technical_verdict": "TECH_PASS_RESERVE_TOO_LOW_FOR_DEFAULT"
           }
         }
       },
       "magnificence": {
         "selected_recipe": "RECIPE_C2_DVD_KRIG_BILATERAL",
         "fallback_recipe": "RECIPE_0_PURE",
-        "status": "TECHNICALLY_MEASURED_PROVISIONAL",
+        "status": "TECHNICALLY_QUALIFIED_N150_SD_1080P",
         "reason": "KrigBilateral is the lowest-cost shader retained from the prior C2 visual set on this N150 measurement; FSRCNNX-8 leaves substantially less reserve.",
         "visual_basis": "C2 prior visual qualification; 1080p-specific visual confirmation still pending",
         "selected_label": "KrigBilateral",
-        "ui_reason_fr": "Réserve GPU préservée pour fluidité, décodage et traitements vidéo."
+        "ui_reason_fr": "Traitement léger retenu pour préserver une large réserve GPU pour la fluidité, le décodage et les autres traitements vidéo.",
+        "rejected_default_candidates": {
+          "RECIPE_C2_DVD_FSRCNNX_8": "High GPU workload; insufficient reserve for default N150 policy.",
+          "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable but ~1.64x PURE workload; reserve judged too small for default N150 policy.",
+          "RECIPE_C2_DVD_FSRCNNX_16": "Dropped frames.",
+          "RECIPE_C2_DVD_ARTCNN_C4F16": "Dropped frames."
+        }
       },
       "reference_sources": {
         "intel_spec": "https://www.intel.com/content/www/us/en/products/sku/241636/intel-processor-n150-6m-cache-up-to-3-60-ghz/specifications.html",
