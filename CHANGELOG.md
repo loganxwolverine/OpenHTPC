@@ -1,5 +1,13 @@
 # Changelog
 
+# OPENHTPC 1.2.0 — 1.2.0
+
+- Promotes the physically qualified RC9 media UX to the stable 1.2.0 release without product-behavior changes.
+- Preserves the authoritative library summary, compact unidentified-media review states, mounted NAS/network discovery and guided first-use flow.
+- Preserves the RC8 Media Foundation, asynchronous TMDb workflows, Unicode/CJK fallback, playback stack and protected-optical behavior.
+- Keeps the RC9 full-suite result: no new regression versus the frozen RC8 baseline (2164 passed, 2 skipped, same 16 historical boundary-contract failures).
+- Builds deterministically from the exact stable release commit and rebuilds Flex with schema-2 source provenance.
+
 # OPENHTPC 1.2.0 Release Candidate 9 — 1.2.0-rc9
 
 - Adds an authoritative couch-visible library summary with total, identified and review-needed counts.

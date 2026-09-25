@@ -12,7 +12,7 @@ TOOL = ROOT / "tools/openhtpc_release_metadata.py"
 SPEC = importlib.util.spec_from_file_location("release_metadata", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC); assert SPEC.loader; SPEC.loader.exec_module(MODULE)
 BUILD_ID = "amd-codec-release-metadata-consistency-dev5"
-CURRENT_BUILD_ID = "public-release-1.2.0-rc9"
+CURRENT_BUILD_ID = "public-release-1.2.0"
 
 
 def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
@@ -70,8 +70,8 @@ class ReleaseMetadataConsistency(unittest.TestCase):
 
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
-        self.assertEqual(values["top_version"], "1.2.0-rc9")
-        self.assertEqual(values["product"], "OPENHTPC 1.2.0 Release Candidate 9")
+        self.assertEqual(values["top_version"], "1.2.0")
+        self.assertEqual(values["product"], "OPENHTPC 1.2.0")
         self.assertEqual(values["build_date"], "2026-09-25")
 
     def test_rc_product_identity_is_guarded(self):
@@ -82,7 +82,7 @@ class ReleaseMetadataConsistency(unittest.TestCase):
             payload="1.2.0-rc9",
             json_version="1.2.0-rc9",
             installer="1.2.0-rc9",
-            build_id=CURRENT_BUILD_ID,
+            build_id="public-release-1.2.0-rc9",
         )
         metadata_path = root / "payload/version.json"
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -90,7 +90,7 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         metadata["build_date"] = "2026-09-25"
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "RELEASE_METADATA_PRODUCT_MISMATCH"):
-            MODULE.validate_tree(root, CURRENT_BUILD_ID)
+            MODULE.validate_tree(root, "public-release-1.2.0-rc9")
 
     def test_stable_product_identity_is_guarded(self):
         root = self.temporary()
@@ -210,6 +210,28 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         self.assertIn('"ANALYSER MES MÉDIAS"', builder)
         self.assertIn('"NAS / RÉSEAU"', builder)
         self.assertIn("devctl._verify_artifact(archive)", builder)
+
+
+    def test_1_2_0_stable_builder_records_qualified_promotion(self):
+        builder = (ROOT / "tools/build-1.2.0.py").read_text(encoding="utf-8")
+        self.assertIn('NAME = "OpenHTPC-1.2.0"', builder)
+        self.assertIn('BUILD = "public-release-1.2.0"', builder)
+        self.assertIn('DEV_TRANCHE = "PUBLIC_1_2_0"', builder)
+        self.assertIn('"physical_qualification": "PASS_REFERENCE_BENCH"', builder)
+        self.assertIn('"promotion_basis": "RC9_QUALIFIED_BEHAVIOR_NO_PRODUCT_CHANGE"', builder)
+        self.assertIn('"status": "OPENHTPC_1_2_0_STABLE_QUALIFIED_FOR_RELEASE"', builder)
+
+    def test_1_2_0_stable_builder_rebuilds_flex_and_preserves_rc9_ux_gates(self):
+        builder = (ROOT / "tools/build-1.2.0.py").read_text(encoding="utf-8")
+        self.assertIn("devctl._export_commit(commit, staging, scratch)", builder)
+        self.assertIn("devctl._build_flex(flex_source", builder)
+        self.assertIn('"source_commit": commit', builder)
+        self.assertIn('"MÉDIATHÈQUE —"', builder)
+        self.assertIn('"À rechercher"', builder)
+        self.assertIn('"ANALYSER MES MÉDIAS"', builder)
+        self.assertIn('"NAS / RÉSEAU"', builder)
+        self.assertIn("devctl._verify_artifact(archive)", builder)
+
 
 
 if __name__ == "__main__":

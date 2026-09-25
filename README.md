@@ -6,11 +6,11 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.2.0 RC9
+# OPENHTPC 1.2.0
 
-Version: `1.2.0-rc9`
-Build: `public-release-1.2.0-rc9`
-Status: **Release Candidate / prerelease — reference physical validation PASS**
+Version: `1.2.0`
+Build: `public-release-1.2.0`
+Status: **Stable release — reference physical validation PASS**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
 Flex Launcher provides the ten-foot interface and MPV provides playback. The
@@ -28,22 +28,22 @@ settings synchronization, and protected optical / local playback display resync
 audio stability. RC8 introduced the Media Foundation persistent database,
 normalized media probe, living-room movie matcher and resolver, cached poster
 rendering, asynchronous library/identity/TMDb operations with live activity
-feedback, and Unicode/CJK fallback rendering. RC9 keeps that foundation intact
-and focuses on couch usability: an authoritative library summary, clearer
-unidentified-media review, mounted NAS/network source discovery, and contextual
-first-use guidance from source selection through the first media analysis.
+feedback, and Unicode/CJK fallback rendering. OPENHTPC 1.2.0 promotes the
+RC9-qualified behavior unchanged as the stable release: an authoritative library
+summary, clearer unidentified-media review, mounted NAS/network source discovery,
+and contextual first-use guidance from source selection through first analysis.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.2.0-RC9.tar.gz.sha256
+sha256sum -c OpenHTPC-1.2.0.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.2.0-RC9.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.2.0.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -67,7 +67,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted RC9 directory:
+From the extracted OPENHTPC 1.2.0 directory:
 
 ```bash
 ./update.sh
@@ -133,7 +133,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [RC9 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-RC9-FR-EN.md),
+See [1.2.0 release notes](RELEASE-NOTES-OPENHTPC-1.2.0-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).
