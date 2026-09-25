@@ -10,6 +10,7 @@ assets/benchmark/manifest.json
 assets/branding/openhtpc-logo.png
 assets/branding/openhtpc-wallpaper.png
 assets/c3_calibration_catalog.json
+assets/magnificence_profiles.json
 assets/shaders/Anime4K_AutoDownscalePre_x2.glsl
 assets/shaders/Anime4K_AutoDownscalePre_x4.glsl
 assets/shaders/Anime4K_Clamp_Highlights.glsl
