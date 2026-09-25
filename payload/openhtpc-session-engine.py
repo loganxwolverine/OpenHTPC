@@ -658,7 +658,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     """Build a bounded complete media graph before the persistent Flex starts."""
     sections: list[str] = []
     actions: dict[str, dict] = {}
-    unmatched_entries: list[tuple[str, pathlib.Path, str, str, str]] = []
+    unmatched_entries: list[tuple[str, pathlib.Path, str]] = []
     unmatched_resources: list[tuple[int, str, str]] = []
     generated_detail_ids: set[str] = set()
     source_roots: dict[str, pathlib.Path] = {}
@@ -1061,20 +1061,17 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         else:
             hint = "recherche manuelle"
         unmatched_entries.append((
-            f"{title}  ·  {ext[1:].upper()}  ·  {hint}",
+            f"{hint}  ·  {title}  ·  {ext[1:].upper()}",
             entry_icon,
             f":submenu {detail_menu}",
-            f":submenu {res_menu}",
-            "IDENTIFIER LE FILM",
         ))
         unmatched_ids.add(mv_id)
 
     if unmatched_entries:
         unmatched_body = "\n".join([
             bounded_flex_entry(1, "RETOUR", icon, ":back"),
-            *(bounded_flex_entry(i, label, item_icon, command, context_cmd, context_title)
-              for i, (label, item_icon, command, context_cmd, context_title)
-              in enumerate(unmatched_entries, 2)),
+            *(bounded_flex_entry(i, label, item_icon, command)
+              for i, (label, item_icon, command) in enumerate(unmatched_entries, 2)),
         ])
         sections.append(f"[MEDIA_UNMATCHED]\n{unmatched_body}")
         roots.append((f"À identifier — {len(unmatched_entries)}", icon, ":submenu MEDIA_UNMATCHED"))

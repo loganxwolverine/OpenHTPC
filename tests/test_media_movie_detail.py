@@ -387,10 +387,10 @@ def test_unidentified_rows_explain_candidate_state_and_offer_direct_context_acti
     rows = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     suggested = next(row for row in rows if "Suggested.Movie" in row)
     manual = next(row for row in rows if "Manual.Movie" in row)
-    assert "1 proposition" in suggested
-    assert "recherche manuelle" in manual
-    assert ";:submenu MEDIA_R" in suggested and suggested.endswith(";IDENTIFIER LE FILM")
-    assert ";:submenu MEDIA_R" in manual and manual.endswith(";IDENTIFIER LE FILM")
+    assert "1 proposition  ·  Suggested.Movie  ·  MKV" in suggested
+    assert "recherche manuelle  ·  Manual.Movie  ·  MKV" in manual
+    assert "IDENTIFIER LE FILM" not in suggested
+    assert "IDENTIFIER LE FILM" not in manual
 
 
 def test_unidentified_long_row_preserves_media_type_and_review_hint(env):
@@ -404,7 +404,8 @@ def test_unidentified_long_row_preserves_media_type_and_review_hint(env):
         line for line in _get_section_lines(sections, "[MEDIA_UNMATCHED]")
         if ":submenu MEDIA_D" in line
     )
-    assert "MKV  ·  recherche manuelle" in row
+    assert "recherche manuelle  ·  " in row
+    assert row.index("recherche manuelle") < row.index("  ·  MKV")
     assert len(row.encode("utf-8")) <= 198
 
 
