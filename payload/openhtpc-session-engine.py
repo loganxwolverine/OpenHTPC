@@ -658,7 +658,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     """Build a bounded complete media graph before the persistent Flex starts."""
     sections: list[str] = []
     actions: dict[str, dict] = {}
-    unmatched_entries: list[tuple[str, pathlib.Path, str]] = []
+    unmatched_entries: list[tuple[str, pathlib.Path, str, str, str]] = []
     unmatched_resources: list[tuple[int, str, str]] = []
     generated_detail_ids: set[str] = set()
     source_roots: dict[str, pathlib.Path] = {}
@@ -713,7 +713,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                     SELECT r.source_id, r.relative_path, r.media_version_id,
                            mv.identification_state, mv.match_locked, mv.work_id,
                            w.title, w.year, w.original_title,
-                           (SELECT COUNT(*) FROM match_candidates mc WHERE mc.media_version_id = mv.id AND mc.status != 'REJECTED') AS cand_count
+                           (SELECT COUNT(*) FROM match_candidates mc WHERE mc.media_version_id = mv.id AND mc.status = 'PENDING') AS cand_count
                     FROM resources r
                     JOIN media_versions mv ON mv.id = r.media_version_id
                     LEFT JOIN works w ON w.id = mv.work_id
@@ -1050,15 +1050,31 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         title = ini_value(relative.stem)
         if len(title) > 72:
             title = title[:69].rstrip() + "…"
-        unmatched_entries.append((f"{title}  ·  {ext[1:].upper()}", entry_icon,
-                                  f":submenu {detail_menu}"))
+        ident = identity_map.get((source_id, relative.as_posix()))
+        candidate_count = ident.get("candidate_count", 0) if ident else 0
+        if type(candidate_count) is not int or candidate_count < 0:
+            candidate_count = 0
+        if candidate_count == 1:
+            hint = "1 proposition"
+        elif candidate_count > 1:
+            hint = f"{candidate_count} propositions"
+        else:
+            hint = "recherche manuelle"
+        unmatched_entries.append((
+            f"{title}  ·  {ext[1:].upper()}  ·  {hint}",
+            entry_icon,
+            f":submenu {detail_menu}",
+            f":submenu {res_menu}",
+            "IDENTIFIER LE FILM",
+        ))
         unmatched_ids.add(mv_id)
 
     if unmatched_entries:
         unmatched_body = "\n".join([
             bounded_flex_entry(1, "RETOUR", icon, ":back"),
-            *(bounded_flex_entry(i, label, item_icon, command)
-              for i, (label, item_icon, command) in enumerate(unmatched_entries, 2)),
+            *(bounded_flex_entry(i, label, item_icon, command, context_cmd, context_title)
+              for i, (label, item_icon, command, context_cmd, context_title)
+              in enumerate(unmatched_entries, 2)),
         ])
         sections.append(f"[MEDIA_UNMATCHED]\n{unmatched_body}")
         roots.append((f"À identifier — {len(unmatched_entries)}", icon, ":submenu MEDIA_UNMATCHED"))

@@ -366,6 +366,33 @@ def test_media_root_exposes_authoritative_library_summary(env):
     )
 
 
+def test_unidentified_rows_explain_candidate_state_and_offer_direct_context_action(env):
+    _seed_movie(env, filename="Suggested.Movie.mkv", work_id=1, state="UNMATCHED")
+    _seed_movie(env, filename="Manual.Movie.mkv", work_id=2, external_id="2002", state="UNMATCHED")
+    with closing(media_db.connect(env["db_file"])) as db:
+        db.execute(
+            """
+            INSERT INTO match_candidates
+                (media_version_id, provider, external_id, candidate_title,
+                 candidate_year, candidate_payload_json, score, status, created_at)
+            VALUES (1, 'tmdb_movie', '999', 'Suggested Movie', 2026, '{}', 42.0, 'PENDING', ?)
+            """,
+            (NOW,),
+        )
+        db.commit()
+
+    _root, sections = session_engine.media_menu_sections(
+        env["home"], [env["sources_dir"]], env["media_icon"],
+    )
+    rows = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
+    suggested = next(row for row in rows if "Suggested.Movie" in row)
+    manual = next(row for row in rows if "Manual.Movie" in row)
+    assert "1 proposition" in suggested
+    assert "recherche manuelle" in manual
+    assert ";:submenu MEDIA_R" in suggested and suggested.endswith(";IDENTIFIER LE FILM")
+    assert ";:submenu MEDIA_R" in manual and manual.endswith(";IDENTIFIER LE FILM")
+
+
 def test_unidentified_entry_absent_when_no_db_unmatched(env):
     _seed_movie(env, state="AUTO_MATCHED")
     _root, sections = session_engine.media_menu_sections(
@@ -389,7 +416,7 @@ def test_unidentified_view_includes_item_beyond_normal_depth(env):
     unidentified = _get_section_lines(sections, "[MEDIA_UNMATCHED]")
     assert len(unidentified) == 2
     assert "Deep.Raw.Release  ·  MKV" in unidentified[1]
-    detail_id = unidentified[1].split(";:submenu ", 1)[1]
+    detail_id = unidentified[1].split(";:submenu ", 1)[1].split(";", 1)[0]
     assert _get_section_lines(sections, f"[{detail_id}]")
     manifest = json.loads(session_engine.current_media_manifest(env["home"]).read_text())
     assert any(item.get("relative_path") == relative
