@@ -167,7 +167,7 @@ def main() -> int:
         roots = get_roots(home)
         for label, path in roots:
             entries.append((
-                f"EXPLORER : {label}",
+                label,
                 folder_icon,
                 f":replace {picker_bin} \"{str(path)}\""
             ))
