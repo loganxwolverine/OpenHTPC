@@ -256,6 +256,148 @@
         "visual_qualification": "assets/c3_calibration_catalog.json",
         "shader_catalog": "assets/shaders/catalog.json"
       }
+    },
+    "intel_arc_a310_8086_56a6_sd_2160p": {
+      "gpu": {
+        "vendor": "Intel",
+        "model": "Intel Arc A310",
+        "pci_id": "8086:56a6",
+        "architecture": "DG2 / Alchemist"
+      },
+      "reference_platform": "HP ProDesk 400 G3 SFF / Core i5-6500 / Intel Arc A310",
+      "software": {
+        "os": "Fedora 44",
+        "kernel": "7.1.8-200.fc44.x86_64",
+        "mesa": "26.1.6-1.fc44",
+        "session": "KDE/Wayland"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0,
+        "bit_depth_observed": 10
+      },
+      "measurement": {
+        "date": "2026-09-26",
+        "benchmark_repeats": 1,
+        "combo_repeats": 3,
+        "recipes": {
+          "RECIPE_0_PURE": {
+            "p95_ms": 16.412,
+            "relative_to_pure": 1.0,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_CFL_LITE": {
+            "p95_ms": 19.1,
+            "relative_to_pure": 1.164,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_KRIG_BILATERAL": {
+            "p95_ms": 18.606,
+            "relative_to_pure": 1.134,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_RAVU_LITE": {
+            "p95_ms": 19.242,
+            "relative_to_pure": 1.172,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_8": {
+            "p95_ms": 18.144,
+            "relative_to_pure": 1.106,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_ARTCNN_C4F16": {
+            "p95_ms": 46.497,
+            "relative_to_pure": 2.833,
+            "technical_verdict": "TECH_FAIL_DROPS",
+            "vo_drops": 46,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_16": {
+            "p95_ms": 25.726,
+            "relative_to_pure": 1.568,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_MAG_SD_RAVU_KRIG": {
+            "p95_ms_runs": [
+              17.677,
+              17.902,
+              17.596
+            ],
+            "p95_ms_avg": 17.725,
+            "relative_to_pure": 1.08,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_MAG_SD_FSRCNNX8_KRIG": {
+            "p95_ms_runs": [
+              18.004,
+              18.848,
+              16.61
+            ],
+            "p95_ms_avg": 17.821,
+            "relative_to_pure": 1.086,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          }
+        }
+      },
+      "visual_qualification": {
+        "date": "2026-09-26",
+        "source": "Alerte.mkv",
+        "source_characterization": "DVD PAL film content, 720x576 MPEG-2 at 25 fps; field metadata TFF but sampled film content detected progressive.",
+        "method": "Two independent blind A/B/C comparisons with remapped labels on separate representative film sequences.",
+        "observations": [
+          "Pass 1: FSRCNNX-8 + KrigBilateral perceived as adding something interesting; PURE and KrigBilateral perceived as similar.",
+          "Pass 2: FSRCNNX-8 + KrigBilateral perceived as more refined; PURE and KrigBilateral perceived as approximately similar."
+        ],
+        "result": "FSRCNNX-8 + KrigBilateral visually preferred in both blind passes."
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNNX8_KRIG",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "TECHNICALLY_QUALIFIED_ARC_A310_SD_2160P",
+        "selected_label": "FSRCNNX-8 + KrigBilateral",
+        "selected_shaders": [
+          "FSRCNNX_x2_8-0-4-1.glsl",
+          "KrigBilateral.glsl"
+        ],
+        "reason": "Two remapped blind film comparisons preferred FSRCNNX-8 + KrigBilateral while PURE and KrigBilateral alone were perceived as similar. The combined recipe completed three 4K output measurements without drops or delayed frames.",
+        "visual_basis": "Two blind comparisons on representative Alerte DVD-film sequences at 2160p output.",
+        "ui_reason_fr": "Traitement plus poussé retenu : sur l’Arc A310, deux comparaisons aveugles ont montré un gain visuel perceptible tout en conservant une large réserve de rendu.",
+        "rejected_default_candidates": {
+          "RECIPE_C2_DVD_KRIG_BILATERAL": "Technically stable, but visually close to PURE in both Arc A310 blind comparisons.",
+          "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable; no Arc-specific blind preference demonstrated.",
+          "RECIPE_C2_DVD_ARTCNN_C4F16": "Dropped output frames in the Arc A310 4K benchmark."
+        }
+      },
+      "reference_sources": {
+        "visual_qualification": "Local blind film review 2026-09-26",
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
     }
   }
 }

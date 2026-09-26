@@ -133,3 +133,57 @@ def test_same_15d8_on_other_cpu_does_not_match_vega3_profile():
         assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
     finally:
         temp.cleanup()
+
+def test_playback_refresh_uses_cached_magnificence_model():
+    source = (PAYLOAD / "openhtpc-system-action").read_text(encoding="utf-8")
+    assert 'model={"available":True,"playback_policy":policy.read_preferences(home)}' in source
+    assert 'magnificence_from_capabilities(caps,install)' in source
+
+
+def make_arc_home() -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
+    temp = tempfile.TemporaryDirectory()
+    home = pathlib.Path(temp.name)
+    runtime = home / ".config/openhtpc/runtime"
+    runtime.mkdir(parents=True)
+    caps = {
+        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i5-6500 CPU @ 3.20GHz"}},
+        "graphics": {"devices": [{
+            "active": True, "vendor_id": "8086", "device_id": "56a6",
+            "model": "Intel Corporation DG2 [Arc A310]",
+        }]},
+        "display": {"active_output": {
+            "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}
+        }},
+    }
+    (runtime / "capabilities.json").write_text(json.dumps(caps), encoding="utf-8")
+    policy.write_preference(home, "presentation_mode", "CINEMA_AUTO")
+    return temp, home
+
+
+def test_arc_a310_4k_resolves_fsrcnnx8_krig():
+    temp, home = make_arc_home()
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNNX8_KRIG"
+        assert decision["presentation"]["profile_id"] == "intel_arc_a310_8086_56a6_sd_2160p"
+        shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
+        assert len(shader_args) == 1
+        assert "FSRCNNX_x2_8-0-4-1.glsl" in shader_args[0]
+        assert "KrigBilateral.glsl" in shader_args[0]
+        assert shader_args[0].index("FSRCNNX_x2_8-0-4-1.glsl") < shader_args[0].index("KrigBilateral.glsl")
+    finally:
+        temp.cleanup()
+
+
+def test_arc_a310_1080p_has_no_4k_profile():
+    temp, home = make_arc_home()
+    try:
+        caps_path = home / ".config/openhtpc/runtime/capabilities.json"
+        caps = json.loads(caps_path.read_text(encoding="utf-8"))
+        caps["display"]["active_output"]["current_mode"]["width"] = 1920
+        caps["display"]["active_output"]["current_mode"]["height"] = 1080
+        caps_path.write_text(json.dumps(caps), encoding="utf-8")
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+    finally:
+        temp.cleanup()

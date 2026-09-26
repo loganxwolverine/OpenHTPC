@@ -194,6 +194,71 @@ def clean_gpu_display_name(raw: Any) -> str:
     return compact or raw.strip()
 
 
+def magnificence_from_capabilities(
+    caps: dict,
+    install: pathlib.Path,
+    *,
+    display_snapshot: dict | None = None,
+    active_device_id: str | None = None,
+) -> dict:
+    """Resolve user-facing Magnificence data without performing hardware probes."""
+    default = {
+        "profile_id": None,
+        "status": "NO_PROFILE",
+        "selected_recipe": "RECIPE_0_PURE",
+        "selected_label": "PURE",
+        "reason_fr": "Aucun profil Magnificence qualifié pour cette combinaison matériel / affichage.",
+    }
+    try:
+        graphics = caps.get("graphics", {}) if isinstance(caps.get("graphics"), dict) else {}
+        devices = graphics.get("devices", []) if isinstance(graphics.get("devices"), list) else []
+        if active_device_id is None:
+            active_gpu = next((item for item in devices if isinstance(item, dict) and item.get("active")), None)
+            if active_gpu is None:
+                active_gpu = next((item for item in devices if isinstance(item, dict)), None)
+            if not active_gpu:
+                return default
+            active_device_id = active_gpu.get("device_id")
+        active_device_id = normalize_device_id(active_device_id)
+
+        display = display_snapshot if isinstance(display_snapshot, dict) else {}
+        output = display.get("active_output", {}) if isinstance(display.get("active_output"), dict) else {}
+        mode = output.get("current_mode", {}) if isinstance(output.get("current_mode"), dict) else {}
+        if not (mode.get("width") and mode.get("height")):
+            stored_display = caps.get("display", {}) if isinstance(caps.get("display"), dict) else {}
+            output = stored_display.get("active_output", {}) if isinstance(stored_display.get("active_output"), dict) else {}
+            mode = output.get("current_mode", {}) if isinstance(output.get("current_mode"), dict) else {}
+        if not (mode.get("width") and mode.get("height")):
+            return default
+        active_resolution = f"{mode.get('width')}x{mode.get('height')}"
+        cpu_model = str(caps.get("hardware", {}).get("cpu", {}).get("model", "")).casefold()
+
+        db = read_json(install / "assets/magnificence_profiles.json")
+        for profile_id, profile_data in db.get("profiles", {}).items():
+            profile_gpu = profile_data.get("gpu", {})
+            if active_device_id != normalize_device_id(profile_gpu.get("pci_id")):
+                continue
+            cpu_contains = str(profile_data.get("match", {}).get("cpu_model_contains", "")).strip().casefold()
+            if cpu_contains and cpu_contains not in cpu_model:
+                continue
+            if active_resolution != profile_data.get("display_scope", {}).get("resolution"):
+                continue
+            mag = profile_data.get("magnificence", {})
+            return {
+                "profile_id": profile_id,
+                "status": mag.get("status", "UNKNOWN"),
+                "selected_recipe": mag.get("selected_recipe", "RECIPE_0_PURE"),
+                "selected_label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
+                "reason_fr": mag.get("ui_reason_fr", "Profil sélectionné automatiquement selon le matériel et l'affichage."),
+                "gpu": clean_gpu_display_name(profile_gpu.get("model")),
+                "display": profile_data.get("display_scope", {}).get("resolution"),
+                "source_class": profile_data.get("source_scope", {}).get("class"),
+            }
+    except Exception:
+        return default
+    return default
+
+
 def _load_gpu_runtime(install: pathlib.Path | None = None):
     candidates = []
     if install:
@@ -744,60 +809,15 @@ def build(
         "cal_ui_status": cal_ui_status,
     }
 
-    # Magnificence profile explanation: same hardware/output database used for
-    # automatic image treatment selection.  Never probe here; consume the
-    # already-normalized SYSTÈME model only.
-    magnificence = {
-        "profile_id": None,
-        "status": "NO_PROFILE",
-        "selected_recipe": "RECIPE_0_PURE",
-        "selected_label": "PURE",
-        "reason_fr": "Aucun profil Magnificence qualifié pour cette combinaison matériel / affichage.",
-    }
-    try:
-        active_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
-        active_device_id = normalize_device_id(active_gpu.get("device_id"))
-        magnificence_mode = mode
-        if not (magnificence_mode.get("width") and magnificence_mode.get("height")):
-            stored_display = caps.get("display", {}) if isinstance(caps.get("display"), dict) else {}
-            stored_output = stored_display.get("active_output", {}) if isinstance(stored_display.get("active_output"), dict) else {}
-            stored_mode = stored_output.get("current_mode", {}) if isinstance(stored_output.get("current_mode"), dict) else {}
-            if stored_mode.get("width") and stored_mode.get("height"):
-                magnificence_mode = stored_mode
-        active_resolution = (
-            f"{magnificence_mode.get('width')}x{magnificence_mode.get('height')}"
-            if magnificence_mode.get("width") and magnificence_mode.get("height")
-            else None
-        )
-        db = read_json(install / "assets/magnificence_profiles.json")
-        for profile_id, profile_data in db.get("profiles", {}).items():
-            profile_gpu = profile_data.get("gpu", {})
-            profile_display = profile_data.get("display_scope", {})
-            profile_device_id = normalize_device_id(profile_gpu.get("pci_id"))
-            if active_device_id != profile_device_id:
-                continue
-            profile_match = profile_data.get("match", {})
-            cpu_contains = str(profile_match.get("cpu_model_contains", "")).strip().casefold()
-            active_cpu_model = str(cpu.get("model", "")).casefold()
-            if cpu_contains and cpu_contains not in active_cpu_model:
-                continue
-            if active_resolution != profile_display.get("resolution"):
-                continue
-            mag = profile_data.get("magnificence", {})
-            magnificence = {
-                "profile_id": profile_id,
-                "status": mag.get("status", "UNKNOWN"),
-                "selected_recipe": mag.get("selected_recipe", "RECIPE_0_PURE"),
-                "selected_label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
-                "reason_fr": mag.get("ui_reason_fr", "Profil sélectionné automatiquement selon le matériel et l'affichage."),
-                "gpu": clean_gpu_display_name(profile_gpu.get("model")),
-                "display": profile_display.get("resolution"),
-                "source_class": profile_data.get("source_scope", {}).get("class"),
-            }
-            break
-    except Exception:
-        pass
-    result["magnificence"] = magnificence
+    # Magnificence is resolved from the current normalized display result
+    # plus the cached Hardware Passport.  The helper itself performs no probes.
+    active_mag_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
+    result["magnificence"] = magnificence_from_capabilities(
+        caps,
+        install,
+        display_snapshot=display,
+        active_device_id=active_mag_gpu.get("device_id"),
+    )
     # Also update top-level profile key to reflect actual active C4 profile
     result["profile"] = active_profile
     # Update processing section
