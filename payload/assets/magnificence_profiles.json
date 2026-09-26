@@ -125,6 +125,137 @@
         "intel_spec": "https://www.intel.com/content/www/us/en/products/sku/241636/intel-processor-n150-6m-cache-up-to-3-60-ghz/specifications.html",
         "shader_catalog": "assets/shaders/catalog.json"
       }
+    },
+    "amd_picasso_15d8_vega3_sd_2160p": {
+      "gpu": {
+        "vendor": "AMD",
+        "model": "Picasso/Raven 2 Radeon Vega 3",
+        "pci_id": "1002:15d8",
+        "reference_class": "Vega 3"
+      },
+      "match": {
+        "cpu_model_contains": "Ryzen 3 PRO 3200GE"
+      },
+      "reference_platform": "Ryzen 3 PRO 3200GE / Radeon Vega 3 / Denon AVR-X1800H",
+      "software": {
+        "os": "Fedora 44",
+        "kernel": "7.2.5-200.fc44.x86_64",
+        "mesa": "26.2.2-6.fc44",
+        "session": "KDE/Wayland"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0
+      },
+      "measurement": {
+        "date": "2026-09-26",
+        "benchmark_repeats": 1,
+        "combo_repeats": 3,
+        "recipes": {
+          "RECIPE_0_PURE": {
+            "p95_ms": 23.22,
+            "relative_to_pure": 1.0,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_CFL_LITE": {
+            "p95_ms": 23.495,
+            "relative_to_pure": 1.012,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_KRIG_BILATERAL": {
+            "p95_ms": 23.874,
+            "relative_to_pure": 1.028,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_RAVU_LITE": {
+            "p95_ms": 23.957,
+            "relative_to_pure": 1.032,
+            "technical_verdict": "TECH_PASS",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_8": {
+            "p95_ms": 23.949,
+            "relative_to_pure": 1.031,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_ARTCNN_C4F16": {
+            "p95_ms": 26.179,
+            "relative_to_pure": 1.127,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_C2_DVD_FSRCNNX_16": {
+            "p95_ms": 29.866,
+            "relative_to_pure": 1.286,
+            "technical_verdict": "TECH_PASS_HIGH_GPU_WORKLOAD",
+            "vo_drops": 0,
+            "decoder_drops": 0
+          },
+          "RECIPE_MAG_SD_RAVU_KRIG": {
+            "p95_ms_runs": [
+              24.1,
+              24.165,
+              24.112
+            ],
+            "p95_ms_avg": 24.126,
+            "relative_to_pure": 1.039,
+            "technical_verdict": "TECH_PASS_PENDING_BLIND_VISUAL",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          },
+          "RECIPE_MAG_SD_FSRCNNX8_KRIG": {
+            "p95_ms_runs": [
+              24.197,
+              24.363,
+              24.22
+            ],
+            "p95_ms_avg": 24.26,
+            "relative_to_pure": 1.045,
+            "technical_verdict": "TECH_PASS_PENDING_BLIND_VISUAL",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0
+          }
+        }
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_C2_DVD_KRIG_BILATERAL",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "TECHNICALLY_QUALIFIED_VEGA3_SD_2160P",
+        "selected_label": "KrigBilateral",
+        "selected_shaders": [
+          "KrigBilateral.glsl"
+        ],
+        "reason": "KrigBilateral is the highest-ranked enhanced recipe from the C2 blind visual qualification and adds only ~2.8% measured workload over PURE on the Vega 3 at 2160p output.",
+        "visual_basis": "C2 blind visual qualification on EVIL DEAD II Region 2 / 720x576 MPEG-2 / 4K60: PURE winner, KrigBilateral 2nd finalist. Magnificence selects the highest-ranked qualified enhancement while PURE remains separately selectable.",
+        "ui_reason_fr": "Traitement visuellement qualifié retenu ; le Vega 3 conserve une large réserve GPU en 4K pour la fluidité et les autres traitements vidéo.",
+        "experimental_candidates": {
+          "RECIPE_MAG_SD_RAVU_KRIG": "TECH_PASS; ~3.9% over PURE; pending blind visual qualification.",
+          "RECIPE_MAG_SD_FSRCNNX8_KRIG": "TECH_PASS; ~4.5% over PURE; pending blind visual qualification."
+        }
+      },
+      "reference_sources": {
+        "visual_qualification": "assets/c3_calibration_catalog.json",
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
     }
   }
 }

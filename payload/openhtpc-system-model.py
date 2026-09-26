@@ -769,6 +769,11 @@ def build(
             profile_device_id = normalize_device_id(profile_gpu.get("pci_id"))
             if active_device_id != profile_device_id:
                 continue
+            profile_match = profile_data.get("match", {})
+            cpu_contains = str(profile_match.get("cpu_model_contains", "")).strip().casefold()
+            active_cpu_model = str(cpu.get("model", "")).casefold()
+            if cpu_contains and cpu_contains not in active_cpu_model:
+                continue
             if active_resolution != profile_display.get("resolution"):
                 continue
             mag = profile_data.get("magnificence", {})

@@ -93,3 +93,43 @@ def test_magnificence_database_is_installed():
     assert 'assets/magnificence_profiles.json' in manifest
     assert 'assets/magnificence_profiles.json' in installer
     assert '$INSTALL_DIR/assets/magnificence_profiles.json' in installer
+def make_vega_home(cpu_model: str) -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
+    temp = tempfile.TemporaryDirectory()
+    home = pathlib.Path(temp.name)
+    runtime = home / ".config/openhtpc/runtime"
+    runtime.mkdir(parents=True)
+    caps = {
+        "hardware": {"cpu": {"model": cpu_model}},
+        "graphics": {"devices": [{
+            "active": True, "vendor_id": "1002", "device_id": "15d8",
+            "model": "AMD Picasso/Raven 2",
+        }]},
+        "display": {"active_output": {
+            "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}
+        }},
+    }
+    (runtime / "capabilities.json").write_text(json.dumps(caps), encoding="utf-8")
+    policy.write_preference(home, "presentation_mode", "CINEMA_AUTO")
+    return temp, home
+
+
+def test_vega3_3200ge_4k_resolves_krig():
+    temp, home = make_vega_home("AMD Ryzen 3 PRO 3200GE w/ Radeon Vega Graphics")
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_C2_DVD_KRIG_BILATERAL"
+        assert decision["presentation"]["profile_id"] == "amd_picasso_15d8_vega3_sd_2160p"
+        assert any("KrigBilateral.glsl" in arg for arg in decision["mpv_args"])
+    finally:
+        temp.cleanup()
+
+
+def test_same_15d8_on_other_cpu_does_not_match_vega3_profile():
+    temp, home = make_vega_home("AMD Ryzen 5 3500U with Radeon Vega Mobile Gfx")
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+        assert decision["presentation"]["reason"] == "no_qualified_magnificence_profile"
+        assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
+    finally:
+        temp.cleanup()

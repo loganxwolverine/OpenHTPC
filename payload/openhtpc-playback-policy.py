@@ -104,6 +104,11 @@ def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> d
                 continue
             if vendor_id != _normalize_hex_id(pci_id[0]) or device_id != _normalize_hex_id(pci_id[1]):
                 continue
+            profile_match = profile.get("match", {})
+            cpu_contains = str(profile_match.get("cpu_model_contains", "")).strip().casefold()
+            cpu_model = str(caps.get("hardware", {}).get("cpu", {}).get("model", "")).casefold()
+            if cpu_contains and cpu_contains not in cpu_model:
+                continue
             if profile.get("display_scope", {}).get("resolution") != resolution:
                 continue
             if profile.get("source_scope", {}).get("class") != scope:
