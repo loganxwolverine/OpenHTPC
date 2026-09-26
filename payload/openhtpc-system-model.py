@@ -757,9 +757,16 @@ def build(
     try:
         active_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
         active_device_id = normalize_device_id(active_gpu.get("device_id"))
+        magnificence_mode = mode
+        if not (magnificence_mode.get("width") and magnificence_mode.get("height")):
+            stored_display = caps.get("display", {}) if isinstance(caps.get("display"), dict) else {}
+            stored_output = stored_display.get("active_output", {}) if isinstance(stored_display.get("active_output"), dict) else {}
+            stored_mode = stored_output.get("current_mode", {}) if isinstance(stored_output.get("current_mode"), dict) else {}
+            if stored_mode.get("width") and stored_mode.get("height"):
+                magnificence_mode = stored_mode
         active_resolution = (
-            f"{mode.get('width')}x{mode.get('height')}"
-            if mode.get("width") and mode.get("height")
+            f"{magnificence_mode.get('width')}x{magnificence_mode.get('height')}"
+            if magnificence_mode.get("width") and magnificence_mode.get("height")
             else None
         )
         db = read_json(install / "assets/magnificence_profiles.json")

@@ -256,6 +256,32 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         self.assertEqual(model["magnificence"]["selected_label"], "KrigBilateral")
         self.assertIn("réserve GPU", model["magnificence"]["reason_fr"])
 
+    def test_vega3_magnificence_uses_stored_display_when_live_probe_is_unavailable(self):
+        vega = dict(self.capabilities["graphics"]["devices"][0])
+        vega.update({
+            "pci_address": "0000:0a:00.0",
+            "model": "AMD Picasso/Raven 2",
+            "vendor_id": "1002",
+            "device_id": "15d8",
+            "kernel_driver": "amdgpu",
+            "memory_type": "shared",
+        })
+        self.capabilities["graphics"]["devices"] = [vega]
+        self.capabilities["hardware"]["cpu"]["model"] = "AMD Ryzen 3 PRO 3200GE w/ Radeon Vega Graphics"
+        self.capabilities["display"] = {
+            "active_output": {
+                "connector": "HDMI-A-1",
+                "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0},
+            }
+        }
+        (self.home / ".config/openhtpc/runtime/capabilities.json").write_text(
+            json.dumps(self.capabilities), encoding="utf-8"
+        )
+        model = sys_model.build(self.home, self.install, self.health, self.version, display_snapshot={})
+        self.assertEqual(model["magnificence"]["profile_id"], "amd_picasso_15d8_vega3_sd_2160p")
+        self.assertEqual(model["magnificence"]["selected_label"], "KrigBilateral")
+        self.assertIn("4K", model["magnificence"]["reason_fr"])
+
     def test_validator_exception_and_unavailable_fail_closed(self):
         node = self.dev_root / "dri/renderD129"
         node.parent.mkdir()
