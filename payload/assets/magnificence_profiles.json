@@ -361,7 +361,75 @@
             "technical_verdict": "TECH_PASS",
             "vo_drops": 0,
             "decoder_drops": 0,
-            "delayed_frames": 0
+            "delayed_frames": 0,
+            "endurance": {
+              "repeats": 8,
+              "p95_ms_runs": [
+                19.696,
+                17.945,
+                18.667,
+                17.321,
+                17.695,
+                18.253,
+                18.847,
+                17.987
+              ],
+              "p95_ms_avg": 18.301,
+              "temperature_c_start": 56.0,
+              "temperature_c_loaded_range": [
+                62.0,
+                66.0
+              ],
+              "fan_rpm_loaded_range": [
+                4034,
+                4770
+              ],
+              "drops": 0,
+              "delayed_frames": 0,
+              "mistimed_frames": 0,
+              "mpv_errors": 0,
+              "runtime_render3d_observation": "Approximately 39-41% observed during a real DVD Magnificence session; informational only, not a hard selection metric."
+            }
+          },
+          "RECIPE_MAG_SD_FSRCNNX16_KRIG": {
+            "p95_ms_runs": [
+              23.263,
+              23.81,
+              23.113
+            ],
+            "p95_ms_avg": 23.395,
+            "technical_verdict": "TECH_PASS_PENDING_BLIND_VISUAL",
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "delayed_frames": 0,
+            "mistimed_frames": 0,
+            "endurance": {
+              "repeats": 8,
+              "p95_ms_runs": [
+                22.506,
+                23.452,
+                23.898,
+                22.928,
+                23.177,
+                23.881,
+                24.108,
+                24.11
+              ],
+              "p95_ms_avg": 23.508,
+              "temperature_c_start": 55.0,
+              "temperature_c_loaded_range": [
+                64.0,
+                71.0
+              ],
+              "fan_rpm_loaded_range": [
+                4148,
+                5233
+              ],
+              "drops": 0,
+              "delayed_frames": 0,
+              "mistimed_frames": 0,
+              "mpv_errors": 0
+            }
           }
         }
       },
@@ -392,6 +460,9 @@
           "RECIPE_C2_DVD_KRIG_BILATERAL": "Technically stable, but visually close to PURE in both Arc A310 blind comparisons.",
           "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable; no Arc-specific blind preference demonstrated.",
           "RECIPE_C2_DVD_ARTCNN_C4F16": "Dropped output frames in the Arc A310 4K benchmark."
+        },
+        "experimental_candidates": {
+          "RECIPE_MAG_SD_FSRCNNX16_KRIG": "TECH_PASS over repeated 4K SD load; higher thermal/fan cost than FSRCNNX-8 + Krig; pending blind visual comparison."
         }
       },
       "reference_sources": {
@@ -399,5 +470,19 @@
         "shader_catalog": "assets/shaders/catalog.json"
       }
     }
+  },
+  "selection_policy": {
+    "principle": "Use the strongest visually justified recipe that preserves a practical reserve instead of maximizing idle headroom.",
+    "sd_sdr_progressive": {
+      "target_gpu_use_guidance": "Roughly 50-60% sustained render utilization is acceptable when measured, with approximately 25% or more practical reserve preferred.",
+      "hard_rule": "Do not select from utilization percentage alone.",
+      "required_gates": [
+        "zero sustained frame drops",
+        "stable frame-time under repeated load",
+        "acceptable thermal/acoustic behavior",
+        "blind visual benefit over the lighter recipe"
+      ]
+    },
+    "higher_cost_contexts": "Interlaced content, HDR/tone mapping, higher cadence or other GPU-heavy stages require additional reserve and separate qualification."
   }
 }
