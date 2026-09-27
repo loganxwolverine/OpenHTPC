@@ -431,6 +431,26 @@
               "mpv_errors": 0
             }
           }
+        },
+        "real_dvd_session": {
+          "date": "2026-09-26",
+          "duration_seconds": 4165,
+          "duration_human": "1h09m25s",
+          "presentation_resolved": "RECIPE_MAG_SD_FSRCNNX8_KRIG",
+          "render_gpu": "Intel Arc A310",
+          "render_pci": "0000:03:00.0",
+          "decode_backend": "vaapi",
+          "decode_hardware_active": true,
+          "audio_mode": "BITSTREAM",
+          "audio_codec_observed": "AC3",
+          "passthrough": "ACTIVE",
+          "telemetry_samples": 8002,
+          "max_frame_drops": 0,
+          "max_decoder_frame_drops": 0,
+          "max_delayed_frames": 0,
+          "max_mistimed_frames": 0,
+          "exit_code": 0,
+          "evidence": "Normal physical DVD playback through OPENHTPC; long-session technical validation. No subjective visual claim is inferred from telemetry."
         }
       },
       "visual_qualification": {
