@@ -293,6 +293,13 @@ def run_single_recipe_benchmark(recipe: dict, asset_path: pathlib.Path, dry_run:
     if "WAYLAND_DISPLAY" not in env:
         env["WAYLAND_DISPLAY"] = "wayland-0"
 
+    foreground_benchmark = os.environ.get("OPENHTPC_BENCHMARK_FOREGROUND", "").strip().casefold() in {
+        "1", "true", "yes", "on"
+    }
+    # Technical recipe benchmarks stay off the living-room display by default.
+    # Explicit foreground mode is reserved for supervised visual/qualification work.
+    window_args = ["--fs"] if foreground_benchmark else ["--window-minimized=yes", "--geometry=100%x100%"]
+
     cmd = [
         "mpv",
         f"--include={pure_conf}",
@@ -301,7 +308,7 @@ def run_single_recipe_benchmark(recipe: dict, asset_path: pathlib.Path, dry_run:
         "--keep-open=no",
         "--no-terminal",
         "--cursor-autohide=no",
-        "--fs",
+        *window_args,
     ]
 
 

@@ -30,7 +30,7 @@ class PresentationTruth(unittest.TestCase):
         source = (PAYLOAD / "openhtpc-ui.py").read_text(encoding="utf-8")
         self.assertIn('card((70, 170, 1780, 500), "LECTURE — PRÉFÉRENCES ACTIVES"', source)
         self.assertIn('txt((90, 715), "ACTIONS"', source)
-        for label in ("Mode vidéo", "Langue audio", "Sous-titres", "Application", "Persistance"):
+        for label in ("Mode vidéo", "Traitement", "Shaders", "Langue audio", "Sous-titres", "Application", "Persistance"):
             self.assertIn(label, source)
 
     def test_pure_auto_parent_reopen_and_session_persistence(self):

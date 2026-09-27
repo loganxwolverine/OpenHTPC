@@ -657,23 +657,24 @@ def system_page_png(
         audio = {"AUTO":"Auto","FR":"Français","DEFAULT":"Piste par défaut"}.get(p.get("audio_language_policy"), "Auto")
         subtitle = {"AUTO":"Auto","OFF":"Désactivés","FR_FORCED":"Français forcés","FR_FULL":"Français complets"}.get(p.get("subtitle_policy"), "Auto")
         if presentation == "MAGNIFICENCE":
-            treatment = mag.get("selected_label") or "PURE"
-            if mag.get("status") == "NO_PROFILE":
-                treatment = "PURE (repli de sécurité)"
+            shaders = mag.get("selected_label") or "PURE"
+            no_profile = mag.get("status") == "NO_PROFILE"
+            if no_profile:
+                shaders = "Aucun (repli PURE)"
             rows = [
                 ("Mode vidéo", presentation, "#22c7ff"),
-                ("Matériel", mag.get("gpu") or model.get("overview", {}).get("gpu") or "GPU détecté", None),
-                ("Traitement DVD / SD", treatment, "#22c7ff" if treatment != "PURE (repli de sécurité)" else "#78d9ae"),
-                ("Pourquoi", mag.get("reason_fr") or "Choix automatique selon le matériel et l'affichage.", None),
+                ("Traitement", "Repli de sécurité" if no_profile else "Renforcé", "#78d9ae" if no_profile else "#22c7ff"),
+                ("Shaders", shaders, "#78d9ae" if no_profile else "#22c7ff"),
                 ("Langue audio", audio, None),
                 ("Sous-titres", subtitle, None),
                 ("Application", "À la prochaine lecture", None),
+                ("Persistance", "Configuration utilisateur", None),
             ]
         else:
             rows = [
                 ("Mode vidéo", "PURE", "#78d9ae"),
-                ("Traitement image", "Aucun shader Magnificence", None),
-                ("Pourquoi", "Restitution sans amélioration volontaire", None),
+                ("Traitement", "Aucun", None),
+                ("Shaders", "Aucun", None),
                 ("Langue audio", audio, None),
                 ("Sous-titres", subtitle, None),
                 ("Application", "À la prochaine lecture", None),
