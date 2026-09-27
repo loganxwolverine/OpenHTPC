@@ -184,6 +184,21 @@
       "redistributable": true,
       "mpv_compatibility": "gpu-next, vo=gpu",
       "description": "Spatial upscaling algorithm combining EASU edge scaling and RCAS sharpening."
+    },
+    "openhtpc_vibrance_mild": {
+      "id": "openhtpc_vibrance_mild",
+      "name": "OPENHTPC Vibrance Mild",
+      "filename": "OpenHTPC_Vibrance_Mild.glsl",
+      "functional_class": "COLOR",
+      "hook_stage": "MAIN",
+      "expected_input": "RGB",
+      "expected_output": "RGB",
+      "scaling_factor": 1.0,
+      "license": "Apache-2.0",
+      "license_author": "Steve Dehanne",
+      "redistributable": true,
+      "mpv_compatibility": "gpu-next",
+      "description": "Mild adaptive vibrance for SDR/DVD material, weighted toward low-saturation regions with conservative attenuation around skin-like tones."
     }
   }
 }

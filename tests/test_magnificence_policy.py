@@ -208,17 +208,19 @@ def make_arc_home() -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
     return temp, home
 
 
-def test_arc_a310_4k_resolves_fsrcnnx16_krig():
+def test_arc_a310_4k_resolves_fsrcnnx16_krig_vibrance():
     temp, home = make_arc_home()
     try:
         decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
-        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNNX16_KRIG"
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNNX16_KRIG_VIBRANCE_MILD"
         assert decision["presentation"]["profile_id"] == "intel_arc_a310_8086_56a6_sd_2160p"
         shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
         assert len(shader_args) == 1
         assert "FSRCNNX_x2_16-0-4-1.glsl" in shader_args[0]
         assert "KrigBilateral.glsl" in shader_args[0]
+        assert "OpenHTPC_Vibrance_Mild.glsl" in shader_args[0]
         assert shader_args[0].index("FSRCNNX_x2_16-0-4-1.glsl") < shader_args[0].index("KrigBilateral.glsl")
+        assert shader_args[0].index("KrigBilateral.glsl") < shader_args[0].index("OpenHTPC_Vibrance_Mild.glsl")
     finally:
         temp.cleanup()
 

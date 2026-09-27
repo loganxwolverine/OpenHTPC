@@ -62,6 +62,7 @@ assets/shaders/FSR.glsl
 assets/shaders/FSRCNNX_x2_16-0-4-1.glsl
 assets/shaders/FSRCNNX_x2_8-0-4-1.glsl
 assets/shaders/KrigBilateral.glsl
+assets/shaders/OpenHTPC_Vibrance_Mild.glsl
 assets/shaders/SSimDownscaler.glsl
 assets/shaders/SSimSuperRes.glsl
 assets/shaders/adaptive-sharpen.glsl

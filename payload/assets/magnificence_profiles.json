@@ -467,17 +467,18 @@
         "result": "FSRCNNX-16 + KrigBilateral selected as the Arc A310 SD-to-2160p Magnificence recipe after two independent final blind wins."
       },
       "magnificence": {
-        "selected_recipe": "RECIPE_MAG_SD_FSRCNNX16_KRIG",
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNNX16_KRIG_VIBRANCE_MILD",
         "fallback_recipe": "RECIPE_0_PURE",
         "status": "TECHNICALLY_QUALIFIED_ARC_A310_SD_2160P",
-        "selected_label": "FSRCNNX-16 + KrigBilateral",
+        "selected_label": "FSRCNNX-16 + KrigBilateral + Vibrance légère",
         "selected_shaders": [
           "FSRCNNX_x2_16-0-4-1.glsl",
-          "KrigBilateral.glsl"
+          "KrigBilateral.glsl",
+          "OpenHTPC_Vibrance_Mild.glsl"
         ],
-        "reason": "Two independent remapped blind comparisons on different Alerte film sequences preferred FSRCNNX-16 + KrigBilateral over both PURE and FSRCNNX-8 + Krig. Repeated technical and endurance measurements completed without drops, delayed frames, mistimed frames or MPV errors.",
-        "visual_basis": "Two blind A/B/C comparisons on different representative Alerte DVD-film sequences at 2160p output. Pass 1 ranked FSRCNNX-16 + Krig first; Pass 2 selected FSRCNNX-16 + Krig without hesitation.",
-        "ui_reason_fr": "Traitement renforcé retenu : sur l’Arc A310, FSRCNNX-16 + KrigBilateral a été préféré lors de deux comparaisons aveugles indépendantes, tout en conservant une marge de rendu stable.",
+        "reason": "FSRCNNX-16 + KrigBilateral remains the qualified SD-to-2160p reconstruction chain. OPENHTPC Vibrance Mild was then selected in a blind color comparison as the preferred middle ground between the neutral reference and a stronger vibrance variant; plain saturation +6 was rejected for overly red facial tones.",
+        "visual_basis": "Two independent blind recipe comparisons selected FSRCNNX-16 + KrigBilateral for reconstruction. A subsequent blind A/B/C color comparison selected OPENHTPC Vibrance Mild as the preferred color extension.",
+        "ui_reason_fr": "Traitement renforcé : FSRCNNX-16 + KrigBilateral + Vibrance légère.",
         "rejected_default_candidates": {
           "RECIPE_C2_DVD_KRIG_BILATERAL": "Technically stable, but visually close to PURE in both Arc A310 blind comparisons.",
           "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable; no Arc-specific blind preference demonstrated.",
@@ -485,6 +486,20 @@
           "RECIPE_MAG_SD_FSRCNNX8_KRIG": "Technically efficient, but ranked below FSRCNNX-16 + Krig in two later Arc A310 blind comparisons."
         },
         "experimental_candidates": {}
+      },
+      "color_extension_validation": {
+        "date": "2026-09-27",
+        "source": "Alerte DVD-film local review at 3840x2160",
+        "method": "Blind A/B/C comparison with independently hidden mapping; base Magnificence chain held constant while color extension changed.",
+        "candidates": {
+          "REFERENCE": "FSRCNNX-16 + KrigBilateral without color extension",
+          "VIBRANCE_MILD": "FSRCNNX-16 + KrigBilateral + OPENHTPC Vibrance Mild",
+          "VIBRANCE_MEDIUM": "FSRCNNX-16 + KrigBilateral + stronger adaptive vibrance"
+        },
+        "observation": "Reference judged neutral; Mild judged the best middle ground; Medium judged the most vivid. Earlier plain saturation +6 was rejected because some faces became too red.",
+        "user_selection": "VIBRANCE_MILD",
+        "technical_observation": "Shader compiled and rendered through gpu-next; live vo-passes showed the OPENHTPC Vibrance Mild pass at approximately 0.2 ms. No separate long-endurance requalification was performed for the color pass.",
+        "status": "USER_VISUAL_VALIDATED_LOW_COST_EXTENSION"
       },
       "reference_sources": {
         "visual_qualification": "Local blind film review 2026-09-26",
