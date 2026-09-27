@@ -55,7 +55,7 @@ def _normalize_hex_id(value: Any) -> str | None:
 
 
 def _magnificence_source_scope(kind: str, probe: dict | None) -> str | None:
-    """Map current media to the first Magnificence scope: DVD / SD film."""
+    """Map media to a conservative Magnificence source class."""
     if kind == "dvd":
         return "DVD_PAL_FILM"
     if kind != "local" or not isinstance(probe, dict):
@@ -74,6 +74,24 @@ def _magnificence_source_scope(kind: str, probe: dict | None) -> str | None:
         return None
     if width and height and width <= 720 and height <= 576:
         return "DVD_PAL_FILM"
+
+    # First HD scope: progressive film-rate material only.  Do not fold
+    # 720p50/60, interlaced video or unknown cadence into the same profile.
+    if width and height and width <= 1280 and height <= 720 and (width > 720 or height > 576):
+        field_order = str(video.get("field_order") or "").strip().lower()
+        if field_order in {"tt", "bb", "tb", "bt"}:
+            return None
+        rate = str(video.get("avg_frame_rate") or video.get("r_frame_rate") or "").strip()
+        try:
+            if "/" in rate:
+                num, den = rate.split("/", 1)
+                fps = float(num) / float(den)
+            else:
+                fps = float(rate)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        if 0 < fps <= 30.0:
+            return "HD_720P_FILM"
     return None
 
 

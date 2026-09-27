@@ -61,6 +61,54 @@ def test_n150_local_576p_uses_same_profile():
         temp.cleanup()
 
 
+def test_720p_film_is_classified_but_falls_back_until_profile_exists():
+    temp, home = make_home()
+    try:
+        probe = {"streams": [{
+            "codec_type": "video", "codec_name": "h264",
+            "width": 1280, "height": 536,
+            "r_frame_rate": "24000/1001", "avg_frame_rate": "24000/1001",
+            "field_order": "progressive",
+        }]}
+        assert policy._magnificence_source_scope("local", probe) == "HD_720P_FILM"
+        decision = policy.resolve(home, kind="local", probe=probe, gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+        assert decision["presentation"]["reason"] == "no_qualified_magnificence_profile"
+        assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
+    finally:
+        temp.cleanup()
+
+
+def test_720p_high_frame_rate_is_not_folded_into_film_profile():
+    temp, home = make_home()
+    try:
+        probe = {"streams": [{
+            "codec_type": "video", "codec_name": "h264",
+            "width": 1280, "height": 720,
+            "r_frame_rate": "50/1", "avg_frame_rate": "50/1",
+            "field_order": "progressive",
+        }]}
+        assert policy._magnificence_source_scope("local", probe) is None
+        decision = policy.resolve(home, kind="local", probe=probe, gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+    finally:
+        temp.cleanup()
+
+
+def test_720p_interlaced_is_not_folded_into_film_profile():
+    temp, home = make_home()
+    try:
+        probe = {"streams": [{
+            "codec_type": "video", "codec_name": "h264",
+            "width": 1280, "height": 720,
+            "r_frame_rate": "25/1", "avg_frame_rate": "25/1",
+            "field_order": "tt",
+        }]}
+        assert policy._magnificence_source_scope("local", probe) is None
+    finally:
+        temp.cleanup()
+
+
 def test_1080p_local_falls_back_to_pure():
     temp, home = make_home()
     try:
