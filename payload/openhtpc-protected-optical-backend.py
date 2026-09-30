@@ -180,7 +180,7 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
             diag = {"audio_sink_id": None, "audio_sink_is_hdmi": False, "iec958_prepare_attempted": False, "iec958_prepare_status": "FAILED", "iec958_prepare_reason": "PREPARATION_EXCEPTION"}
         pw_diag_holder[0] = diag
         return diag
-    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--force-window=immediate","--border=no","--terminal=no",
+    command=[mpv,"--no-config",f"--include={runtime}","--fullscreen=yes","--border=no","--terminal=no",
              "--cache=yes","--demuxer-readahead-secs=12.0","--demuxer-max-bytes=268435456","--demuxer-max-back-bytes=67108864",
              f"--log-file={attempt}",*policy_args,f"--bluray-device={request['device']}","--","bd://"]
     gpu_binding = decision.get("gpu_render_binding") or decision.get("gpu_binding") or {}

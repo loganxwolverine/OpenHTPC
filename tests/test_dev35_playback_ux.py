@@ -86,6 +86,11 @@ class EffectiveOsd(unittest.TestCase):
             self.assertIn("presentation_requested", source)
             self.assertIn("presentation_resolved", source)
 
+    def test_production_playback_does_not_force_immediate_window(self):
+        for player in ("openhtpc-play", "openhtpc-play-dvd", "openhtpc-protected-optical-backend.py"):
+            source = (PAYLOAD / player).read_text(encoding="utf-8")
+            self.assertNotIn("--force-window=immediate", source)
+
 
 class VideoModeSingleEntryPoint(unittest.TestCase):
     def test_dvd_menu_does_not_expose_video_mode(self):

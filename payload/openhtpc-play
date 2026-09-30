@@ -316,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
 
     attempt = tempfile.NamedTemporaryFile(prefix="openhtpc-mpv-", delete=False)
     attempt_path = pathlib.Path(attempt.name); attempt.close()
-    command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--force-window=immediate", "--border=no", "--terminal=no", *policy_args, "--osd-playing-msg-duration=5000", "--osd-align-x=left", "--osd-align-y=top", "--osd-margin-x=48", "--osd-margin-y=48", "--osd-font-size=32", f"--osd-playing-msg={osd}", f"--log-file={attempt_path}", "--", str(media)]
+    command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--border=no", "--terminal=no", *policy_args, "--osd-playing-msg-duration=5000", "--osd-align-x=left", "--osd-align-y=top", "--osd-margin-x=48", "--osd-margin-y=48", "--osd-font-size=32", f"--osd-playing-msg={osd}", f"--log-file={attempt_path}", "--", str(media)]
     cwd = os.getcwd()
     gpu_binding = decision.get("gpu_render_binding") or decision.get("gpu_binding") or {}
     common = dict(kind="local", source_id=source_id(source), media="<redacted>", extension=media.suffix.casefold(), media_path_type="absolute", media_exists=True, runtime=decision["presentation"]["resolved"].casefold(), mpv=mpv, argv_count=len(command), cwd_type="independent", gpu_render_binding=gpu_binding.get("status", "AUTO_FALLBACK"))
