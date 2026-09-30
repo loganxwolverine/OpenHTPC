@@ -10,7 +10,9 @@ import importlib.machinery
 import importlib.util
 import json
 import pathlib
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -271,6 +273,24 @@ class TestRefreshModesetSettling(unittest.TestCase):
         self.assertNotIn('hwdec=no', refresh_code)
         self.assertNotIn('amdgpu', refresh_code.lower())
         self.assertNotIn('vega', refresh_code.lower())
+
+    def test_17_teardown_guard_releases_process_after_mpv_exit_marker(self):
+        with tempfile.TemporaryDirectory() as value:
+            root = pathlib.Path(value)
+            log = root / 'mpv.log'
+            script = root / 'hang.py'
+            script.write_text(
+                "import pathlib,sys,time\n"
+                "log=pathlib.Path(next(x.split('=',1)[1] for x in sys.argv[1:] if x.startswith('--log-file=')))\n"
+                "log.write_text('Exiting... (Quit)\\n')\n"
+                "time.sleep(30)\n"
+            )
+            started = time.monotonic()
+            with mock.patch.object(M, 'TEARDOWN_GRACE_SECONDS', 0.1):
+                result, forced = M._run_guarded_subprocess([sys.executable, str(script), f'--log-file={log}'], check=False)
+            self.assertTrue(forced)
+            self.assertEqual(result.returncode, 0)
+            self.assertLess(time.monotonic() - started, 2.0)
 
 
 if __name__ == '__main__':

@@ -554,6 +554,78 @@ class TelemetryCollector:
         }
 
 
+TEARDOWN_EXIT_MARKER = "Exiting... ("
+TEARDOWN_GRACE_SECONDS = 1.5
+
+
+def _log_path_from_command(command):
+    if not isinstance(command, (list, tuple)):
+        return None
+    for item in command:
+        if isinstance(item, str) and item.startswith("--log-file="):
+            return pathlib.Path(item.split("=", 1)[1])
+    return None
+
+
+def _run_guarded_subprocess(command, **kwargs):
+    """Run real MPV and force-release it only after MPV has announced its own exit.
+
+    NVIDIA/Wayland/Vulkan can occasionally hang in gpu-next/libplacebo teardown
+    after `Exiting... (Quit)` has already been logged.  At that point playback is
+    over from the user's perspective; leaving the process alive pins the final
+    frame on screen indefinitely.
+    """
+    opts = dict(kwargs)
+    check = bool(opts.pop("check", False))
+    timeout = opts.pop("timeout", None)
+    if "input" in opts or "capture_output" in opts or opts.get("stdout") == subprocess.PIPE or opts.get("stderr") == subprocess.PIPE:
+        return subprocess.run(command, check=check, timeout=timeout, **opts), False
+
+    process = subprocess.Popen(command, **opts)
+    log_path = _log_path_from_command(command)
+    offset = 0
+    exit_seen_at = None
+    started = time.monotonic()
+    forced = False
+    try:
+        while process.poll() is None:
+            now = time.monotonic()
+            if timeout is not None and now - started >= timeout:
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(command, timeout)
+            if log_path is not None:
+                try:
+                    with log_path.open("r", encoding="utf-8", errors="replace") as stream:
+                        stream.seek(offset)
+                        chunk = stream.read()
+                        offset = stream.tell()
+                    if exit_seen_at is None and TEARDOWN_EXIT_MARKER in chunk:
+                        exit_seen_at = now
+                except OSError:
+                    pass
+            if exit_seen_at is not None and now - exit_seen_at >= TEARDOWN_GRACE_SECONDS:
+                forced = True
+                process.terminate()
+                try:
+                    process.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=1.0)
+                break
+            time.sleep(0.05)
+        returncode = 0 if forced else process.returncode
+        result = subprocess.CompletedProcess(command, returncode)
+        if check and result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, command)
+        return result, forced
+    finally:
+        if process.poll() is None:
+            process.kill()
+            try: process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired: pass
+
+
 def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
     with matching(home, media, dispatch_id=dispatch_id) as tx:
         switched = bool(tx and tx.record.get('switch_requested') and tx.record.get('switch_verified') and tx.record.get('status') == 'APPLIED')
@@ -589,8 +661,12 @@ def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_i
 
         collector = TelemetryCollector(sock_path)
         collector.start()
+        teardown_forced = False
         try:
-            result = runner(mpv_cmd, **kwargs)
+            if runner is subprocess.run:
+                result, teardown_forced = _run_guarded_subprocess(mpv_cmd, **kwargs)
+            else:
+                result = runner(mpv_cmd, **kwargs)
         finally:
             collector.stop()
             if sock_path.exists():
@@ -604,6 +680,7 @@ def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_i
                     tx.record['status'],
                     playback_started=True,
                     playback_exit_code=getattr(result, 'returncode', None),
+                    playback_teardown_forced=teardown_forced,
                     presentation_telemetry=telemetry,
                 )
                 if telemetry:
