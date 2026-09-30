@@ -505,6 +505,89 @@
         "visual_qualification": "Local blind film review 2026-09-26",
         "shader_catalog": "assets/shaders/catalog.json"
       }
+    },
+    "nvidia_rtx3050_10de_2507_sd_2160p": {
+      "gpu": {
+        "vendor": "NVIDIA",
+        "model": "GeForce RTX 3050",
+        "pci_id": "10de:2507",
+        "architecture": "Ampere / GA106",
+        "hardware_class": "HIGH"
+      },
+      "reference_platform": "Core i5-7500 / NVIDIA GeForce RTX 3050 8 GB",
+      "software": {
+        "os": "Fedora 44",
+        "nvidia_driver": "615.71.09",
+        "session": "KDE/Wayland",
+        "video_backend": "nvdec",
+        "render_backend": "vulkan"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-09-30",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_WITH_LIVE_VISUAL_VALIDATION",
+        "gpu_tier": "HIGH",
+        "runtime_benchmark_required": false,
+        "rationale": "RTX 3050 HIGH profile selected from known hardware class, then validated by live 4K film review on multiple DVD masters; runtime benchmarking is not used for recipe selection."
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNN_HQ32_KRIG_SSIM_VIBRANCE_MILD",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "HARDWARE_CLASSIFIED_VISUALLY_VALIDATED_RTX3050_SD_2160P",
+        "selected_label": "FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance légère",
+        "selected_shaders": [
+          "FSRCNN_x2_r2_32-0-2.glsl",
+          "KrigBilateral.glsl",
+          "SSimSuperRes.glsl",
+          "OpenHTPC_Vibrance_Mild.glsl"
+        ],
+        "mpv_args": [
+          "--fbo-format=rgba16hf",
+          "--vf=bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced",
+          "--scale=ewa_lanczossharp",
+          "--dscale=mitchell",
+          "--sigmoid-upscaling=yes"
+        ],
+        "reason": "HIGH-class DVD-to-4K recipe validated on Alerte and GOTHIKA: FSRCNN-HQ r2_32 reconstructs luma detail, KrigBilateral reconstructs DVD 4:2:0 chroma, SSimSuperRes supplies controlled super-resolution finishing with antiringing, and OpenHTPC Vibrance Mild adds restrained presence.",
+        "visual_basis": "Live 4K comparison on two distinct DVD masters. RAVU/CfL was judged too subtle for the HIGH tier. FSRCNN-HQ + Krig + SSimSuperRes was clearly preferred. A direct Krig-vs-CfL 4K frame comparison on a brighter GOTHIKA scene found no meaningful visual reason to replace Krig.",
+        "ui_reason_fr": "Profil HIGH DVD vers 4K validé : FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance légère, avec dé-entrelacement CUDA uniquement lorsque la source est marquée entrelacée.",
+        "rejected_candidates": {
+          "RECIPE_MAG_SD_RAVU_ZOOM_CFL_VIBRANCE_MILD": "Stable and efficient, but visual gain was too subtle to justify the HIGH tier.",
+          "FSRCNN_HQ32_CFL_SSIM_VIBRANCE": "Direct 4K same-frame challenge showed only very small chroma differences and no convincing visual advantage over KrigBilateral.",
+          "ARTCNN_C4F32_CFL_VIBRANCE": "No convincing visual gap in live review; not retained for the HIGH profile."
+        }
+      },
+      "reference_sources": {
+        "shader_catalog": "assets/shaders/catalog.json",
+        "fsrcnn_hq_release": "https://github.com/igv/FSRCNN-TensorFlow/releases/tag/1.0"
+      },
+      "validation": {
+        "date": "2026-09-30",
+        "method": "LIVE_VISUAL_REVIEW_AND_CONTINUOUS_PLAYBACK_OBSERVATION",
+        "masters": [
+          "Alerte",
+          "GOTHIKA"
+        ],
+        "output": "3840x2160",
+        "cadence": "25 fps for PAL source; BWDIF CUDA send_frame only for interlaced frames",
+        "observations": [
+          "FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes produced the first clearly preferred HIGH-class result in live review.",
+          "OpenHTPC Vibrance Mild added useful presence without the red skin-tone shift seen with generic saturation.",
+          "Continuous playback remained stable after removing artificial short-clip EOF test harness freezes.",
+          "Observed RTX 3050 utilization during validated playback was roughly 39-53%, leaving practical reserve.",
+          "CfL Prediction was compared against KrigBilateral at the same 4K frame on a brighter GOTHIKA scene; difference was very small and did not justify replacing KrigBilateral."
+        ]
+      }
     }
   },
   "selection_policy": {

@@ -237,3 +237,67 @@ def test_arc_a310_1080p_has_no_4k_profile():
         assert decision["presentation"]["resolved"] == "PURE"
     finally:
         temp.cleanup()
+
+def make_rtx3050_home() -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
+    temp = tempfile.TemporaryDirectory()
+    home = pathlib.Path(temp.name)
+    runtime = home / ".config/openhtpc/runtime"
+    runtime.mkdir(parents=True)
+    caps = {
+        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i5-7500 CPU @ 3.40GHz"}},
+        "graphics": {"devices": [
+            {
+                "active": False, "vendor_id": "8086", "device_id": "5912",
+                "model": "Intel Corporation Kaby Lake-S GT2 [HD Graphics 630]",
+            },
+            {
+                "active": True, "vendor_id": "10de", "device_id": "2507",
+                "model": "NVIDIA Corporation GA106 [GeForce RTX 3050]",
+            },
+        ]},
+        "display": {"active_output": {
+            "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}
+        }},
+    }
+    (runtime / "capabilities.json").write_text(json.dumps(caps), encoding="utf-8")
+    policy.write_preference(home, "presentation_mode", "CINEMA_AUTO")
+    return temp, home
+
+
+def test_rtx3050_4k_resolves_hq_krig_ssim_vibrance():
+    temp, home = make_rtx3050_home()
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNN_HQ32_KRIG_SSIM_VIBRANCE_MILD"
+        assert decision["presentation"]["profile_id"] == "nvidia_rtx3050_10de_2507_sd_2160p"
+        shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
+        assert len(shader_args) == 1
+        chain = shader_args[0]
+        assert "FSRCNN_x2_r2_32-0-2.glsl" in chain
+        assert "KrigBilateral.glsl" in chain
+        assert "SSimSuperRes.glsl" in chain
+        assert "OpenHTPC_Vibrance_Mild.glsl" in chain
+        assert chain.index("FSRCNN_x2_r2_32-0-2.glsl") < chain.index("KrigBilateral.glsl")
+        assert chain.index("KrigBilateral.glsl") < chain.index("SSimSuperRes.glsl")
+        assert chain.index("SSimSuperRes.glsl") < chain.index("OpenHTPC_Vibrance_Mild.glsl")
+        assert "--fbo-format=rgba16hf" in decision["mpv_args"]
+        assert "--vf=bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced" in decision["mpv_args"]
+        assert "--scale=ewa_lanczossharp" in decision["mpv_args"]
+        assert "--dscale=mitchell" in decision["mpv_args"]
+        assert "--sigmoid-upscaling=yes" in decision["mpv_args"]
+    finally:
+        temp.cleanup()
+
+
+def test_rtx3050_1080p_does_not_use_4k_profile():
+    temp, home = make_rtx3050_home()
+    try:
+        caps_path = home / ".config/openhtpc/runtime/capabilities.json"
+        caps = json.loads(caps_path.read_text(encoding="utf-8"))
+        caps["display"]["active_output"]["current_mode"]["width"] = 1920
+        caps["display"]["active_output"]["current_mode"]["height"] = 1080
+        caps_path.write_text(json.dumps(caps), encoding="utf-8")
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+    finally:
+        temp.cleanup()

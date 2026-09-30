@@ -133,17 +133,20 @@ def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> d
                 continue
 
             mag = profile.get("magnificence", {})
-            if not str(mag.get("status", "")).startswith("TECHNICALLY_QUALIFIED"):
+            status = str(mag.get("status", ""))
+            if not status.startswith(("TECHNICALLY_QUALIFIED", "HARDWARE_CLASSIFIED")):
                 continue
             shader_names = [str(item) for item in mag.get("selected_shaders", []) if item]
             shader_paths = [install / "assets/shaders" / name for name in shader_names]
             if any(not path.is_file() for path in shader_paths):
                 return None
+            profile_mpv_args = [str(item) for item in mag.get("mpv_args", []) if isinstance(item, str) and item.startswith("--")]
             return {
                 "profile_id": profile_id,
                 "recipe_id": mag.get("selected_recipe", "RECIPE_0_PURE"),
                 "label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
                 "shader_files": [str(path) for path in shader_paths],
+                "mpv_args": profile_mpv_args,
                 "source_scope": scope,
                 "display": resolution,
             }
@@ -1355,6 +1358,7 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
                 "source_scope": magnificence_choice["source_scope"],
                 "display": magnificence_choice["display"],
                 "shader_files": magnificence_choice["shader_files"],
+                "mpv_args": magnificence_choice.get("mpv_args", []),
             }
     audio = choose_audio(prefs["audio_language_policy"], probe)
     source_audio_tracks = _typed_streams(probe or {}, "audio")
@@ -1569,9 +1573,11 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
 
     mpv_gpu_args = list((gpu_binding or {}).get("mpv_args", []))
     magnificence_args: list[str] = []
-    if magnificence_choice is not None and magnificence_choice.get("shader_files"):
-        shader_value = ":".join(magnificence_choice["shader_files"])
-        magnificence_args.append(f"--glsl-shaders={shader_value}")
+    if magnificence_choice is not None:
+        magnificence_args.extend(magnificence_choice.get("mpv_args", []))
+        if magnificence_choice.get("shader_files"):
+            shader_value = ":".join(magnificence_choice["shader_files"])
+            magnificence_args.append(f"--glsl-shaders={shader_value}")
     mpv_args = [
         *mpv_gpu_args,
         *mpv_decode_args,

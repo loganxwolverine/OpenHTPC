@@ -60,6 +60,7 @@ assets/shaders/CfL_Prediction.glsl
 assets/shaders/CfL_Prediction_Lite.glsl
 assets/shaders/FSR.glsl
 assets/shaders/FSRCNNX_x2_16-0-4-1.glsl
+assets/shaders/FSRCNN_x2_r2_32-0-2.glsl
 assets/shaders/FSRCNNX_x2_8-0-4-1.glsl
 assets/shaders/KrigBilateral.glsl
 assets/shaders/OpenHTPC_Vibrance_Mild.glsl

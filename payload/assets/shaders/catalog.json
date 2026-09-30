@@ -3,7 +3,7 @@
   "catalog_version": "v1.0.0",
   "upstream_repository": "https://github.com/loganxwolverine/shaders",
   "upstream_commit": "e2bfe0ccd7eb7b404f9262365bed88771f69a291",
-  "audit_date": "2026-08-16",
+  "audit_date": "2026-09-30",
   "shaders": {
     "cfl_prediction_lite": {
       "id": "cfl_prediction_lite",
@@ -109,6 +109,21 @@
       "redistributable": true,
       "mpv_compatibility": "gpu-next, vo=gpu",
       "description": "Heavy Super-Resolution Convolutional Neural Network with 16 feature channels."
+    },
+    "fsrcnn_hq_r2_32": {
+      "id": "fsrcnn_hq_r2_32",
+      "name": "FSRCNN-HQ r2 32-0-2",
+      "filename": "FSRCNN_x2_r2_32-0-2.glsl",
+      "functional_class": "UPSCALE",
+      "hook_stage": "LUMA",
+      "expected_input": "LUMA",
+      "expected_output": "LUMA_2X",
+      "scaling_factor": 2.0,
+      "license": "GPL-3.0 (upstream repository; repository also contains MIT-licensed components)",
+      "license_author": "igv / upstream FSRCNN-TensorFlow contributors",
+      "redistributable": true,
+      "mpv_compatibility": "gpu-next, vo=gpu; requires rgba16hf with Vulkan",
+      "description": "FSRCNN-HQ 2x luma super-resolution network (r2, 32 feature channels), trained with distort=True for slight compression-artifact reduction."
     },
     "artcnn_c4f16": {
       "id": "artcnn_c4f16",
