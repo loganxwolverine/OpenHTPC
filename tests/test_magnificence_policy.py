@@ -244,7 +244,7 @@ def make_rtx3050_home() -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
     runtime = home / ".config/openhtpc/runtime"
     runtime.mkdir(parents=True)
     caps = {
-        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i5-7500 CPU @ 3.40GHz"}},
+        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz"}},
         "graphics": {"devices": [
             {
                 "active": False, "vendor_id": "8086", "device_id": "5912",
@@ -296,6 +296,57 @@ def test_rtx3050_1080p_does_not_use_4k_profile():
         caps = json.loads(caps_path.read_text(encoding="utf-8"))
         caps["display"]["active_output"]["current_mode"]["width"] = 1920
         caps["display"]["active_output"]["current_mode"]["height"] = 1080
+        caps_path.write_text(json.dumps(caps), encoding="utf-8")
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+    finally:
+        temp.cleanup()
+
+
+def make_hd630_home() -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
+    temp = tempfile.TemporaryDirectory()
+    home = pathlib.Path(temp.name)
+    runtime = home / ".config/openhtpc/runtime"
+    runtime.mkdir(parents=True)
+    caps = {
+        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz"}},
+        "graphics": {"devices": [{
+            "active": True, "vendor_id": "8086", "device_id": "5912",
+            "model": "Intel Corporation Kaby Lake-S GT2 [HD Graphics 630]",
+        }]},
+        "display": {"active_output": {
+            "current_mode": {"width": 1920, "height": 1080, "refresh_hz": 60.0}
+        }},
+    }
+    (runtime / "capabilities.json").write_text(json.dumps(caps), encoding="utf-8")
+    policy.write_preference(home, "presentation_mode", "CINEMA_AUTO")
+    return temp, home
+
+
+def test_hd630_1080p_resolves_fsrcnnx8_krig():
+    temp, home = make_hd630_home()
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNNX8_KRIG"
+        assert decision["presentation"]["profile_id"] == "intel_hd630_8086_5912_sd_1080p"
+        shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
+        assert len(shader_args) == 1
+        chain = shader_args[0]
+        assert "FSRCNNX_x2_8-0-4-1.glsl" in chain
+        assert "KrigBilateral.glsl" in chain
+        assert chain.index("FSRCNNX_x2_8-0-4-1.glsl") < chain.index("KrigBilateral.glsl")
+        assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
+    finally:
+        temp.cleanup()
+
+
+def test_hd630_4k_has_no_1080p_profile():
+    temp, home = make_hd630_home()
+    try:
+        caps_path = home / ".config/openhtpc/runtime/capabilities.json"
+        caps = json.loads(caps_path.read_text(encoding="utf-8"))
+        caps["display"]["active_output"]["current_mode"]["width"] = 3840
+        caps["display"]["active_output"]["current_mode"]["height"] = 2160
         caps_path.write_text(json.dumps(caps), encoding="utf-8")
         decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
         assert decision["presentation"]["resolved"] == "PURE"

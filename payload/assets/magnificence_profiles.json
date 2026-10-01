@@ -506,6 +506,75 @@
         "shader_catalog": "assets/shaders/catalog.json"
       }
     },
+    "intel_hd630_8086_5912_sd_1080p": {
+      "gpu": {
+        "vendor": "Intel",
+        "model": "Intel HD Graphics 630",
+        "pci_id": "8086:5912",
+        "architecture": "Kaby Lake GT2",
+        "hardware_class": "MEDIUM"
+      },
+      "reference_platform": "Core i7-7700 / Intel HD Graphics 630",
+      "software": {
+        "os": "Fedora 44",
+        "mesa": "26.2.3",
+        "session": "KDE/Wayland",
+        "video_backend": "vaapi",
+        "render_backend": "vulkan"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "1920x1080",
+        "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-10-01",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_WITH_LIVE_VISUAL_VALIDATION",
+        "gpu_tier": "MEDIUM",
+        "runtime_benchmark_required": false,
+        "rationale": "Dedicated HTPC profile selected from live DVD playback. Challenging GOTHIKA scenes with rain, flashes, lights and water showed no visible loss or playback drop; runtime benchmarking is not used for recipe selection."
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNNX8_KRIG",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "HARDWARE_CLASSIFIED_VISUALLY_VALIDATED_HD630_SD_1080P",
+        "selected_label": "FSRCNNX-8 + KrigBilateral",
+        "selected_shaders": [
+          "FSRCNNX_x2_8-0-4-1.glsl",
+          "KrigBilateral.glsl"
+        ],
+        "mpv_args": [
+          "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]"
+        ],
+        "reason": "FSRCNNX-8 adds visible luma reconstruction over the lightweight Krig-only path while KrigBilateral reconstructs DVD 4:2:0 chroma. The combination remained stable during demanding live film scenes on a dedicated HD 630 HTPC.",
+        "visual_basis": "Live 1080p review of GOTHIKA, including rain, flashes, lighting changes, water and other visually busy scenes; no playback loss was observed.",
+        "ui_reason_fr": "Profil MEDIUM DVD vers 1080p validé : FSRCNNX-8 + KrigBilateral, avec BWDIF send_frame pour les trames entrelacées."
+      },
+      "validation": {
+        "date": "2026-10-01",
+        "method": "LIVE_VISUAL_REVIEW_AND_CONTINUOUS_PLAYBACK_OBSERVATION",
+        "masters": [
+          "GOTHIKA"
+        ],
+        "output": "1920x1080",
+        "cadence": "25 fps PAL source; BWDIF send_frame only for interlaced frames",
+        "observations": [
+          "No visible playback loss was observed across demanding rain, flash, lighting and water scenes.",
+          "VA-API MPEG-2 decode and Vulkan rendering remained stable.",
+          "intel_gpu_top observed Render/3D around 87-91% with FSRCNNX-8 + KrigBilateral and about 1% Video engine activity during the sampled passage.",
+          "The narrow render reserve is accepted for this profile because OPENHTPC is a dedicated HTPC workload; PURE remains the safe fallback."
+        ]
+      },
+      "reference_sources": {
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
+    },
     "nvidia_rtx3050_10de_2507_sd_2160p": {
       "gpu": {
         "vendor": "NVIDIA",
@@ -514,7 +583,7 @@
         "architecture": "Ampere / GA106",
         "hardware_class": "HIGH"
       },
-      "reference_platform": "Core i5-7500 / NVIDIA GeForce RTX 3050 8 GB",
+      "reference_platform": "Core i7-7700 / NVIDIA GeForce RTX 3050 8 GB",
       "software": {
         "os": "Fedora 44",
         "nvidia_driver": "615.71.09",
