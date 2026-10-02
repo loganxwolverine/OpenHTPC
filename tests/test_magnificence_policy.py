@@ -352,3 +352,73 @@ def test_hd630_4k_has_no_1080p_profile():
         assert decision["presentation"]["resolved"] == "PURE"
     finally:
         temp.cleanup()
+
+
+def make_amd_4k_home(device_id: str, model: str) -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
+    temp = tempfile.TemporaryDirectory()
+    home = pathlib.Path(temp.name)
+    runtime = home / ".config/openhtpc/runtime"
+    runtime.mkdir(parents=True)
+    caps = {
+        "hardware": {"cpu": {"model": "Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz"}},
+        "graphics": {"devices": [{
+            "active": True, "vendor_id": "1002", "device_id": device_id,
+            "model": model,
+        }]},
+        "display": {"active_output": {
+            "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}
+        }},
+    }
+    (runtime / "capabilities.json").write_text(json.dumps(caps), encoding="utf-8")
+    policy.write_preference(home, "presentation_mode", "CINEMA_AUTO")
+    return temp, home
+
+
+def test_rx580_4k_resolves_strong_chain():
+    temp, home = make_amd_4k_home("67df", "AMD Radeon RX 580")
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNNX16_KRIG_SSIM_VIBRANCE_MILD"
+        assert decision["presentation"]["profile_id"] == "amd_rx580_1002_67df_sd_2160p"
+        shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
+        assert len(shader_args) == 1
+        chain = shader_args[0]
+        for shader in ("FSRCNNX_x2_16-0-4-1.glsl", "KrigBilateral.glsl", "SSimSuperRes.glsl", "OpenHTPC_Vibrance_Mild.glsl"):
+            assert shader in chain
+        assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
+        assert "--fbo-format=rgba16hf" in decision["mpv_args"]
+    finally:
+        temp.cleanup()
+
+
+def test_rx5700xt_4k_resolves_high_chain():
+    temp, home = make_amd_4k_home("731f", "AMD Radeon RX 5700 XT")
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "RECIPE_MAG_SD_FSRCNN_HQ32_KRIG_SSIM_VIBRANCE_MILD"
+        assert decision["presentation"]["profile_id"] == "amd_rx5700xt_1002_731f_sd_2160p"
+        shader_args = [arg for arg in decision["mpv_args"] if arg.startswith("--glsl-shaders=")]
+        assert len(shader_args) == 1
+        chain = shader_args[0]
+        for shader in ("FSRCNN_x2_r2_32-0-2.glsl", "KrigBilateral.glsl", "SSimSuperRes.glsl", "OpenHTPC_Vibrance_Mild.glsl"):
+            assert shader in chain
+        assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
+        assert "--fbo-format=rgba16hf" in decision["mpv_args"]
+    finally:
+        temp.cleanup()
+
+
+def test_qualified_amd_4k_profiles_do_not_apply_at_1080p():
+    for device_id, model in (("67df", "AMD Radeon RX 580"), ("731f", "AMD Radeon RX 5700 XT")):
+        temp, home = make_amd_4k_home(device_id, model)
+        try:
+            caps_path = home / ".config/openhtpc/runtime/capabilities.json"
+            caps = json.loads(caps_path.read_text(encoding="utf-8"))
+            caps["display"]["active_output"]["current_mode"]["width"] = 1920
+            caps["display"]["active_output"]["current_mode"]["height"] = 1080
+            caps_path.write_text(json.dumps(caps), encoding="utf-8")
+            decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+            assert decision["presentation"]["resolved"] == "PURE"
+            assert decision["presentation"]["reason"] == "no_qualified_magnificence_profile"
+        finally:
+            temp.cleanup()

@@ -657,6 +657,160 @@
           "CfL Prediction was compared against KrigBilateral at the same 4K frame on a brighter GOTHIKA scene; difference was very small and did not justify replacing KrigBilateral."
         ]
       }
+    },
+    "amd_rx580_1002_67df_sd_2160p": {
+      "gpu": {
+        "vendor": "AMD",
+        "model": "Radeon RX 580",
+        "pci_id": "1002:67df",
+        "architecture": "Polaris 10 / GCN 4",
+        "hardware_class": "STRONG"
+      },
+      "reference_platform": "Core i7-7700 / Radeon RX 580",
+      "software": {
+        "os": "Fedora 44",
+        "mesa": "26.2.3",
+        "session": "KDE/Wayland",
+        "video_backend": "vaapi",
+        "render_backend": "vulkan"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-10-01",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_WITH_LIVE_VISUAL_VALIDATION",
+        "gpu_tier": "STRONG",
+        "runtime_benchmark_required": false,
+        "rationale": "RX 580 STRONG profile selected from known hardware class and validated during real DVD-to-4K playback. Runtime benchmarking is not used for recipe selection."
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNNX16_KRIG_SSIM_VIBRANCE_MILD",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "HARDWARE_CLASSIFIED_VISUALLY_VALIDATED_RX580_SD_2160P",
+        "selected_label": "FSRCNNX-16 + KrigBilateral + SSimSuperRes + Vibrance légère",
+        "selected_shaders": [
+          "FSRCNNX_x2_16-0-4-1.glsl",
+          "KrigBilateral.glsl",
+          "SSimSuperRes.glsl",
+          "OpenHTPC_Vibrance_Mild.glsl"
+        ],
+        "mpv_args": [
+          "--fbo-format=rgba16hf",
+          "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
+          "--scale=ewa_lanczossharp",
+          "--dscale=mitchell",
+          "--sigmoid-upscaling=yes"
+        ],
+        "reason": "STRONG-class DVD-to-4K recipe retained after live RX 580 review: FSRCNNX-16 supplies visible luma reconstruction, KrigBilateral reconstructs DVD chroma, SSimSuperRes adds a restrained finishing pass and OpenHTPC Vibrance Mild adds modest color presence.",
+        "visual_basis": "Live GOTHIKA review and same-source comparisons found the chain convincing and stable. SSimSuperRes produced a subtle positive refinement without obvious halos or oversharpening.",
+        "ui_reason_fr": "Profil STRONG DVD vers 4K validé : FSRCNNX-16 + KrigBilateral + SSimSuperRes + Vibrance légère, avec BWDIF send_frame pour les trames entrelacées."
+      },
+      "validation": {
+        "date": "2026-10-01",
+        "method": "LIVE_VISUAL_REVIEW_AND_CONTINUOUS_PLAYBACK_OBSERVATION",
+        "masters": [
+          "GOTHIKA"
+        ],
+        "output": "3840x2160",
+        "cadence": "25 fps PAL source; BWDIF send_frame only for interlaced frames",
+        "observations": [
+          "FSRCNNX-16 + KrigBilateral + SSimSuperRes + Vibrance Mild played without observed frame, decoder or delayed drops in the qualified passages.",
+          "The SSimSuperRes addition was visually subtle but positive, with no obvious recurring halo or oversharpening defect.",
+          "Polaris gpu_busy_percent was bursty and was not used as a runtime selection criterion."
+        ]
+      },
+      "reference_sources": {
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
+    },
+    "amd_rx5700xt_1002_731f_sd_2160p": {
+      "gpu": {
+        "vendor": "AMD",
+        "model": "Radeon RX 5700 XT",
+        "pci_id": "1002:731f",
+        "architecture": "Navi 10 / RDNA 1",
+        "hardware_class": "HIGH"
+      },
+      "reference_platform": "Core i7-7700 / Radeon RX 5700 XT",
+      "software": {
+        "os": "Fedora 44",
+        "mesa": "26.2.3",
+        "session": "KDE/Wayland",
+        "video_backend": "vaapi",
+        "render_backend": "vulkan"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-10-01",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_WITH_MULTI_MASTER_LIVE_VISUAL_VALIDATION",
+        "gpu_tier": "HIGH",
+        "runtime_benchmark_required": false,
+        "rationale": "The same HIGH reconstruction recipe used by the RTX 3050 remained stable and visually convincing on RDNA1 across several very different DVD masters, demonstrating that HIGH is a capability class rather than a vendor label."
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_FSRCNN_HQ32_KRIG_SSIM_VIBRANCE_MILD",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "HARDWARE_CLASSIFIED_VISUALLY_VALIDATED_RX5700XT_SD_2160P",
+        "selected_label": "FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance légère",
+        "selected_shaders": [
+          "FSRCNN_x2_r2_32-0-2.glsl",
+          "KrigBilateral.glsl",
+          "SSimSuperRes.glsl",
+          "OpenHTPC_Vibrance_Mild.glsl"
+        ],
+        "mpv_args": [
+          "--fbo-format=rgba16hf",
+          "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
+          "--scale=ewa_lanczossharp",
+          "--dscale=mitchell",
+          "--sigmoid-upscaling=yes"
+        ],
+        "reason": "HIGH-class DVD-to-4K recipe validated on RDNA1 across dark, foggy, dusty and bright masters. FSRCNN-HQ r2_32 provides the main reconstruction, KrigBilateral restores chroma detail, SSimSuperRes adds controlled finishing and OpenHTPC Vibrance Mild preserves restrained color presence.",
+        "visual_basis": "Multi-master live review on GOTHIKA, GLADIATOR, REIGN_OF_FIRE and L_ECHANGE. The recipe remained natural across dark and bright material. REIGN_OF_FIRE exposed mosquito noise already present in PURE; SSimSuperRes could make that source defect slightly more visible but did not create it.",
+        "ui_reason_fr": "Profil HIGH DVD vers 4K validé : FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance légère, avec BWDIF send_frame pour les trames entrelacées."
+      },
+      "validation": {
+        "date": "2026-10-01",
+        "method": "MULTI_MASTER_LIVE_VISUAL_REVIEW_AND_CONTINUOUS_PLAYBACK_OBSERVATION",
+        "masters": [
+          "GOTHIKA",
+          "GLADIATOR",
+          "REIGN_OF_FIRE",
+          "L_ECHANGE"
+        ],
+        "output": "3840x2160",
+        "cadence": "25 fps PAL source; BWDIF send_frame only for interlaced frames",
+        "observations": [
+          "GOTHIKA remained convincing on dark faces, rain and contrast-heavy scenes.",
+          "GLADIATOR retained natural fog, dust, skin and arena texture without obvious recurring halos.",
+          "REIGN_OF_FIRE showed MPEG-2 mosquito noise already visible in PURE; removing SSimSuperRes reduced emphasis slightly but did not remove the source artifact.",
+          "L_ECHANGE validated bright exterior, skin tone, vegetation and blue-lit scenes without a recurring treatment defect.",
+          "Observed playback checks remained at zero frame, decoder and delayed drops during the qualified passages."
+        ]
+      },
+      "reference_sources": {
+        "shader_catalog": "assets/shaders/catalog.json",
+        "fsrcnn_hq_release": "https://github.com/igv/FSRCNN-TensorFlow/releases/tag/1.0"
+      }
     }
   },
   "selection_policy": {
