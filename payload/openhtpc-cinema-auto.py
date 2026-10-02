@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""OPENHTPC 1.1 Phase C3 CINÉMA AUTO Selection Engine.
+"""OPENHTPC CINÉMA AUTO selection helper.
 
-Read-only consumer of the Performance Map produced by openhtpc-calibrate.py.
+Production selection is profile-driven: the cached Hardware Passport, display
+resolution and qualified Magnificence profile database determine the recipe.
+No per-install benchmark or calibration map is required for playback.
 
-Given a content_scope and output_signature, returns the Highest quality_priority candidate that is technically stable on this hardware. Falls back to PURE
-unconditionally when the map is absent, stale, or yields no stable result.
-
-Wired into normal playback in C4 Dev1 for DVD_PAL_FILM scope.
+Legacy Performance Map helpers remain in this module only for backward
+compatibility with old diagnostic/calibration tooling; :func:`query` does not
+use them.
 """
 from __future__ import annotations
 
@@ -157,26 +158,63 @@ def select_recipe(content_scope: str, perf_map: dict, catalog: dict) -> tuple[st
     return FALLBACK_RECIPE, "FALLBACK_NO_STABLE_CANDIDATE"
 
 
-def query(content_scope: str) -> dict:
-    """Full query: load map, check staleness, select recipe."""
-    perf_map = _load_map()
-    if perf_map is None:
-        return {
-            "recipe_id": FALLBACK_RECIPE,
-            "reason": "FALLBACK_MAP_ABSENT",
-            "content_scope": content_scope,
-            "map_status": "ABSENT",
-        }
+def _load_playback_policy():
+    """Load the production playback policy from the installed/payload tree."""
+    try:
+        import importlib.util
+        policy_path = ROOT_DIR / "openhtpc-playback-policy.py"
+        if not policy_path.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_cinema_auto", policy_path)
+        if not spec or not spec.loader:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
 
-    catalog = _load_catalog()
-    recipe_id, reason = select_recipe(content_scope, perf_map, catalog)
-    stale_check, stale_reason = is_map_stale(perf_map)
-    return {
-        "recipe_id": recipe_id,
-        "reason": reason,
+
+def query(content_scope: str, home: pathlib.Path | None = None) -> dict:
+    """Resolve CINÉMA AUTO from the static qualified profile database.
+
+    DVD_PAL_FILM is the first production scope. Unknown/unqualified scopes or
+    hardware always return PURE. No Performance Map is consulted.
+    """
+    result = {
+        "recipe_id": FALLBACK_RECIPE,
+        "reason": "FALLBACK_NO_QUALIFIED_PROFILE",
         "content_scope": content_scope,
-        "map_status": f"STALE:{stale_reason}" if stale_check else "CURRENT",
+        "map_status": "NOT_REQUIRED",
+        "selection_source": "STATIC_PROFILE_DB",
+        "profile_id": None,
+        "label": "PURE",
     }
+    if content_scope != "DVD_PAL_FILM":
+        result["reason"] = "FALLBACK_SCOPE_UNQUALIFIED"
+        return result
+
+    policy = _load_playback_policy()
+    if policy is None or not hasattr(policy, "_magnificence_choice"):
+        result["reason"] = "FALLBACK_POLICY_UNAVAILABLE"
+        return result
+
+    selected_home = home or pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    try:
+        choice = policy._magnificence_choice(selected_home, "dvd", None)
+    except Exception:
+        choice = None
+    if not choice:
+        return result
+
+    result.update({
+        "recipe_id": choice.get("recipe_id", FALLBACK_RECIPE),
+        "reason": "QUALIFIED_STATIC_PROFILE",
+        "profile_id": choice.get("profile_id"),
+        "label": choice.get("label", choice.get("recipe_id", "MAGNIFICENCE")),
+        "display": choice.get("display"),
+    })
+    return result
 
 
 def main() -> int:

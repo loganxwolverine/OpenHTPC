@@ -3,9 +3,9 @@
 
 Manages the user-facing video profile selection:
   PURE       — Always uses the immutable PURE runtime. No shaders. Maximum stability.
-  CINEMA_AUTO — Resolves presentation dynamically via content scope + Recipe Catalogue
-               + Performance Map. Fallback to PURE if map absent, stale, or yields
-               no stable candidate.
+  CINEMA_AUTO — Resolves presentation dynamically via the cached Hardware Passport,
+               display target and qualified Magnificence profile database.
+               Fallback to PURE if no qualified profile matches.
 
 Fresh-install default: PURE.
 """
@@ -78,42 +78,48 @@ def write_profile(profile: str, home: pathlib.Path | None = None) -> None:
 
 
 def cinema_auto_status(home: pathlib.Path | None = None, install: pathlib.Path | None = None) -> dict:
-    """Return C4 status dict without triggering calibration or probing hardware."""
+    """Return static-profile CINÉMA AUTO status without probing or benchmarking."""
     _home = home or pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
     _install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", _home / ".local/lib/openhtpc"))
-    map_path = _home / ".local/state/openhtpc/performance_map.json"
-    map_present = map_path.exists()
-    map_schema_ok = False
-    if map_present:
-        try:
-            data = json.loads(map_path.read_text(encoding="utf-8"))
-            map_schema_ok = isinstance(data, dict) and data.get("schema_version") == 2
-        except Exception:
-            pass
-    # Check staleness via cinema-auto engine (read-only)
-    map_current = False
-    if map_schema_ok:
-        try:
-            import importlib.util
-            engine_path = _install / "openhtpc-cinema-auto.py"
-            if engine_path.is_file():
-                spec = importlib.util.spec_from_file_location("openhtpc_cinema_auto", engine_path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                pmap = module._load_map()
-                if pmap is not None:
-                    stale, _ = module.is_map_stale(pmap)
-                    map_current = not stale
-        except Exception:
-            pass
-    active = read_profile(_home)
-    return {
-        "active_profile": active,
-        "map_present": map_present,
-        "map_schema_ok": map_schema_ok,
-        "map_current": map_current,
-        "can_activate": map_present and map_schema_ok,
+    result = {
+        "active_profile": read_profile(_home),
+        "profile_available": False,
+        "profile_id": None,
+        "selected_recipe": "RECIPE_0_PURE",
+        "reason": "FALLBACK_NO_QUALIFIED_PROFILE",
+        "selection_source": "STATIC_PROFILE_DB",
+        # Compatibility fields retained for older UI consumers. They now mean
+        # qualified-profile availability rather than a calibration map.
+        "map_present": False,
+        "map_schema_ok": False,
+        "map_current": False,
+        "can_activate": False,
     }
+    try:
+        import importlib.util
+        engine_path = _install / "openhtpc-cinema-auto.py"
+        if not engine_path.is_file():
+            return result
+        spec = importlib.util.spec_from_file_location("openhtpc_cinema_auto_profile", engine_path)
+        if not spec or not spec.loader:
+            return result
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        decision = module.query("DVD_PAL_FILM", home=_home)
+        available = decision.get("recipe_id") != "RECIPE_0_PURE"
+        result.update({
+            "profile_available": available,
+            "profile_id": decision.get("profile_id"),
+            "selected_recipe": decision.get("recipe_id", "RECIPE_0_PURE"),
+            "reason": decision.get("reason", result["reason"]),
+            "map_present": available,
+            "map_schema_ok": available,
+            "map_current": available,
+            "can_activate": available,
+        })
+    except Exception:
+        pass
+    return result
 
 
 def _refresh_ui(home: pathlib.Path, install: pathlib.Path) -> None:

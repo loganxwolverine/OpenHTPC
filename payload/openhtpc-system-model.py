@@ -244,9 +244,16 @@ def magnificence_from_capabilities(
             if active_resolution != profile_data.get("display_scope", {}).get("resolution"):
                 continue
             mag = profile_data.get("magnificence", {})
+            status = str(mag.get("status", ""))
+            if not status.startswith(("TECHNICALLY_QUALIFIED", "HARDWARE_CLASSIFIED")):
+                continue
+            shader_names = [str(item) for item in mag.get("selected_shaders", []) if item]
+            shader_root = install / "assets/shaders"
+            if any(not (shader_root / name).is_file() for name in shader_names):
+                continue
             return {
                 "profile_id": profile_id,
-                "status": mag.get("status", "UNKNOWN"),
+                "status": status,
                 "selected_recipe": mag.get("selected_recipe", "RECIPE_0_PURE"),
                 "selected_label": mag.get("selected_label", mag.get("selected_recipe", "PURE")),
                 "reason_fr": mag.get("ui_reason_fr", "Profil sélectionné automatiquement selon le matériel et l'affichage."),
@@ -764,69 +771,39 @@ def build(
     except Exception:
         active_profile = "PURE"
 
-    perf_map_path = home / ".local/state/openhtpc/performance_map.json"
-    perf_map_present = perf_map_path.exists()
-    map_stale = False
-    decision_human = "PURE"
-    if perf_map_present:
-        try:
-            ca_path = install / "openhtpc-cinema-auto.py"
-            if ca_path.exists():
-                spec = importlib.util.spec_from_file_location("ca", ca_path)
-                if spec and spec.loader:
-                    ca = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(ca)
-                    pmap = json.loads(perf_map_path.read_text(encoding="utf-8"))
-                    if pmap:
-                        stale, _ = ca.is_map_stale(pmap)
-                        map_stale = stale
-                        rec, _ = ca.select_recipe("DVD_PAL_FILM", pmap, ca._load_catalog())
-                        RECIPE_NAMES = {
-                            "RECIPE_0_PURE": "PURE",
-                            "RECIPE_C2_DVD_KRIG_BILATERAL": "KrigBilateral",
-                            "RECIPE_C2_DVD_FSRCNNX_8": "FSRCNNX 8",
-                            "RECIPE_C2_DVD_RAVU_LITE": "RAVU Lite",
-                            "RECIPE_C2_DVD_CFL_LITE": "CfL Lite",
-                        }
-                        decision_human = RECIPE_NAMES.get(rec, rec)
-        except Exception:
-            pass
-
-    cal_ui_status = None
-    cal_status_file = home / ".local/state/openhtpc/calibration-ui-status.json"
-    if cal_status_file.exists():
-        try:
-            cst = read_json(cal_status_file)
-            cal_ui_status = cst.get("status")
-        except Exception:
-            pass
-
-    result["video_profile"] = {
-        "active": active_profile,
-        "map_present": perf_map_present,
-        "map_stale": map_stale,
-        "decision": decision_human,
-        "cal_ui_status": cal_ui_status,
-    }
-
-    # Magnificence is resolved from the current normalized display result
-    # plus the cached Hardware Passport.  The helper itself performs no probes.
+    # Magnificence is resolved from the cached Hardware Passport and the static
+    # qualified profile database. No calibration/performance map is required.
     active_mag_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
-    result["magnificence"] = magnificence_from_capabilities(
+    mag_result = magnificence_from_capabilities(
         caps,
         install,
         display_snapshot=display,
         active_device_id=active_mag_gpu.get("device_id"),
     )
+    profile_available = mag_result.get("status") != "NO_PROFILE"
+    decision_human = mag_result.get("selected_label") if profile_available else "PURE"
+
+    result["video_profile"] = {
+        "active": active_profile,
+        "profile_available": profile_available,
+        "profile_id": mag_result.get("profile_id"),
+        "selection_source": "STATIC_PROFILE_DB",
+        # Compatibility fields for the retired calibration UI path.
+        "map_present": profile_available,
+        "map_stale": False,
+        "decision": decision_human,
+        "cal_ui_status": None,
+    }
+    result["magnificence"] = mag_result
     # Also update top-level profile key to reflect actual active C4 profile
     result["profile"] = active_profile
-    # Update processing section
+    # Legacy processing-page fields mirror static profile availability.
     result.setdefault("processing", {})
     result["processing"]["active_video_profile"] = active_profile
-    result["processing"]["map_present"] = perf_map_present
-    result["processing"]["map_stale"] = map_stale
+    result["processing"]["map_present"] = profile_available
+    result["processing"]["map_stale"] = False
     result["processing"]["decision"] = decision_human
-    result["processing"]["cal_ui_status"] = cal_ui_status
+    result["processing"]["cal_ui_status"] = None
     try:
         policy_path = install / "openhtpc-playback-policy.py"
         spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_model", policy_path)
