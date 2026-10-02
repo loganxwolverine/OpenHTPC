@@ -47,6 +47,7 @@ ACTIVE_TESTS = [
     "tests/test_pipewire_hd_passthrough_rc5.py",
     "tests/test_release_metadata_consistency.py",
     "tests/test_update_runtime_regeneration_dev14.py",
+    "tests/test_devctl.py",
 ]
 
 

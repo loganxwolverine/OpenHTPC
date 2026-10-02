@@ -994,15 +994,18 @@ def cmd_target_check(args: argparse.Namespace) -> int:
     print("(Read-only post-install checks — no scanning, no mutation)")
     print()
 
-    checks: list[tuple[str, bool, str]] = []
+    checks: list[tuple[str, str, str]] = []
 
     def check(name: str, result: subprocess.CompletedProcess[str], expect: str | None = None) -> bool:
         ok = result.returncode == 0
         if expect is not None:
             ok = ok and expect in result.stdout
-        detail = result.stdout.strip()[:120]
-        checks.append((name, ok, detail))
+        detail = (result.stdout.strip() or result.stderr.strip())[:120]
+        checks.append((name, "PASS" if ok else "FAIL", detail))
         return ok
+
+    def not_applicable(name: str, detail: str) -> None:
+        checks.append((name, "N/A", detail[:120]))
 
     # openhtpc version
     r = _run_remote(target, ["openhtpc", "version"])
@@ -1010,19 +1013,28 @@ def cmd_target_check(args: argparse.Namespace) -> int:
     version_str = r.stdout.strip()
     print(f"Installed version: {version_str}")
 
-    # Media DB status
-    r = _run_remote(
+    # Media DB is optional until the user initializes a local media library.
+    db_presence = _run_remote(
         target,
-        ["bash", "-c", "python3 $HOME/.local/lib/openhtpc/openhtpc-media-db.py status"],
+        ["bash", "-c", 'test -f "$HOME/.local/share/openhtpc/media/media.db" && echo PRESENT || echo ABSENT'],
     )
-    check("media-db status", r)
+    if db_presence.returncode == 0 and "PRESENT" in db_presence.stdout:
+        r = _run_remote(
+            target,
+            ["bash", "-c", 'python3 "$HOME/.local/lib/openhtpc/openhtpc-media-db.py" status'],
+        )
+        check("media-db status", r)
 
-    # Media DB verify
-    r = _run_remote(
-        target,
-        ["bash", "-c", "python3 $HOME/.local/lib/openhtpc/openhtpc-media-db.py verify"],
-    )
-    check("media-db verify", r)
+        r = _run_remote(
+            target,
+            ["bash", "-c", 'python3 "$HOME/.local/lib/openhtpc/openhtpc-media-db.py" verify'],
+        )
+        check("media-db verify", r)
+    elif db_presence.returncode == 0 and "ABSENT" in db_presence.stdout:
+        not_applicable("media-db status", "media library not initialized")
+        not_applicable("media-db verify", "media library not initialized")
+    else:
+        check("media-db presence", db_presence)
 
     # Media Probe presence and mode
     r = _run_remote(
@@ -1032,7 +1044,7 @@ def cmd_target_check(args: argparse.Namespace) -> int:
          'test -f "$f" && test -x "$f" && echo EXECUTABLE || echo MISSING_OR_NOT_EXECUTABLE'],
     )
     probe_ok = "EXECUTABLE" in r.stdout
-    checks.append(("media-probe executable", probe_ok, r.stdout.strip()))
+    checks.append(("media-probe executable", "PASS" if probe_ok else "FAIL", r.stdout.strip()))
 
     # Media Ingest presence and mode
     r = _run_remote(
@@ -1042,7 +1054,7 @@ def cmd_target_check(args: argparse.Namespace) -> int:
          'test -f "$f" && test -x "$f" && echo EXECUTABLE || echo MISSING_OR_NOT_EXECUTABLE'],
     )
     ingest_ok = "EXECUTABLE" in r.stdout
-    checks.append(("media-ingest executable", ingest_ok, r.stdout.strip()))
+    checks.append(("media-ingest executable", "PASS" if ingest_ok else "FAIL", r.stdout.strip()))
 
     # Optional media probe test
     if media_file:
@@ -1054,18 +1066,21 @@ def cmd_target_check(args: argparse.Namespace) -> int:
         check("probe explicit file", r, '"ok": true')
 
     print()
-    passed = sum(1 for _, ok, _ in checks if ok)
-    for name, ok, detail in checks:
-        status = "PASS" if ok else "FAIL"
-        print(f"  {status}  {name}")
-        if detail and not ok:
+    passed = sum(1 for _, status, _ in checks if status == "PASS")
+    failed = sum(1 for _, status, _ in checks if status == "FAIL")
+    not_applicable_count = sum(1 for _, status, _ in checks if status == "N/A")
+    applicable = passed + failed
+    for name, status, detail in checks:
+        print(f"  {status:<4}  {name}")
+        if detail and status != "PASS":
             print(f"       {detail}")
 
     print()
     _print_separator()
-    print(f"  TARGET-CHECK: {passed}/{len(checks)} PASS")
+    suffix = f", {not_applicable_count} N/A" if not_applicable_count else ""
+    print(f"  TARGET-CHECK: {passed}/{applicable} PASS{suffix}")
     _print_separator()
-    return 0 if passed == len(checks) else 1
+    return 0 if failed == 0 else 1
 
 
 def cmd_collect(args: argparse.Namespace) -> int:
@@ -1084,12 +1099,23 @@ def cmd_collect(args: argparse.Namespace) -> int:
         return r.stdout.strip() if r.returncode == 0 else f"ERROR: {r.stderr.strip()}"
 
     bundle["openhtpc_version"] = remote(["openhtpc", "version"])
-    bundle["media_db_status"] = remote([
-        "python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "status",
+    media_db_presence = remote([
+        "bash", "-c",
+        'test -f "$HOME/.local/share/openhtpc/media/media.db" && echo PRESENT || echo ABSENT',
     ])
-    bundle["media_db_verify"] = remote([
-        "python3", "$HOME/.local/lib/openhtpc/openhtpc-media-db.py", "verify",
-    ])
+    bundle["media_db_presence"] = media_db_presence
+    if media_db_presence == "PRESENT":
+        bundle["media_db_status"] = remote([
+            "bash", "-c",
+            'python3 "$HOME/.local/lib/openhtpc/openhtpc-media-db.py" status',
+        ])
+        bundle["media_db_verify"] = remote([
+            "bash", "-c",
+            'python3 "$HOME/.local/lib/openhtpc/openhtpc-media-db.py" verify',
+        ])
+    else:
+        bundle["media_db_status"] = "NOT_INITIALIZED"
+        bundle["media_db_verify"] = "NOT_INITIALIZED"
     bundle["probe_sha256"] = remote([
         "bash", "-c",
         "sha256sum $HOME/.local/lib/openhtpc/openhtpc-media-probe.py 2>/dev/null || echo NOT_FOUND",

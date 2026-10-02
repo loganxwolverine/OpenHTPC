@@ -953,3 +953,117 @@ class TestArchiveRoot:
             rc = devctl.cmd_verify(args)
 
         assert rc == 1
+
+
+# ─── TARGET VALIDATION ───────────────────────────────────────────────────────
+
+def test_target_check_uninitialized_media_db_is_not_applicable(capsys):
+    args = MagicMock(target="steve@test", media_file=None)
+    seen = []
+
+    def fake_remote(target, cmd, timeout=devctl.SSH_OP_TIMEOUT):
+        seen.append(cmd)
+        joined = " ".join(cmd)
+        if cmd == ["openhtpc", "version"]:
+            return _fake_completed(stdout="1.2.0\n")
+        if "media.db" in joined and "test -f" in joined:
+            return _fake_completed(stdout="ABSENT\n")
+        if "openhtpc-media-probe.py" in joined:
+            return _fake_completed(stdout="EXECUTABLE\n")
+        if "openhtpc-media-ingest.py" in joined:
+            return _fake_completed(stdout="EXECUTABLE\n")
+        return _fake_completed(returncode=99, stderr=f"unexpected command: {joined}")
+
+    with patch.object(devctl, "_run_remote", side_effect=fake_remote):
+        rc = devctl.cmd_target_check(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "media-db status" in out and "N/A" in out
+    assert "media-db verify" in out
+    assert "TARGET-CHECK: 3/3 PASS, 2 N/A" in out
+    assert not any("openhtpc-media-db.py" in " ".join(cmd) for cmd in seen)
+
+
+def test_target_check_initialized_media_db_is_verified(capsys):
+    args = MagicMock(target="steve@test", media_file=None)
+
+    def fake_remote(target, cmd, timeout=devctl.SSH_OP_TIMEOUT):
+        joined = " ".join(cmd)
+        if cmd == ["openhtpc", "version"]:
+            return _fake_completed(stdout="1.2.0\n")
+        if "media.db" in joined and "test -f" in joined:
+            return _fake_completed(stdout="PRESENT\n")
+        if "openhtpc-media-db.py" in joined and " status" in joined:
+            return _fake_completed(stdout='{"status":"OK"}\n')
+        if "openhtpc-media-db.py" in joined and " verify" in joined:
+            return _fake_completed(stdout='{"ok":true}\n')
+        if "openhtpc-media-probe.py" in joined:
+            return _fake_completed(stdout="EXECUTABLE\n")
+        if "openhtpc-media-ingest.py" in joined:
+            return _fake_completed(stdout="EXECUTABLE\n")
+        return _fake_completed(returncode=99, stderr=f"unexpected command: {joined}")
+
+    with patch.object(devctl, "_run_remote", side_effect=fake_remote):
+        rc = devctl.cmd_target_check(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "TARGET-CHECK: 5/5 PASS" in out
+    assert "N/A" not in out
+
+
+def test_collect_uninitialized_media_db_reports_not_initialized(capsys):
+    args = MagicMock(target="steve@test")
+    seen = []
+
+    def fake_remote(target, cmd, timeout=devctl.SSH_OP_TIMEOUT):
+        seen.append(cmd)
+        joined = " ".join(cmd)
+        if cmd == ["openhtpc", "version"]:
+            return _fake_completed(stdout="1.2.0\n")
+        if "media.db" in joined and "test -f" in joined:
+            return _fake_completed(stdout="ABSENT\n")
+        if "sha256sum" in joined:
+            return _fake_completed(stdout="abc  /home/steve/.local/lib/openhtpc/openhtpc-media-probe.py\n")
+        return _fake_completed(returncode=99, stderr=f"unexpected command: {joined}")
+
+    with patch.object(devctl, "_run_remote", side_effect=fake_remote):
+        rc = devctl.cmd_collect(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert '"media_db_presence": "ABSENT"' in out
+    assert out.count('"NOT_INITIALIZED"') == 2
+    assert not any("openhtpc-media-db.py" in " ".join(cmd) for cmd in seen)
+
+
+def test_collect_initialized_media_db_expands_home_inside_remote_shell(capsys):
+    args = MagicMock(target="steve@test")
+    seen = []
+
+    def fake_remote(target, cmd, timeout=devctl.SSH_OP_TIMEOUT):
+        seen.append(cmd)
+        joined = " ".join(cmd)
+        if cmd == ["openhtpc", "version"]:
+            return _fake_completed(stdout="1.2.0\n")
+        if "media.db" in joined and "test -f" in joined:
+            return _fake_completed(stdout="PRESENT\n")
+        if "openhtpc-media-db.py" in joined and " status" in joined:
+            return _fake_completed(stdout='{"status":"OK"}\n')
+        if "openhtpc-media-db.py" in joined and " verify" in joined:
+            return _fake_completed(stdout='{"ok":true}\n')
+        if "sha256sum" in joined:
+            return _fake_completed(stdout="abc  /home/steve/.local/lib/openhtpc/openhtpc-media-probe.py\n")
+        return _fake_completed(returncode=99, stderr=f"unexpected command: {joined}")
+
+    with patch.object(devctl, "_run_remote", side_effect=fake_remote):
+        rc = devctl.cmd_collect(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    db_commands = [cmd for cmd in seen if "openhtpc-media-db.py" in " ".join(cmd)]
+    assert len(db_commands) == 2
+    assert all(cmd[:2] == ["bash", "-c"] for cmd in db_commands)
+    assert all('"$HOME/.local/lib/openhtpc/openhtpc-media-db.py"' in cmd[2] for cmd in db_commands)
+    assert '"media_db_presence": "PRESENT"' in out
