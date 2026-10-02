@@ -8,6 +8,28 @@ The first Magnificence RC targets hardware that works with the current Fedora gr
 
 The initial qualified matrix is intentionally finite. It includes current validated Intel, AMD and NVIDIA paths and does not infer an untested recipe merely because a GPU appears similar to a qualified one. Runtime benchmarking is not a recipe-selection mechanism.
 
+## RC qualified matrix
+
+The first Magnificence RC uses the following static hardware/output classes. These are implementation classes only; the public user choice remains binary: `PURE` or `MAGNIFICENCE`.
+
+| Hardware profile | Class | Qualified output | Magnificence chain |
+| --- | --- | --- | --- |
+| Intel N150 (`8086:46d4`) | `LIGHT` | 1920x1080 | KrigBilateral |
+| AMD Vega 3 / Ryzen 3 PRO 3200GE (`1002:15d8`) | `LIGHT` | 3840x2160 | KrigBilateral |
+| Intel Arc A310 (`8086:56a6`) | `MEDIUM` | 3840x2160 | FSRCNNX-16 + KrigBilateral + OPENHTPC Vibrance Mild |
+| Intel HD 630 (`8086:5912`) | `MEDIUM` | 1920x1080 | FSRCNNX-8 + KrigBilateral |
+| AMD Radeon RX 580 (`1002:67df`) | `STRONG` | 3840x2160 | FSRCNNX-16 + KrigBilateral + SSimSuperRes + OPENHTPC Vibrance Mild |
+| NVIDIA GeForce RTX 3050 (`10de:2507`) | `HIGH` | 3840x2160 | FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + OPENHTPC Vibrance Mild |
+| AMD Radeon RX 5700 XT (`1002:731f`) | `HIGH` | 3840x2160 | FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + OPENHTPC Vibrance Mild |
+
+Selection is profile-driven and does not use runtime benchmarking. A missing profile, incompatible output resolution, or missing selected shader falls back to `PURE`.
+
+## RC validation gate
+
+`tools/validate-magnificence-rc.py` is the authoritative current-RC software gate. It validates the static profile matrix, shader distribution/licensing, the untouched `release/1.2.0-stable-prep` reference, active playback/audio/release regressions, the full Media Foundation profile, `git diff --check`, and a clean worktree for the final run.
+
+Historical tranche tests are retained unchanged even when their frozen assumptions refer to earlier UI wording or source snapshots. They are not silently weakened to make the current branch appear green.
+
 ## Legacy GPU support
 
 Status: `POST-RC ROADMAP`

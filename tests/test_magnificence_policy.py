@@ -141,6 +141,48 @@ def test_magnificence_database_is_installed():
     assert 'assets/magnificence_profiles.json' in manifest
     assert 'assets/magnificence_profiles.json' in installer
     assert '$INSTALL_DIR/assets/magnificence_profiles.json' in installer
+
+
+def test_all_profiles_use_static_hardware_tiers_without_runtime_benchmark_selection():
+    profiles = json.loads((PAYLOAD / "assets/magnificence_profiles.json").read_text(encoding="utf-8"))
+    expected = {
+        "intel_n150_8086_46d4_sd_1080p": "LIGHT",
+        "amd_picasso_15d8_vega3_sd_2160p": "LIGHT",
+        "intel_arc_a310_8086_56a6_sd_2160p": "MEDIUM",
+        "intel_hd630_8086_5912_sd_1080p": "MEDIUM",
+        "nvidia_rtx3050_10de_2507_sd_2160p": "HIGH",
+        "amd_rx580_1002_67df_sd_2160p": "STRONG",
+        "amd_rx5700xt_1002_731f_sd_2160p": "HIGH",
+    }
+    assert set(profiles["profiles"]) == set(expected)
+    for profile_id, tier in expected.items():
+        profile = profiles["profiles"][profile_id]
+        assert profile["gpu"]["hardware_class"] == tier
+        assert profile["classification"]["gpu_tier"] == tier
+        assert profile["classification"]["runtime_benchmark_required"] is False
+        assert profile["magnificence"]["fallback_recipe"] == "RECIPE_0_PURE"
+
+
+def test_all_selected_magnificence_shaders_are_cataloged_and_managed():
+    profiles = json.loads((PAYLOAD / "assets/magnificence_profiles.json").read_text(encoding="utf-8"))
+    catalog = json.loads((PAYLOAD / "assets/shaders/catalog.json").read_text(encoding="utf-8"))
+    manifest = (PAYLOAD / "managed-files.txt").read_text(encoding="utf-8").splitlines()
+    by_filename = {entry["filename"]: entry for entry in catalog["shaders"].values()}
+
+    selected = {
+        shader
+        for profile in profiles["profiles"].values()
+        for shader in profile.get("magnificence", {}).get("selected_shaders", [])
+    }
+    assert selected
+    for shader in selected:
+        assert (PAYLOAD / "assets/shaders" / shader).is_file(), shader
+        assert shader in by_filename, shader
+        assert by_filename[shader].get("redistributable") is True, shader
+        assert by_filename[shader].get("license"), shader
+        assert f"assets/shaders/{shader}" in manifest, shader
+
+
 def make_vega_home(cpu_model: str) -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
     temp = tempfile.TemporaryDirectory()
     home = pathlib.Path(temp.name)
@@ -404,6 +446,25 @@ def test_rx5700xt_4k_resolves_high_chain():
             assert shader in chain
         assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
         assert "--fbo-format=rgba16hf" in decision["mpv_args"]
+    finally:
+        temp.cleanup()
+
+
+def test_missing_selected_shader_falls_back_to_pure(monkeypatch):
+    temp, home = make_amd_4k_home("731f", "AMD Radeon RX 5700 XT")
+    real_is_file = pathlib.Path.is_file
+
+    def fake_is_file(path):
+        if path.name == "SSimSuperRes.glsl":
+            return False
+        return real_is_file(path)
+
+    monkeypatch.setattr(pathlib.Path, "is_file", fake_is_file)
+    try:
+        decision = policy.resolve(home, kind="dvd", gpu_binding={"mpv_args": []})
+        assert decision["presentation"]["resolved"] == "PURE"
+        assert decision["presentation"]["reason"] == "no_qualified_magnificence_profile"
+        assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
     finally:
         temp.cleanup()
 

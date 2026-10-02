@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "catalog_version": "v1.0.0",
+  "catalog_version": "v1.0.1",
   "upstream_repository": "https://github.com/loganxwolverine/shaders",
   "upstream_commit": "e2bfe0ccd7eb7b404f9262365bed88771f69a291",
-  "audit_date": "2026-09-30",
+  "audit_date": "2026-10-02",
   "shaders": {
     "cfl_prediction_lite": {
       "id": "cfl_prediction_lite",
@@ -124,6 +124,21 @@
       "redistributable": true,
       "mpv_compatibility": "gpu-next, vo=gpu; requires rgba16hf with Vulkan",
       "description": "FSRCNN-HQ 2x luma super-resolution network (r2, 32 feature channels), trained with distort=True for slight compression-artifact reduction."
+    },
+    "ssim_superres": {
+      "id": "ssim_superres",
+      "name": "SSimSuperRes",
+      "filename": "SSimSuperRes.glsl",
+      "functional_class": "SUPER_RESOLUTION_FINISH",
+      "hook_stage": "POSTKERNEL",
+      "expected_input": "POSTKERNEL",
+      "expected_output": "DISPLAY_SCALED",
+      "scaling_factor": 1.0,
+      "license": "GNU LGPL v3+",
+      "license_author": "Shiandow / igv revision",
+      "redistributable": true,
+      "mpv_compatibility": "gpu-next, vo=gpu",
+      "description": "SSIM-based super-resolution finishing shader used after the primary reconstruction pass."
     },
     "artcnn_c4f16": {
       "id": "artcnn_c4f16",

@@ -8,7 +8,8 @@
         "model": "Intel Processor N150 Graphics",
         "pci_id": "8086:46d4",
         "execution_units": 24,
-        "max_dynamic_frequency_mhz": 1000
+        "max_dynamic_frequency_mhz": 1000,
+        "hardware_class": "LIGHT"
       },
       "reference_platform": "ZimaBoard 2",
       "software": {
@@ -27,6 +28,13 @@
       "display_scope": {
         "resolution": "1920x1080",
         "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-10-02",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_FROM_QUALIFIED_PROFILE",
+        "gpu_tier": "LIGHT",
+        "runtime_benchmark_required": false,
+        "rationale": "Legacy N150 profile normalized to the static tier model. Its qualified Magnificence path remains the lightweight KrigBilateral-only recipe; runtime benchmarking is not used for recipe selection."
       },
       "measurement": {
         "date": "2026-09-25",
@@ -131,7 +139,8 @@
         "vendor": "AMD",
         "model": "Picasso/Raven 2 Radeon Vega 3",
         "pci_id": "1002:15d8",
-        "reference_class": "Vega 3"
+        "reference_class": "Vega 3",
+        "hardware_class": "LIGHT"
       },
       "match": {
         "cpu_model_contains": "Ryzen 3 PRO 3200GE"
@@ -153,6 +162,13 @@
       "display_scope": {
         "resolution": "3840x2160",
         "refresh_hz": 60.0
+      },
+      "classification": {
+        "date": "2026-10-02",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_FROM_QUALIFIED_PROFILE",
+        "gpu_tier": "LIGHT",
+        "runtime_benchmark_required": false,
+        "rationale": "Legacy Vega 3 profile normalized to the static tier model. Its qualified 4K Magnificence path remains KrigBilateral-only after prior blind visual qualification; runtime benchmarking is not used for recipe selection."
       },
       "measurement": {
         "date": "2026-09-26",
@@ -262,7 +278,8 @@
         "vendor": "Intel",
         "model": "Intel Arc A310",
         "pci_id": "8086:56a6",
-        "architecture": "DG2 / Alchemist"
+        "architecture": "DG2 / Alchemist",
+        "hardware_class": "MEDIUM"
       },
       "reference_platform": "HP ProDesk 400 G3 SFF / Core i5-6500 / Intel Arc A310",
       "software": {
@@ -282,6 +299,13 @@
         "resolution": "3840x2160",
         "refresh_hz": 60.0,
         "bit_depth_observed": 10
+      },
+      "classification": {
+        "date": "2026-10-02",
+        "method": "STATIC_HARDWARE_CLASSIFICATION_WITH_LIVE_VISUAL_VALIDATION",
+        "gpu_tier": "MEDIUM",
+        "runtime_benchmark_required": false,
+        "rationale": "Arc A310 MEDIUM profile normalized to the static tier model after the qualified FSRCNNX-16 + KrigBilateral + Vibrance Mild live 4K validation; runtime benchmarking is not used for recipe selection."
       },
       "measurement": {
         "date": "2026-09-26",
