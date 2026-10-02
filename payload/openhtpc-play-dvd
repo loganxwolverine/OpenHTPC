@@ -58,7 +58,8 @@ try:
 except Exception: pass' "$readahead_json" 2>/dev/null)
         readahead_target="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("target_readahead_seconds",0))' "$readahead_json" 2>/dev/null || printf 0)"
         readahead_max="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("maximum_cache_bytes",0))' "$readahead_json" 2>/dev/null || printf 0)"
-        [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event READAHEAD_POLICY_APPLIED --source OPTICAL --target "$readahead_target" --cache_bytes "$readahead_max"
+        [[ ! -x $INSTALL/openhtpc-runtime.py ]] || "$INSTALL/openhtpc-runtime.py" log --component playback --event READAHEAD_POLICY_APPLIED \
+            --field "source=OPTICAL" --field "target=$readahead_target" --field "cache_bytes=$readahead_max"
     fi
 fi
 if [[ ${#readahead_args[@]} -eq 0 ]]; then

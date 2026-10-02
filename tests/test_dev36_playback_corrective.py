@@ -116,6 +116,15 @@ class OsdAndPreservedPolicy(unittest.TestCase):
         self.assertEqual(policy.choose_audio("FR", probe)["resolved"], "AID_1")
         self.assertEqual(policy.choose_subtitle("OFF", probe)["mpv_args"], ["--sid=no"])
 
+    def test_dvd_readahead_runtime_log_uses_supported_field_contract(self):
+        dvd = (PAYLOAD / "openhtpc-play-dvd").read_text(encoding="utf-8")
+        self.assertIn("READAHEAD_POLICY_APPLIED", dvd)
+        self.assertIn('--field "source=OPTICAL"', dvd)
+        self.assertIn('--field "target=$readahead_target"', dvd)
+        self.assertIn('--field "cache_bytes=$readahead_max"', dvd)
+        self.assertNotIn("--source OPTICAL --target", dvd)
+        self.assertNotIn("--cache_bytes", dvd)
+
 
 if __name__ == "__main__":
     unittest.main()
