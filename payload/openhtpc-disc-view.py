@@ -2,7 +2,7 @@
 """Generate the complete cinematic DVD composition without opening a window."""
 from __future__ import annotations
 import argparse, hashlib, importlib.util, json, os, pathlib, re, textwrap
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
 VERSION="cinematic-v2"
 def load(path,name):
@@ -62,6 +62,25 @@ def poster_image(path,size,font_path,allowed_roots=(),fallback_title="MÉDIA OPT
  except (OSError,ValueError,TypeError): return placeholder(size,font_path,fallback_title)
 def committed_poster(metadata):
  return metadata.get("poster_file") if metadata.get("status")=="PASS" else None
+
+def bokeh_background(path, wallpaper, allowed_roots=()):
+ try:
+  if not path: raise ValueError
+  candidate=pathlib.Path(path).resolve()
+  if allowed_roots and not any(candidate.is_relative_to(root.resolve()) for root in allowed_roots): raise ValueError
+  with Image.open(candidate) as image:
+   image.load()
+   if image.width<50 or image.height<80: raise ValueError
+   image=ImageOps.fit(image.convert("RGB"),(1920,1080),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+   image=image.filter(ImageFilter.GaussianBlur(radius=44)).convert("RGBA")
+   veil=Image.new("RGBA",image.size,(0,0,0,105))
+   return Image.alpha_composite(image,veil)
+ except (OSError,ValueError,TypeError):
+  try:
+   with Image.open(wallpaper) as source:
+    return ImageOps.fit(source.convert("RGB"),(1920,1080),method=Image.Resampling.LANCZOS).convert("RGBA")
+  except OSError:
+   return Image.new("RGBA",(1920,1080),(2,7,17,255))
 
 # Media-type profiles — logo key: physical-media logo asset for poster overlay.
 # None = fall back to textual pill badge. Future Blu-ray/UHD logos drop in here.
@@ -246,10 +265,10 @@ def render(home,install,state,metadata,target):
  font_path=install/"flex/assets/fonts/OpenSans-Regular.ttf"
  def font(n): return ImageFont.truetype(str(font_path),n)
  wallpaper=install/"assets/branding/openhtpc-wallpaper.png"
- try:
-  with Image.open(wallpaper) as source: base=ImageOps.fit(source.convert("RGB"),(1920,1080),method=Image.Resampling.LANCZOS)
- except OSError: base=Image.new("RGB",(1920,1080),"#020711")
- shade=Image.new("RGBA",base.size,(0,5,14,178)); base=Image.alpha_composite(base.convert("RGBA"),shade); d=ImageDraw.Draw(base,"RGBA")
+ poster_path=committed_poster(metadata)
+ allowed_artwork=(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache")
+ base=bokeh_background(poster_path,wallpaper,allowed_artwork)
+ d=ImageDraw.Draw(base,"RGBA")
  status=metadata.get("status")
  is_committed=(status=="PASS")
  media_type=optical_model.canonical_state(state); media=optical_model.presentation(state)
@@ -268,8 +287,7 @@ def render(home,install,state,metadata,target):
  if policy.get("unplayable") and not is_committed and not state.get("tmdb_title") and status!="AMBIGUOUS":
   title=policy.get("title") or title
  # Poster: (90,185) 430×645; frame outline. Never show uncommitted candidate poster.
- poster_path=committed_poster(metadata)
- poster=poster_image(poster_path,(430,645),font_path,(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache"),media["poster_label"])
+ poster=poster_image(poster_path,(430,645),font_path,allowed_artwork,media["poster_label"])
  base.paste(poster,(90,185)); d.rounded_rectangle((84,179,526,836),radius=22,outline="#22c7ff",width=4)
  # Physical-media logo overlay — top-right corner of poster
  result=_draw_logo_overlay(base,install,media_prof)

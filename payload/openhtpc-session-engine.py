@@ -574,6 +574,72 @@ def _chunk_synopsis_properties(overview: str, max_chunk_bytes: int = 135, max_ch
     return chunks if chunks else ["Aucun synopsis disponible."]
 
 
+def _movie_bokeh_background(home: pathlib.Path, section_id: str, artwork: pathlib.Path) -> pathlib.Path | None:
+    """Build the validated movie-detail Bokeh: centered cover crop, blur 44, dark veil alpha 105."""
+    try:
+        from PIL import Image, ImageFilter, ImageOps
+        source = artwork.resolve(strict=True)
+        if not source.is_file():
+            return None
+        target_dir = home / ".cache/openhtpc/media/movie-detail-bokeh"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        # Recipe is encoded in the filename so a visual-contract change can never
+        # silently reuse an older cached rendition.
+        target = target_dir / f"{section_id}-b44-a105.jpg"
+        if target.is_file() and target.stat().st_mtime_ns >= source.stat().st_mtime_ns:
+            return target
+        with Image.open(source) as image:
+            image = image.convert("RGB")
+            image = ImageOps.fit(image, (1920, 1080), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            image = image.filter(ImageFilter.GaussianBlur(radius=44))
+            base = image.convert("RGBA")
+            veil = Image.new("RGBA", base.size, (0, 0, 0, 105))
+            image = Image.alpha_composite(base, veil).convert("RGB")
+            with tempfile.NamedTemporaryFile(dir=target_dir, prefix=f".{section_id}-", suffix=".jpg", delete=False) as tmp:
+                tmp_path = pathlib.Path(tmp.name)
+            image.save(tmp_path, format="JPEG", quality=84, optimize=True)
+            os.replace(tmp_path, target)
+        return target
+    except Exception:
+        return None
+
+
+def _format_media_technical(info: dict[str, Any] | None) -> str:
+    if not info:
+        return ""
+    parts: list[str] = []
+    container = str(info.get("container") or "").lower()
+    if "matroska" in container or "webm" in container:
+        parts.append("MKV")
+    elif container:
+        parts.append(container.split(",", 1)[0].upper())
+    codec = str(info.get("video_codec") or "").lower()
+    codec_labels = {"mpeg2video": "MPEG-2", "mpeg2": "MPEG-2", "h264": "H.264", "hevc": "HEVC", "h265": "HEVC", "av1": "AV1", "vp9": "VP9"}
+    if codec:
+        parts.append(codec_labels.get(codec, codec.upper()))
+    width, height = info.get("width"), info.get("height")
+    if width and height:
+        parts.append(f"{width}×{height}")
+    fps = info.get("fps")
+    if fps:
+        parts.append(f"{fps:g} fps")
+    audio_codec = str(info.get("audio_codec") or "").lower()
+    audio_labels = {"ac3": "AC-3", "eac3": "E-AC-3", "dts": "DTS", "truehd": "TrueHD", "aac": "AAC", "flac": "FLAC"}
+    channels = info.get("audio_channels")
+    if audio_codec:
+        audio = audio_labels.get(audio_codec, audio_codec.upper())
+        if channels:
+            audio += " 5.1" if int(channels) == 6 else " 7.1" if int(channels) == 8 else f" {channels} ch"
+        parts.append(audio)
+    langs = list(info.get("audio_languages") or [])
+    if langs:
+        parts.append("Audio " + "/".join(langs[:6]))
+    subs = list(info.get("subtitle_languages") or [])
+    if subs:
+        parts.append("ST " + "/".join(subs[:8]))
+    return " · ".join(parts)
+
+
 def _build_movie_detail_section(
     section_id: str,
     token: str,
@@ -584,12 +650,16 @@ def _build_movie_detail_section(
     item_icon: pathlib.Path,
     entry_icon: pathlib.Path,
     res_menu: str,
+    background_image: pathlib.Path | None = None,
+    technical_info: dict[str, Any] | None = None,
 ) -> str:
     """Construct one hermetic native movie detail [MEDIA_D...] section."""
     lines: list[str] = [
         f"[{section_id}]",
         "Layout=MovieDetail",
     ]
+    if background_image is not None:
+        lines.append(f"BackgroundImage={background_image}")
     play_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-play {token}"
 
     # Determine presentation validity
@@ -658,6 +728,10 @@ def _build_movie_detail_section(
             if gn:
                 meta_parts.append(gn)
 
+    technical_label = _format_media_technical(technical_info)
+    if technical_label:
+        meta_parts.append(technical_label)
+
     if meta_parts:
         meta_label = " · ".join(meta_parts)
     else:
@@ -669,7 +743,7 @@ def _build_movie_detail_section(
         else:
             meta_label = tech_ext
 
-    while len(f"Metadata={meta_label}".encode("utf-8")) > 155:
+    while len(f"Metadata={meta_label}".encode("utf-8")) > 198:
         meta_label = meta_label[:-1].rstrip()
     lines.append(f"Metadata={meta_label}")
 
@@ -722,8 +796,14 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     install = home / ".local/lib/openhtpc"
     picker_bin = install / "openhtpc-media-picker"
     remove_bin = install / "openhtpc-media-remove"
-    add_icon = icon
-    folder_icon = home / ".local/lib/openhtpc/assets/ui/folder.png"
+    # MEDIA root visual language: each action gets a distinct semantic icon.
+    media_ui = home / ".local/lib/openhtpc/assets/ui"
+    update_icon = media_ui / "system-processing.png"
+    library_icon = media_ui / "media.png"
+    add_icon = media_ui / "folder.png"
+    review_icon = media_ui / "diagnostic.png"
+    back_icon = media_ui / "system-back.png"
+    folder_icon = media_ui / "folder.png"
     remove_icon = home / ".local/lib/openhtpc/flex/assets/icons/drive-empty.png"
 
     # Short icon symlinks for line buffer economy (libinih INI_MAX_LINE 200)
@@ -749,6 +829,7 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
     # Preload identity map from media.db if present (single read-only pass)
     media_db_path = home / ".local/share/openhtpc/media/media.db"
     identity_map: dict[tuple[str, str], dict[str, Any]] = {}
+    technical_map: dict[tuple[str, str], dict[str, Any]] = {}
     work_posters: dict[int, pathlib.Path] = {}
     library_summary: tuple[int, int, int] | None = None
     configured_source_ids: set[str] = set()
@@ -785,6 +866,32 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "year": r[7],
                         "original_title": r[8],
                         "candidate_count": r[9] or 0,
+                    }
+
+                lang_labels = {"fre": "FR", "fra": "FR", "fr": "FR", "eng": "EN", "en": "EN", "ita": "IT", "it": "IT", "dut": "NL", "nld": "NL", "spa": "ES", "por": "PT", "ara": "AR", "deu": "DE", "ger": "DE"}
+                resource_rows = db.execute("SELECT id, source_id, relative_path, container_format FROM resources WHERE resource_kind='FILE' AND source_id IS NOT NULL AND relative_path IS NOT NULL").fetchall()
+                for rr in resource_rows:
+                    rid, sid, rel, container = rr
+                    v = db.execute("SELECT codec,width,height,frame_rate_num,frame_rate_den FROM video_streams WHERE resource_id=? ORDER BY stream_index LIMIT 1", (rid,)).fetchone()
+                    aud = db.execute("SELECT codec,channels,language FROM audio_streams WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)).fetchall()
+                    sub = db.execute("SELECT language FROM subtitle_streams WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)).fetchall()
+                    audio_langs: list[str] = []
+                    for row in aud:
+                        code = lang_labels.get(str(row[2] or '').lower(), str(row[2] or '').upper())
+                        if code and code not in audio_langs: audio_langs.append(code)
+                    sub_langs: list[str] = []
+                    for row in sub:
+                        code = lang_labels.get(str(row[0] or '').lower(), str(row[0] or '').upper())
+                        if code and code not in sub_langs: sub_langs.append(code)
+                    fps = None
+                    if v and v[3] and v[4]:
+                        try: fps = float(v[3]) / float(v[4])
+                        except (TypeError, ValueError, ZeroDivisionError): fps = None
+                    technical_map[(sid, rel)] = {
+                        "container": container,
+                        "video_codec": v[0] if v else None, "width": v[1] if v else None, "height": v[2] if v else None, "fps": fps,
+                        "audio_codec": aud[0][0] if aud else None, "audio_channels": aud[0][1] if aud else None,
+                        "audio_languages": audio_langs, "subtitle_languages": sub_langs,
                     }
 
                 if configured_source_ids:
@@ -978,6 +1085,9 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                             sections.append(ms_sec)
 
                         detail_menu = f"MEDIA_D{item_id[:8]}"
+                        fallback_bokeh = install / "assets/branding/openhtpc-wallpaper.png"
+                        bokeh_source = item_icon if item_icon != entry_icon else (fallback_bokeh if fallback_bokeh.is_file() else entry_icon)
+                        detail_background = _movie_bokeh_background(home, detail_menu, bokeh_source)
                         detail_sec = _build_movie_detail_section(
                             section_id=detail_menu,
                             token=token,
@@ -988,6 +1098,8 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                             item_icon=item_icon,
                             entry_icon=entry_icon,
                             res_menu=res_menu,
+                            background_image=detail_background,
+                            technical_info=technical_map.get((source_id, relative.as_posix())),
                         )
                         sections.append(detail_sec)
                         generated_detail_ids.add(detail_menu)
@@ -1016,12 +1128,12 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
         roots = [("+ AJOUTER UNE SOURCE MÉDIA", add_icon, f"{picker_bin}")]
     else:
         update_label = "METTRE À JOUR LA MÉDIATHÈQUE" if has_indexed_media else "ANALYSER MES MÉDIAS"
-        roots = [(update_label, icon, f":fork {install / 'openhtpc-media-update-request'}")]
+        roots = [(update_label, update_icon, f":fork {install / 'openhtpc-media-update-request'}")]
         if has_indexed_media:
             total, identified, review = library_summary
             roots.append((
                 f"MÉDIATHÈQUE — {total} médias · {identified} identifiés · {review} à vérifier",
-                icon,
+                library_icon,
                 ":fork true",
             ))
         for source in sources:
@@ -1099,12 +1211,17 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                                        f":applyback {search_helper_path} --token {token}"),
                     bounded_flex_entry(2, "RETOUR", entry_icon, ":back"),
                 ]))
+            fallback_bokeh = install / "assets/branding/openhtpc-wallpaper.png"
+            unmatched_background = _movie_bokeh_background(
+                home, detail_menu, fallback_bokeh if fallback_bokeh.is_file() else entry_icon
+            )
             sections.append(_build_movie_detail_section(
                 section_id=detail_menu, token=token, stem=relative.stem, ext=ext,
                 ident={"media_version_id": mv_id, "identification_state": "UNMATCHED",
                        "work_id": None},
                 pres_info=None, item_icon=entry_icon, entry_icon=entry_icon,
-                res_menu=res_menu,
+                res_menu=res_menu, background_image=unmatched_background,
+                technical_info=technical_map.get((source_id, relative.as_posix())),
             ))
             generated_detail_ids.add(detail_menu)
 
@@ -1135,9 +1252,9 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
               for i, (label, item_icon, command) in enumerate(unmatched_entries, 2)),
         ])
         sections.append(f"[MEDIA_UNMATCHED]\n{unmatched_body}")
-        roots.append((f"À identifier — {len(unmatched_entries)}", icon, ":submenu MEDIA_UNMATCHED"))
+        roots.append((f"À identifier — {len(unmatched_entries)}", review_icon, ":submenu MEDIA_UNMATCHED"))
 
-    roots.append(("RETOUR À OPENHTPC", icon, ":back"))
+    roots.append(("RETOUR À OPENHTPC", back_icon, ":back"))
     root_entries = []
     for i, entry_tuple in enumerate(roots, 1):
         if len(entry_tuple) == 5:
@@ -1407,94 +1524,21 @@ def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Pa
 
 
 def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon: pathlib.Path) -> str:
-    """Generate dynamic [SYSTEM_PROCESSING] entries for C4 MAGNIFICENCE state machine."""
-    # Read current video profile (never probes hardware)
-    vp_path = home / ".config/openhtpc/video-profile.json"
-    try:
-        vp_data = json.loads(vp_path.read_text(encoding="utf-8")) if vp_path.exists() else {}
-        active = vp_data.get("active_profile", "PURE")
-        if active not in {"PURE", "CINEMA_AUTO"}:
-            active = "PURE"
-    except Exception:
-        active = "PURE"
+    """Return read-only navigation for the Magnificence status page.
 
-    map_path = home / ".local/state/openhtpc/performance_map.json"
-    map_present = map_path.exists()
-    map_stale = False
-    if map_present:
-        try:
-            import importlib.util
-            ca_path = install / "openhtpc-cinema-auto.py"
-            if ca_path.exists():
-                spec = importlib.util.spec_from_file_location("ca", ca_path)
-                if spec and spec.loader:
-                    ca = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(ca)
-                    pmap = json.loads(map_path.read_text(encoding="utf-8"))
-                    if pmap:
-                        stale, _ = ca.is_map_stale(pmap)
-                        map_stale = stale
-        except Exception:
-            pass
-
-    cal_status_path = home / ".local/state/openhtpc/calibration-ui-status.json"
-    last_failed = False
-    if cal_status_path.exists():
-        try:
-            cst = json.loads(cal_status_path.read_text(encoding="utf-8"))
-            last_failed = (cst.get("status") == "FAILED")
-        except Exception:
-            pass
-
-    vp_cmd = install / "openhtpc-video-profile.py"
-    cal_ui = install / "openhtpc-calibrate-ui"
-    lines = []
-    idx = 1
-
-    if not map_present:
-        if last_failed:
-            # State H: Calibration failure
-            lines.append(f"Entry{idx}=RÉESSAYER L'ANALYSE;{local_icon};{cal_ui}")
-            idx += 1
-        else:
-            # State A: Fresh install / No calibration
-            # Exactly ONE primary action (no conflicting USE AUTO / ANALYZE buttons)
-            lines.append(f"Entry{idx}=CONFIGURER MAGNIFICENCE;{local_icon};{cal_ui}")
-            idx += 1
-    elif map_stale:
-        # State G: Stale map
-        lines.append(f"Entry{idx}=RECALIBRER;{local_icon};{cal_ui}")
-        idx += 1
-        if active == "CINEMA_AUTO":
-            lines.append(f"Entry{idx}=UTILISER PURE;{local_icon};:fork {vp_cmd} set PURE")
-            idx += 1
-        else:
-            lines.append(f"Entry{idx}=UTILISER MAGNIFICENCE;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
-            idx += 1
-    else:
-        # State D/E/F: Map present and valid
-        if active == "PURE":
-            lines.append(f"Entry{idx}=UTILISER MAGNIFICENCE;{local_icon};:fork {vp_cmd} set CINEMA_AUTO")
-            idx += 1
-        else:
-            lines.append(f"Entry{idx}=UTILISER PURE;{local_icon};:fork {vp_cmd} set PURE")
-            idx += 1
-        lines.append(f"Entry{idx}=RECALIBRER;{local_icon};{cal_ui}")
-        idx += 1
-
-    lines.append(f"Entry{idx}=RETOUR;{local_icon};:back")
-    return os.linesep.join(lines)
-
+    The single user-facing place that changes PURE / MAGNIFICENCE is
+    LECTURE -> MODE VIDEO.  This page explains the current decision only.
+    """
+    return f"Entry1=RETOUR;{local_icon};:back"
 
 def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: dict[str, pathlib.Path]) -> tuple[str, str, str, str]:
     """Couch-native selectors backed by persistent user configuration."""
     if not isinstance(icons, dict):
-        icons = {key: icons for key in ("video", "audio", "subtitles", "status", "about", "back")}
+        icons = {key: icons for key in ("video", "processing", "audio", "subtitles", "status", "about", "back")}
     policy_path = install / "openhtpc-playback-policy.py"
     setting = install / "openhtpc-playback-setting"
-    video_icon, audio_icon = icons["video"], icons["audio"]
-    subtitle_icon, status_icon = icons["subtitles"], icons["status"]
-    about_icon, back_icon = icons["about"], icons["back"]
+    video_icon, processing_icon, audio_icon = icons["video"], icons["processing"], icons["audio"]
+    subtitle_icon, back_icon = icons["subtitles"], icons["back"]
     try:
         spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_menu", policy_path)
         policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
@@ -1506,11 +1550,10 @@ def _playback_policy_sections(home: pathlib.Path, install: pathlib.Path, icons: 
     subtitle = {"AUTO":"AUTO","OFF":"DÉSACTIVÉS","FR_FORCED":"FRANÇAIS FORCÉS","FR_FULL":"FRANÇAIS COMPLETS"}[prefs["subtitle_policy"]]
     root = os.linesep.join((
         f"Entry1=MODE VIDÉO;{video_icon};:submenu PLAYBACK_VIDEO",
-        f"Entry2=LANGUE AUDIO;{audio_icon};:submenu PLAYBACK_AUDIO",
-        f"Entry3=SOUS-TITRES;{subtitle_icon};:submenu PLAYBACK_SUBTITLES",
-        f"Entry4=ÉTAT AUDIO;{status_icon};:submenu SYSTEM_AUDIO",
-        f"Entry5=À PROPOS;{about_icon};:submenu SYSTEM_ABOUT",
-        f"Entry6=RETOUR;{back_icon};:back",
+        f"Entry2=TRAITEMENT VIDÉO;{processing_icon};:submenu SYSTEM_PROCESSING",
+        f"Entry3=LANGUE AUDIO;{audio_icon};:submenu PLAYBACK_AUDIO",
+        f"Entry4=SOUS-TITRES;{subtitle_icon};:submenu PLAYBACK_SUBTITLES",
+        f"Entry5=RETOUR;{back_icon};:back",
     ))
     video = os.linesep.join((
         f"Entry1=PURE;{video_icon};:applyback {setting} presentation_mode PURE",
@@ -1672,6 +1715,7 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
     icon_back = resolve_sys_icon("system-back.png", resolve_sys_icon("retour.png", logo))
     playback_icons = {
         "video": resolve_sys_icon("playback-video.png", icon_codecs),
+        "processing": icon_processing,
         "audio": resolve_sys_icon("playback-language.png", icon_audio),
         "subtitles": resolve_sys_icon("playback-subtitles.png", media_icon),
         "status": resolve_sys_icon("playback-audio-status.png", icon_audio),
@@ -1869,11 +1913,11 @@ Entry10=RETOUR;{icon_back};:back
 
 [SYSTEM_OVERVIEW]
 BackgroundImage={system_pages['overview']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=RETOUR;{icon_back};:back
 
 [SYSTEM_CODECS]
 BackgroundImage={system_pages['codecs']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=RETOUR;{icon_back};:back
 
 [SYSTEM_DISPLAY]
 BackgroundImage={system_pages['display']}
@@ -1904,7 +1948,7 @@ Entry3=RETOUR;{icon_back};:back
 
 [SYSTEM_MEDIA_OPTICAL]
 BackgroundImage={system_pages['media_optical']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=RETOUR;{icon_back};:back
 
 [SYSTEM_METADATA]
 BackgroundImage={system_pages['metadata']}
@@ -1917,7 +1961,7 @@ BackgroundImage={system_pages['tmdb']}
 
 [SYSTEM_PROCESSING]
 BackgroundImage={system_pages['processing']}
-{_c4_processing_entries(home, install, local_icon)}
+{_c4_processing_entries(home, install, icon_processing)}
 
 [SYSTEM_PLAYBACK]
 BackgroundImage={system_pages['playback']}
@@ -1937,14 +1981,14 @@ BackgroundImage={system_pages['playback']}
 
 [SYSTEM_DIAGNOSTICS]
 BackgroundImage={system_pages['diagnostics']}
-Entry1=ACTUALISER LES CAPACITÉS;{local_icon};:fork {install/'openhtpc-system-action'} refresh
-Entry2=CRÉER UN RAPPORT SUPPORT;{local_icon};:fork {install/'openhtpc-system-action'} support
-Entry3=INFORMATIONS TECHNIQUES;{local_icon};:submenu SYSTEM_TECHNICAL
-Entry4=RETOUR;{local_icon};:back
+Entry1=ACTUALISER LES CAPACITÉS;{icon_diagnostic};:fork {install/'openhtpc-system-action'} refresh
+Entry2=CRÉER UN RAPPORT SUPPORT;{icon_diagnostic};:fork {install/'openhtpc-system-action'} support
+Entry3=INFORMATIONS TECHNIQUES;{icon_diagnostic};:submenu SYSTEM_TECHNICAL
+Entry4=RETOUR;{icon_back};:back
 
 [SYSTEM_TECHNICAL]
 BackgroundImage={system_pages['technical']}
-Entry1=RETOUR;{local_icon};:back
+Entry1=RETOUR;{icon_back};:back
 
 [SYSTEM_ABOUT]
 BackgroundImage={system_pages['about']}

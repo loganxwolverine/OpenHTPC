@@ -41,8 +41,7 @@ class Rc7OpticalActionIconsTest(unittest.TestCase):
         (self.home / ".local/state/openhtpc").mkdir(parents=True, exist_ok=True)
 
     def test_01_dvd_action_icons_with_committed_metadata(self):
-        """Verify that a qualified DVD disc view (e.g. D-TOX) generates the 4 expected icons: media.png, system-processing.png, eject.png, system-back.png."""
-        # Create tmdb cache with PASS status so no configuration prompt is added
+        """Committed DVD metadata keeps play/eject/back icons; video mode is global."""
         tmdb_dir = self.home / ".cache/openhtpc/tmdb"
         tmdb_dir.mkdir(parents=True, exist_ok=True)
         query = "D-TOX"
@@ -51,53 +50,37 @@ class Rc7OpticalActionIconsTest(unittest.TestCase):
         secrets_dir = self.home / ".config/openhtpc/secrets"
         secrets_dir.mkdir(parents=True, exist_ok=True)
         (secrets_dir / "tmdb-token").write_text("synthetic-token", encoding="utf-8")
-
         playback_policy.write_preference(self.home, "presentation_mode", "PURE")
         optical = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0", "disc_title": "D-TOX"}
         default_icons = tuple(pathlib.Path(f"default_{i}.png") for i in range(4))
         menu = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
         lines = [line.strip() for line in menu.strip().splitlines() if line.strip()]
-
         entries = {}
         for line in lines:
-            key, val = line.split("=", 1)
-            parts = val.split(";")
+            key, val = line.split("=", 1); parts = val.split(";")
             entries[key] = {"label": parts[0], "icon": parts[1], "command": ";".join(parts[2:])}
-
-        self.assertEqual(len(entries), 4)
-        self.assertIn("Entry1", entries)
-        self.assertIn("Entry2", entries)
-        self.assertIn("Entry3", entries)
-        self.assertIn("Entry4", entries)
-
-        # 1. LIRE LE DVD -> media.png
+        self.assertEqual(len(entries), 3)
         self.assertEqual(entries["Entry1"]["label"], "LIRE LE DVD")
         self.assertTrue(entries["Entry1"]["icon"].endswith("assets/ui/media.png"))
         self.assertIn("openhtpc-play-dvd", entries["Entry1"]["command"])
-
-        # 2. MODE VIDÉO : PURE -> system-processing.png
-        self.assertEqual(entries["Entry2"]["label"], "MODE VIDÉO : PURE")
-        self.assertTrue(entries["Entry2"]["icon"].endswith("assets/ui/system-processing.png") or entries["Entry2"]["icon"].endswith("assets/ui/traitement_video.png"))
-        self.assertEqual(entries["Entry2"]["command"], ":submenu DVD_VIDEO_MODE")
-
-        # 3. ÉJECTER -> eject.png
-        self.assertEqual(entries["Entry3"]["label"], "ÉJECTER")
-        self.assertTrue(entries["Entry3"]["icon"].endswith("assets/ui/eject.png"))
-        self.assertIn("openhtpc-eject", entries["Entry3"]["command"])
-
-        # 4. RETOUR -> system-back.png
-        self.assertEqual(entries["Entry4"]["label"], "RETOUR")
-        self.assertTrue(entries["Entry4"]["icon"].endswith("assets/ui/system-back.png"))
-        self.assertEqual(entries["Entry4"]["command"], ":back")
+        self.assertEqual(entries["Entry2"]["label"], "ÉJECTER")
+        self.assertTrue(entries["Entry2"]["icon"].endswith("assets/ui/eject.png"))
+        self.assertIn("openhtpc-eject", entries["Entry2"]["command"])
+        self.assertEqual(entries["Entry3"]["label"], "RETOUR")
+        self.assertTrue(entries["Entry3"]["icon"].endswith("assets/ui/system-back.png"))
+        self.assertEqual(entries["Entry3"]["command"], ":back")
+        self.assertNotIn("MODE VIDÉO", menu)
+        self.assertNotIn("DVD_VIDEO_MODE", menu)
 
     def test_02_dvd_cinema_auto_presentation_mode(self):
-        """Verify that CINÉMA AUTO presentation mode preserves the system-processing.png icon."""
+        """CINÉMA AUTO remains global and does not recreate a DVD shortcut."""
         playback_policy.write_preference(self.home, "presentation_mode", "CINEMA_AUTO")
         optical = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0"}
         default_icons = tuple(pathlib.Path(f"default_{i}.png") for i in range(4))
         menu = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
-        self.assertIn("MODE VIDÉO : CINÉMA AUTO", menu)
-        self.assertTrue("assets/ui/system-processing.png" in menu or "assets/ui/traitement_video.png" in menu)
+        self.assertIn("LIRE LE DVD", menu)
+        self.assertNotIn("MODE VIDÉO", menu)
+        self.assertNotIn("DVD_VIDEO_MODE", menu)
 
     def test_03_bluray_and_uhd_action_icons_generation(self):
         """Verify that Blu-ray and UHD disc views generate the appropriate action icons when enabled."""
@@ -147,13 +130,13 @@ class Rc7OpticalActionIconsTest(unittest.TestCase):
                 self.assertGreaterEqual(img.height, 36)
 
     def test_05_action_commands_strictly_unaffected(self):
-        """Verify that all commands generated for disc actions remain functionally immutable."""
+        """DVD playback/eject/back commands remain immutable; video mode stays global."""
         optical = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0"}
         default_icons = tuple(pathlib.Path(f"default_{i}.png") for i in range(4))
         menu = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
-
         self.assertIn("env OPENHTPC_FLEX_RETAINED=1 " + str(PAYLOAD / "openhtpc-play-dvd") + " /dev/sr0", menu)
-        self.assertIn(":submenu DVD_VIDEO_MODE", menu)
+        self.assertNotIn(":submenu DVD_VIDEO_MODE", menu)
+        self.assertNotIn("MODE VIDÉO", menu)
         self.assertIn(":fork env OPENHTPC_RETURN_UI=/bin/true " + str(PAYLOAD / "openhtpc-eject") + " /dev/sr0", menu)
         self.assertIn(":back", menu)
 
@@ -171,10 +154,10 @@ class Rc7OpticalActionIconsTest(unittest.TestCase):
         self.assertIn("return is_menu_disc_sheet(menu) && !is_menu_disc_ambiguous(menu);", source)
 
         # Must use is_menu_disc_action_sheet in render_buttons
-        self.assertIn("if (is_menu_disc_action_sheet(menu) && entry->icon != NULL)", source)
+        self.assertIn("if ((is_menu_disc_action_sheet(menu) || is_movie_detail(menu)) && entry->icon != NULL)", source)
 
         # Must use is_disc_action_sheet for action button geometry, reservation, and drawing
-        self.assertIn("else if (is_disc_action_sheet()) {", source)
+        self.assertIn("else if (is_disc_action_sheet() || is_movie_detail(current_menu)) {", source)
         self.assertIn("int total_w = icon_size + icon_gap + entry->text_rect.w;", source)
         self.assertIn("artwork_rect.x = entry->text_rect.x - icon_gap - icon_size;", source)
 
@@ -460,29 +443,27 @@ int main(void) {
             self.assertEqual(run_res.returncode, 0, f"Consistency test failed with code {run_res.returncode}")
 
     def test_12_pure_vs_cinema_auto_font_consistency(self):
-        """Verify that LIRE LE DVD and MODE VIDÉO: PURE share the full button width, preventing unwarranted text shrinking."""
-        optical_pure = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0"}
-        playback_policy.write_preference(self.home, "presentation_mode", "PURE")
+        """Changing global video mode never changes the DVD action-sheet contract."""
+        optical = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0"}
         default_icons = tuple(pathlib.Path(f"default_{i}.png") for i in range(4))
-        menu_pure = session_engine.disc_menu_entries(optical_pure, PAYLOAD, default_icons, self.home)
-        self.assertIn("LIRE LE DVD", menu_pure)
-        self.assertIn("MODE VIDÉO : PURE", menu_pure)
-
+        playback_policy.write_preference(self.home, "presentation_mode", "PURE")
+        menu_pure = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
         playback_policy.write_preference(self.home, "presentation_mode", "CINEMA_AUTO")
-        menu_auto = session_engine.disc_menu_entries(optical_pure, PAYLOAD, default_icons, self.home)
+        menu_auto = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
+        self.assertIn("LIRE LE DVD", menu_pure)
         self.assertIn("LIRE LE DVD", menu_auto)
-        self.assertIn("MODE VIDÉO : CINÉMA AUTO", menu_auto)
+        self.assertNotIn("MODE VIDÉO", menu_pure)
+        self.assertNotIn("MODE VIDÉO", menu_auto)
+        self.assertEqual(menu_pure, menu_auto)
 
     def test_13_video_mode_icon_is_system_processing_matching_system_playback(self):
-        """Verify that the icon for MODE VIDÉO in disc menu strictly matches the icon in SYSTÈME → LECTURE (system-processing.png)."""
-        sys_menu_source = (PAYLOAD / "openhtpc-session-engine.py").read_text(encoding="utf-8")
-        self.assertIn('icon_processing = resolve_sys_icon("system-processing.png", resolve_sys_icon("traitement_video.png", logo))', sys_menu_source)
-        self.assertIn("Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK", sys_menu_source)
-
+        """Video mode is exposed only through SYSTÈME → LECTURE with the processing icon."""
+        source = (PAYLOAD / "openhtpc-session-engine.py").read_text(encoding="utf-8")
+        self.assertIn('icon_processing = resolve_sys_icon("system-processing.png", resolve_sys_icon("traitement_video.png", logo))', source)
+        self.assertIn("Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK", source)
+        self.assertIn('f"Entry1=MODE VIDÉO;{video_icon};:submenu PLAYBACK_VIDEO"', source)
         optical = {"canonical_state": "DVD_VIDEO", "device": "/dev/sr0"}
         default_icons = tuple(pathlib.Path(f"default_{i}.png") for i in range(4))
         menu = session_engine.disc_menu_entries(optical, PAYLOAD, default_icons, self.home)
-        lines = [line.strip() for line in menu.strip().splitlines() if line.strip()]
-        video_entry = next(line for line in lines if "MODE VIDÉO" in line)
-        self.assertTrue("assets/ui/system-processing.png" in video_entry or "assets/ui/traitement_video.png" in video_entry)
-        self.assertNotIn("assets/ui/playback-video.png", video_entry)
+        self.assertNotIn("MODE VIDÉO", menu)
+        self.assertNotIn("DVD_VIDEO_MODE", menu)

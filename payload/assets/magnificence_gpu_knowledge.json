@@ -1,0 +1,529 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "name": "OPENHTPC_MAGNIFICENCE_EVOLVING_GPU_KNOWLEDGE",
+    "priority": [
+      "EXACT_QUALIFIED_PROFILE",
+      "OPENHTPC_VALIDATED_FAMILY_RULE",
+      "CAPABILITY_BASELINE_LIGHT",
+      "PURE"
+    ],
+    "runtime_benchmark_required": false,
+    "max_output": "3840x2160",
+    "notes": "Exact OPENHTPC physical qualifications always win. Community-derived family tiers are retained as reference evidence only and cannot select a recipe until explicitly promoted by OPENHTPC evidence. Unknown but capable GPUs receive the conservative LIGHT baseline instead of falling directly to PURE.",
+    "resolution_policy": "Family tiers are conservative up to 3840x2160 and are not automatically promoted at lower output resolutions until evidence supports a resolution-specific rule.",
+    "community_reference_rules_active": false,
+    "evolution_rule": "A family rule becomes selection-eligible only after explicit OPENHTPC promotion based on reproducible physical tests and/or sufficiently consistent OPENHTPC user reports. No automatic promotion is performed from external tier tables."
+  },
+  "shader_allowlist": [
+    "KrigBilateral.glsl",
+    "FSRCNNX_x2_8-0-4-1.glsl",
+    "FSRCNNX_x2_16-0-4-1.glsl",
+    "FSRCNN_x2_r2_32-0-2.glsl",
+    "SSimSuperRes.glsl",
+    "OpenHTPC_Vibrance_Mild.glsl"
+  ],
+  "family_recipes": {
+    "LIGHT": {
+      "recipe_id": "RECIPE_MAG_FAMILY_LIGHT_KRIG",
+      "label": "KrigBilateral",
+      "shaders": [
+        "KrigBilateral.glsl"
+      ],
+      "mpv_args": [
+        "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]"
+      ]
+    },
+    "MEDIUM": {
+      "recipe_id": "RECIPE_MAG_FAMILY_MEDIUM_FSRCNNX8_KRIG",
+      "label": "FSRCNNX-8 + KrigBilateral",
+      "shaders": [
+        "FSRCNNX_x2_8-0-4-1.glsl",
+        "KrigBilateral.glsl"
+      ],
+      "mpv_args": [
+        "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]"
+      ]
+    },
+    "STRONG": {
+      "recipe_id": "RECIPE_MAG_FAMILY_STRONG_FSRCNNX16_KRIG_VIBRANCE",
+      "label": "FSRCNNX-16 + KrigBilateral + Vibrance Mild",
+      "shaders": [
+        "FSRCNNX_x2_16-0-4-1.glsl",
+        "KrigBilateral.glsl",
+        "OpenHTPC_Vibrance_Mild.glsl"
+      ],
+      "mpv_args": [
+        "--fbo-format=rgba16hf",
+        "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
+        "--scale=ewa_lanczossharp",
+        "--dscale=mitchell",
+        "--sigmoid-upscaling=yes"
+      ]
+    },
+    "HIGH": {
+      "recipe_id": "RECIPE_MAG_FAMILY_HIGH_FSRCNNX16_KRIG_SSIM_VIBRANCE",
+      "label": "FSRCNNX-16 + KrigBilateral + SSimSuperRes + Vibrance Mild",
+      "shaders": [
+        "FSRCNNX_x2_16-0-4-1.glsl",
+        "KrigBilateral.glsl",
+        "SSimSuperRes.glsl",
+        "OpenHTPC_Vibrance_Mild.glsl"
+      ],
+      "mpv_args": [
+        "--fbo-format=rgba16hf",
+        "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
+        "--scale=ewa_lanczossharp",
+        "--dscale=mitchell",
+        "--sigmoid-upscaling=yes"
+      ]
+    }
+  },
+  "family_rules": [
+    {
+      "id": "nvidia_rtx50_high",
+      "vendor_id": "10de",
+      "contains_any": [],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "regex_any": [
+        "\\brtx 50[0-9]{2}(?: ti| super)?\\b"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_rtx40_high",
+      "vendor_id": "10de",
+      "contains_any": [],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "regex_any": [
+        "\\brtx 40[0-9]{2}(?: ti| super)?\\b"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_rtx30_high",
+      "vendor_id": "10de",
+      "contains_any": [
+        "RTX 3060",
+        "RTX 3060 Ti",
+        "RTX 3070",
+        "RTX 3070 Ti",
+        "RTX 3080",
+        "RTX 3080 Ti",
+        "RTX 3090",
+        "RTX 3090 Ti"
+      ],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_rtx3050_medium",
+      "vendor_id": "10de",
+      "contains_any": [
+        "RTX 3050"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_rtx20_medium",
+      "vendor_id": "10de",
+      "contains_any": [],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "regex_any": [
+        "\\brtx 20[0-9]{2}(?: ti| super)?\\b"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_gtx1660_super_ti_medium",
+      "vendor_id": "10de",
+      "contains_any": [
+        "GTX 1660 SUPER",
+        "GTX 1660 Ti"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles",
+        "ulyssescaballes_performance_notes"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_gtx1660_1650_light",
+      "vendor_id": "10de",
+      "contains_any": [
+        "GTX 1660",
+        "GTX 1650"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles",
+        "ulyssescaballes_performance_notes"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_gtx1070_1080_medium",
+      "vendor_id": "10de",
+      "contains_any": [
+        "GTX 1070",
+        "GTX 1080"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "nvidia_gtx1060_lower_light",
+      "vendor_id": "10de",
+      "contains_any": [
+        "GTX 1060",
+        "GTX 1050",
+        "GTX 1030"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "regex_any": [
+        "\\bgtx 9[0-9]{2}(?: ti)?\\b"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx9_high",
+      "vendor_id": "1002",
+      "contains_any": [],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "regex_any": [
+        "\\brx 9[0-9]{3}(?: xt)?\\b"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx7_high",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 7700 XT",
+        "RX 7800 XT",
+        "RX 7900"
+      ],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx7600_medium",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 7600"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx67plus_high",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 6700 XT",
+        "RX 6750 XT",
+        "RX 6800",
+        "RX 6900",
+        "RX 6950"
+      ],
+      "tier": "HIGH",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles",
+        "ulyssescaballes_performance_notes",
+        "reddit_rx6750xt_heavy_shader_limit"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx66_medium",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 6600",
+        "RX 6650 XT"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx64_65_light",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 6400",
+        "RX 6500"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx56_57_medium",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 5600 XT",
+        "RX 5700"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx55_light",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 5500"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_vega56_64_medium",
+      "vendor_id": "1002",
+      "contains_any": [
+        "Vega 56",
+        "Vega 64"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "amd_rx500_light",
+      "vendor_id": "1002",
+      "contains_any": [
+        "RX 590",
+        "RX 580",
+        "RX 570",
+        "RX 560",
+        "RX 550"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "intel_arc_a7_medium",
+      "vendor_id": "8086",
+      "contains_any": [
+        "Arc A770",
+        "Arc A750"
+      ],
+      "tier": "MEDIUM",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "intel_arc_a5_a3_light",
+      "vendor_id": "8086",
+      "contains_any": [
+        "Arc A580",
+        "Arc A380"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    },
+    {
+      "id": "intel_integrated_light",
+      "vendor_id": "8086",
+      "contains_any": [
+        "UHD Graphics",
+        "Iris Xe",
+        "HD Graphics"
+      ],
+      "tier": "LIGHT",
+      "confidence": "COMMUNITY_DERIVED",
+      "evidence_ids": [
+        "plex_shader_profiles"
+      ],
+      "selection_status": "REFERENCE_ONLY"
+    }
+  ],
+  "evidence_sources": [
+    {
+      "id": "openhtpc_physical",
+      "kind": "FIRST_PARTY_PHYSICAL",
+      "priority": 100,
+      "description": "OPENHTPC physical qualification profiles in magnificence_profiles.json"
+    },
+    {
+      "id": "plex_shader_profiles",
+      "kind": "COMMUNITY_CONFIG",
+      "priority": 60,
+      "url": "https://github.com/bses2018/plex-shader-profiles",
+      "description": "GPU auto-tier mapping and cinema chain using FSRCNNX, SSimSuperRes and KrigBilateral."
+    },
+    {
+      "id": "mpv_dynamic_fallback",
+      "kind": "COMMUNITY_EXPERIENCE",
+      "priority": 40,
+      "url": "https://github.com/mpv-player/mpv/issues/16671",
+      "description": "Real mpv configuration demonstrates a practical FSRCNNX x16 -> x8 -> off degradation ladder using frame counters."
+    },
+    {
+      "id": "jellyfin_default_shader_pack",
+      "kind": "COMMUNITY_PACK",
+      "priority": 50,
+      "url": "https://github.com/iwalton3/default-shader-pack",
+      "description": "Widely used MPV Shim shader pack confirms FSRCNNX/Krig family availability and warns that heavier shader presets can drop frames on weaker GPUs."
+    },
+    {
+      "id": "ulyssescaballes_performance_notes",
+      "kind": "COMMUNITY_CONFIG",
+      "priority": 45,
+      "url": "https://github.com/popeyeurs/ulyssescaballes-mpv.config",
+      "description": "Performance notes recommend lighter FSRCNNX profiles for GTX 1660 / RX 5600 XT and a fuller 4K pipeline for RTX 3060 / RX 6700 XT class GPUs."
+    },
+    {
+      "id": "reddit_rx6750xt_heavy_shader_limit",
+      "kind": "USER_REPORT",
+      "priority": 25,
+      "url": "https://www.reddit.com/r/mpv/comments/1kvmd2e",
+      "description": "RX 6750 XT user reports dropped frames with very heavy NNEDI3 variants, supporting conservative ceilings for inferred high-tier GPUs rather than assuming every heavy shader is safe."
+    },
+    {
+      "id": "reddit_gpus_for_mpv_shaders_2026",
+      "kind": "USER_DISCUSSION",
+      "priority": 25,
+      "url": "https://www.reddit.com/r/mpv/comments/1r584zg/gpus_for_mpv_shaders/",
+      "description": "2026 HTPC discussion comparing RX580, integrated graphics, RTX3060 and Arc A750 for shader-heavy playback."
+    },
+    {
+      "id": "reddit_rtx3060_full4k_2023",
+      "kind": "USER_REPORT",
+      "priority": 25,
+      "url": "https://www.reddit.com/r/mpv/comments/18t231j/",
+      "description": "RTX3060 user reports using full 4K mpv settings after GTX1070 required 1080p constraint."
+    },
+    {
+      "id": "reddit_gtx1660ti_config_2024",
+      "kind": "USER_REPORT",
+      "priority": 20,
+      "url": "https://www.reddit.com/r/mpv/comments/1b80mft/",
+      "description": "GTX1660 Ti user configuration using gpu-next, Vulkan and NVDEC."
+    },
+    {
+      "id": "reddit_rx6600_config_2023",
+      "kind": "USER_REPORT",
+      "priority": 20,
+      "url": "https://www.reddit.com/r/mpv/comments/126q1pm/",
+      "description": "RX6600 user running an mpv configuration with external shaders."
+    }
+  ],
+  "community_observations": [
+    {
+      "id": "reddit_2026_rx580_4k_shader_headroom",
+      "evidence_id": "reddit_gpus_for_mpv_shaders_2026",
+      "gpu": "AMD Radeon RX 580",
+      "output": "4K",
+      "observation": "Users describe RX580 as around the lower practical boundary for shader-heavy 4K use; integrated Intel graphics are reported choppy with expensive shaders.",
+      "use": "CORROBORATION_ONLY",
+      "confidence": "LOW_COMMUNITY_REPORT"
+    },
+    {
+      "id": "reddit_2023_rtx3060_full_4k_config",
+      "evidence_id": "reddit_rtx3060_full4k_2023",
+      "gpu": "NVIDIA GeForce RTX 3060",
+      "output": "3840x2160",
+      "observation": "User reports moving from GTX1070 constrained to 1080p settings to full 4K settings after upgrading to RTX3060.",
+      "use": "FAMILY_TIER_CORROBORATION",
+      "confidence": "LOW_COMMUNITY_REPORT"
+    },
+    {
+      "id": "reddit_2023_gtx1660ti_gpu_next_vulkan",
+      "evidence_id": "reddit_gtx1660ti_config_2024",
+      "gpu": "NVIDIA GeForce GTX 1660 Ti",
+      "output": "1920x1080",
+      "observation": "User configuration runs vo=gpu-next with Vulkan/NVDEC on GTX1660 Ti; useful as backend compatibility evidence, not a heavy-shader benchmark.",
+      "use": "BACKEND_COMPATIBILITY_ONLY",
+      "confidence": "LOW_COMMUNITY_REPORT"
+    },
+    {
+      "id": "reddit_2023_rx6600_mpv_shader_config",
+      "evidence_id": "reddit_rx6600_config_2023",
+      "gpu": "AMD Radeon RX 6600",
+      "output": "UNKNOWN",
+      "observation": "RX6600 user reports using an mpv shader-oriented configuration; performance detail is insufficient for promotion beyond the conservative family rule.",
+      "use": "BACKEND_COMPATIBILITY_ONLY",
+      "confidence": "LOW_COMMUNITY_REPORT"
+    },
+    {
+      "id": "reddit_rx6750xt_heavy_shader_ceiling",
+      "evidence_id": "reddit_rx6750xt_heavy_shader_limit",
+      "gpu": "AMD Radeon RX 6750 XT",
+      "output": "UNKNOWN",
+      "observation": "User reports dropped frames with a substantially heavier NNEDI3 configuration. OPENHTPC therefore does not infer HQ32 merely from RX6750XT raw performance class.",
+      "use": "HEAVY_RECIPE_CEILING",
+      "confidence": "LOW_COMMUNITY_REPORT"
+    }
+  ]
+}

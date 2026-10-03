@@ -47,7 +47,7 @@ def decision(presentation="PURE", audio="AUTO", subtitle="AUTO", aid="MPV_AUTO",
 class PlaybackPage(unittest.TestCase):
     def test_active_state_page_reflects_all_three_preferences(self):
         source = (PAYLOAD / "openhtpc-ui.py").read_text(encoding="utf-8")
-        for marker in ("LECTURE — PRÉFÉRENCES ACTIVES", "Mode vidéo", "Langue audio", "Sous-titres", "Application", "Persistance", "ACTIONS"):
+        for marker in ("LECTURE — PRÉFÉRENCES ACTIVES", "Mode vidéo", "Langue audio", "Sous-titres", "Application", "Réglages mémorisés", "ACTIONS"):
             self.assertIn(marker, source)
         with tempfile.TemporaryDirectory() as value:
             target = pathlib.Path(value) / "playback.png"
@@ -58,12 +58,13 @@ class PlaybackPage(unittest.TestCase):
             self.assertGreater(target.stat().st_size, 10000)
 
     def test_bottom_actions_have_order_navigation_and_distinct_icons(self):
-        icons = {key:pathlib.Path(f"{key}.png") for key in ("video","audio","subtitles","status","about","back")}
+        icons = {key:pathlib.Path(f"{key}.png") for key in ("video","processing","audio","subtitles","status","about","back")}
         root, video, audio, subtitles = session._playback_policy_sections(pathlib.Path("/tmp/home"), PAYLOAD, icons)
-        labels = ["MODE VIDÉO", "LANGUE AUDIO", "SOUS-TITRES", "ÉTAT AUDIO", "À PROPOS", "RETOUR"]
+        labels = ["MODE VIDÉO", "TRAITEMENT VIDÉO", "LANGUE AUDIO", "SOUS-TITRES", "RETOUR"]
         self.assertEqual([line.split("=",1)[1].split(";",1)[0] for line in root.splitlines()], labels)
-        self.assertEqual(len({line.split(";")[1] for line in root.splitlines()}), 6)
+        self.assertEqual(len({line.split(";")[1] for line in root.splitlines()}), 5)
         self.assertIn(":submenu PLAYBACK_VIDEO", root)
+        self.assertIn(":submenu SYSTEM_PROCESSING", root)
         self.assertIn(":back", root)
         self.assertIn("openhtpc-playback-setting", video + audio + subtitles)
 
@@ -95,8 +96,8 @@ class ResolvedOsd(unittest.TestCase):
         self.assertIn("Mode vidéo : PURE", text)
         self.assertNotIn("→", text)
 
-    def test_cinema_auto_to_pure(self):
-        self.assertIn("Mode vidéo : CINÉMA AUTO", policy.osd_text(decision("CINEMA_AUTO")))
+    def test_magnificence_public_label(self):
+        self.assertIn("Mode vidéo : MAGNIFICENCE", policy.osd_text(decision("CINEMA_AUTO")))
 
     def test_resolved_audio_and_subtitles(self):
         fr_off = policy.osd_text(decision(audio="FR", subtitle="OFF", aid="AID_2", sid="NONE"))

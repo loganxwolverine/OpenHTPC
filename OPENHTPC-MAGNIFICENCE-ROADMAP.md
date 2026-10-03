@@ -6,7 +6,7 @@ Status: `RC PRIORITY — CURRENT FEDORA GRAPHICS STACK`
 
 The first Magnificence RC targets hardware that works with the current Fedora graphics stack without requiring OPENHTPC to install, pin or replace a legacy vendor driver branch. The RC must remain installable, predictable and reversible, with PURE as the safe fallback when no qualified profile matches the active GPU, source class and display target.
 
-The initial qualified matrix is intentionally finite. It includes current validated Intel, AMD and NVIDIA paths and does not infer an untested recipe merely because a GPU appears similar to a qualified one. Runtime benchmarking is not a recipe-selection mechanism.
+The physically qualified matrix is intentionally finite, but it is no longer the complete hardware-coverage mechanism. Exact OPENHTPC qualifications remain the highest-priority authority. An evolving GPU knowledge database preserves external family evidence, but community-derived tiers are reference-only until OPENHTPC explicitly promotes them from reproducible physical tests and/or sufficiently consistent OPENHTPC user reports. Runtime benchmarking is not a recipe-selection mechanism.
 
 ## RC qualified matrix
 
@@ -22,7 +22,17 @@ The first Magnificence RC uses the following static hardware/output classes. The
 | NVIDIA GeForce RTX 3050 (`10de:2507`) | `HIGH` | 3840x2160 | FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + OPENHTPC Vibrance Mild |
 | AMD Radeon RX 5700 XT (`1002:731f`) | `HIGH` | 3840x2160 | FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + OPENHTPC Vibrance Mild |
 
-Selection is profile-driven and does not use runtime benchmarking. A missing profile, incompatible output resolution, or missing selected shader falls back to `PURE`.
+Exact-profile selection remains first priority and does not use runtime benchmarking.
+
+## Evolving GPU knowledge database
+
+`assets/magnificence_gpu_knowledge.json` extends Magnificence beyond Steve's exact test hardware without expanding the shader catalogue. Selection order is currently: exact physically qualified OPENHTPC profile, then an explicitly OPENHTPC-promoted family rule when one exists, then a conservative LIGHT capability baseline, then `PURE` when the required capabilities cannot be established. Community-derived family tables remain stored as reference evidence and are not selection-active by default.
+
+The generalized classifier is deliberately restricted to the frozen Magnificence shader set: KrigBilateral, FSRCNNX-8, FSRCNNX-16, FSRCNN-HQ r2_32, SSimSuperRes and OPENHTPC Vibrance Mild. Family inference does not explore RAVU, ArtCNN, CfL or any other shader automatically. HQ32 remains reserved for exact physically qualified profiles; generalized HIGH hardware uses the more conservative FSRCNNX-16 + KrigBilateral + SSimSuperRes + Vibrance Mild chain.
+
+Every generalized decision requires an actual Vulkan device match and MPEG-2 hardware-decode support. Community reports/configurations are evidence, not recipe authority: they may suggest a future promotion, but they cannot activate one by themselves. An exact OPENHTPC profile always wins. The database records evidence identifiers and selection status so mappings can evolve transparently as additional OPENHTPC hardware is reported and verified.
+
+A completely unknown GPU that satisfies the Vulkan + MPEG-2 capability baseline receives the conservative LIGHT/KrigBilateral recipe rather than falling directly to PURE. Missing required capabilities, unsupported source scope, output above the supported limit, or missing approved shaders still falls back to `PURE`.
 
 ## RC validation gate
 

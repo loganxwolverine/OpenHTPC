@@ -39,12 +39,14 @@ class DisplayRuntime(unittest.TestCase):
         (p/'status').write_text(status); (p/'edid').write_bytes(edid(hdr))
         return p
 
-    def collect(self, outputs=None, status='OK', text=None):
+    def collect(self, outputs=None, status='OK', text=None, color_text=''):
         def runner(argv, timeout):
             self.calls.append(argv)
-            self.assertEqual(argv[-2:], ['kscreen-doctor', '-j'])
             self.assertEqual(timeout, 6)
-            return {'status': status, 'stdout': text if text is not None else json.dumps({'outputs': outputs if outputs is not None else [self.output]}), 'stderr': '', 'returncode': 0}
+            if argv[-1] == '-j':
+                return {'status': status, 'stdout': text if text is not None else json.dumps({'outputs': outputs if outputs is not None else [self.output]}), 'stderr': '', 'returncode': 0}
+            self.assertEqual(argv[-2:], ['kscreen-doctor', '-o'])
+            return {'status': 'OK', 'stdout': color_text, 'stderr': '', 'returncode': 0}
         return cap.collect_display(self.home, PAYLOAD, runner, self.sys, self.sys)
 
     def present(self, state):
@@ -70,10 +72,15 @@ class DisplayRuntime(unittest.TestCase):
             d = self.present(self.collect())['display']
             self.assertEqual(d['hdr_capable'], 'Oui'); self.assertEqual(d['hdr_current'], label)
 
+    def test_current_color_depth_uses_kwin_observed_value(self):
+        text = 'Output: 1 HDMI-A-6 abc\n enabled\n connected\n Color resolution: automatic (10), range: [8; 12] bits per color\n'
+        d = self.present(self.collect(color_text=text))['display']
+        self.assertEqual(d['depth'], '10 bpc')
+
     def test_missing_edid_and_max_bpc_do_not_invent_facts(self):
         d = self.present(self.collect())['display']
         self.assertEqual(d['hdr_capable'], 'Non déterminé')
-        self.assertEqual(d['depth'], 'Non déterminée')
+        self.assertIsNone(d['depth'])
         self.assertEqual(d['hdr_pipeline'], 'Non déterminé')
         self.assertEqual(d['auto_refresh'], 'Désactivé')
 

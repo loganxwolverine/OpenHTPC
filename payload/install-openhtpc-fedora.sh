@@ -37,6 +37,7 @@ readonly OPENHTPC_COMMAND_PATH="${BIN_DIR}/openhtpc"
 readonly VALIDATOR_COMMAND_PATH="${BIN_DIR}/openhtpc-validator"
 readonly AUTOSTART_DIR="${HOME}/.config/autostart"
 readonly AUTOSTART_PATH="${AUTOSTART_DIR}/openhtpc.desktop"
+readonly LEGACY_FLEX_AUTOSTART_PATH="${AUTOSTART_DIR}/openhtpc-flex.desktop"
 readonly APPLICATIONS_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
 readonly APPLICATION_DESKTOP_PATH="${APPLICATIONS_DIR}/openhtpc.desktop"
 TEMP_DIR="$(mktemp -d -t openhtpc-installer.XXXXXX)"
@@ -626,6 +627,9 @@ fi
 if [[ -f "$SCRIPT_DIR/assets/magnificence_profiles.json" ]]; then
     install -Dm 0644 "$SCRIPT_DIR/assets/magnificence_profiles.json" "$INSTALL_DIR/assets/magnificence_profiles.json"
 fi
+if [[ -f "$SCRIPT_DIR/assets/magnificence_gpu_knowledge.json" ]]; then
+    install -Dm 0644 "$SCRIPT_DIR/assets/magnificence_gpu_knowledge.json" "$INSTALL_DIR/assets/magnificence_gpu_knowledge.json"
+fi
 install -m 0644 "$SCRIPT_DIR/managed-files.txt" "$INSTALL_DIR/.openhtpc-managed-files"
 
 
@@ -636,6 +640,13 @@ ln -sfn "$INSTALL_DIR/openhtpc-media-browser" "$MEDIA_BROWSER_COMMAND_PATH"
 ln -sfn "$INSTALL_DIR/openhtpc" "$OPENHTPC_COMMAND_PATH"
 ln -sfn "$INSTALL_DIR/openhtpc-validator" "$VALIDATOR_COMMAND_PATH"
 mkdir -p "$AUTOSTART_DIR"
+# Remove the legacy direct Flex autostart only when it is clearly the old
+# OPENHTPC launcher.  Keeping both launch paths causes duplicate SESSION_START
+# attempts and races with the canonical `openhtpc start` entry.
+if [[ -f "$LEGACY_FLEX_AUTOSTART_PATH" ]] && grep -Fq "openhtpc-session-start" "$LEGACY_FLEX_AUTOSTART_PATH"; then
+    rm -f -- "$LEGACY_FLEX_AUTOSTART_PATH"
+    log "Ancien autostart Flex direct supprimé : ${LEGACY_FLEX_AUTOSTART_PATH}"
+fi
 cat >"$AUTOSTART_PATH" <<EOF
 [Desktop Entry]
 Type=Application
@@ -646,7 +657,6 @@ X-KDE-autostart-after=panel
 X-OPENHTPC-Managed=true
 EOF
 chmod 0644 "$AUTOSTART_PATH"
-
 mkdir -p "$APPLICATIONS_DIR"
 cat >"$APPLICATION_DESKTOP_PATH" <<EOF
 [Desktop Entry]

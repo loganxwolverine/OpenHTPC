@@ -2747,3 +2747,34 @@ VkPhysicalDeviceVulkan11Properties:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVulkanIdentityProbeEnvironment(unittest.TestCase):
+    def test_default_runner_drops_display_but_preserves_wayland(self):
+        captured = {}
+
+        class Proc:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        original_run = gpu_rt.subprocess.run
+        old_display = os.environ.get("DISPLAY")
+        old_wayland = os.environ.get("WAYLAND_DISPLAY")
+        try:
+            os.environ["DISPLAY"] = ":0"
+            os.environ["WAYLAND_DISPLAY"] = "wayland-0"
+            def fake_run(command, **kwargs):
+                captured.update(kwargs)
+                return Proc()
+            gpu_rt.subprocess.run = fake_run
+            rc, stdout, stderr = gpu_rt.default_vulkan_runner()
+        finally:
+            gpu_rt.subprocess.run = original_run
+            if old_display is None: os.environ.pop("DISPLAY", None)
+            else: os.environ["DISPLAY"] = old_display
+            if old_wayland is None: os.environ.pop("WAYLAND_DISPLAY", None)
+            else: os.environ["WAYLAND_DISPLAY"] = old_wayland
+        self.assertEqual((rc, stdout, stderr), (0, "ok", ""))
+        self.assertNotIn("DISPLAY", captured["env"])
+        self.assertEqual(captured["env"].get("WAYLAND_DISPLAY"), "wayland-0")

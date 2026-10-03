@@ -176,10 +176,12 @@ def _load_playback_policy():
 
 
 def query(content_scope: str, home: pathlib.Path | None = None) -> dict:
-    """Resolve CINÉMA AUTO from the static qualified profile database.
+    """Resolve MAGNIFICENCE from exact profiles or the evolving GPU knowledge DB.
 
-    DVD_PAL_FILM is the first production scope. Unknown/unqualified scopes or
-    hardware always return PURE. No Performance Map is consulted.
+    DVD_PAL_FILM is the first production scope. Exact OPENHTPC physical
+    qualifications take priority; otherwise conservative family/capability
+    classification selects only from the frozen Magnificence shader recipes.
+    No runtime benchmark is used for recipe selection.
     """
     result = {
         "recipe_id": FALLBACK_RECIPE,
@@ -207,12 +209,18 @@ def query(content_scope: str, home: pathlib.Path | None = None) -> dict:
     if not choice:
         return result
 
+    selection_source = choice.get("selection_source", "STATIC_PROFILE_DB")
+    classification_method = choice.get("classification_method", "EXACT_QUALIFIED_PROFILE")
+    reason = "QUALIFIED_STATIC_PROFILE" if selection_source == "STATIC_PROFILE_DB" else classification_method
     result.update({
         "recipe_id": choice.get("recipe_id", FALLBACK_RECIPE),
-        "reason": "QUALIFIED_STATIC_PROFILE",
+        "reason": reason,
         "profile_id": choice.get("profile_id"),
         "label": choice.get("label", choice.get("recipe_id", "MAGNIFICENCE")),
         "display": choice.get("display"),
+        "selection_source": selection_source,
+        "classification_tier": choice.get("classification_tier"),
+        "classification_confidence": choice.get("classification_confidence"),
     })
     return result
 

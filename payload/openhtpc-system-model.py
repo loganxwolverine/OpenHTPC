@@ -172,6 +172,14 @@ def normalize_device_id(value: Any) -> str | None:
     return match.group(1) if match else None
 
 
+def normalize_vendor_device_id(value: Any) -> tuple[str, str] | None:
+    if not isinstance(value, str):
+        return None
+    compact = value.strip().lower().replace("0x", "")
+    match = re.fullmatch(r"([0-9a-f]{4}):([0-9a-f]{4})", compact)
+    return (match.group(1), match.group(2)) if match else None
+
+
 def clean_gpu_display_name(raw: Any) -> str:
     if not isinstance(raw, str) or not raw.strip():
         return "Indéterminé"
@@ -199,7 +207,7 @@ def magnificence_from_capabilities(
     install: pathlib.Path,
     *,
     display_snapshot: dict | None = None,
-    active_device_id: str | None = None,
+    active_pci_address: str | None = None,
 ) -> dict:
     """Resolve user-facing Magnificence data without performing hardware probes."""
     default = {
@@ -211,15 +219,30 @@ def magnificence_from_capabilities(
     }
     try:
         graphics = caps.get("graphics", {}) if isinstance(caps.get("graphics"), dict) else {}
-        devices = graphics.get("devices", []) if isinstance(graphics.get("devices"), list) else []
-        if active_device_id is None:
-            active_gpu = next((item for item in devices if isinstance(item, dict) and item.get("active")), None)
-            if active_gpu is None:
-                active_gpu = next((item for item in devices if isinstance(item, dict)), None)
-            if not active_gpu:
+        devices = [item for item in graphics.get("devices", []) if isinstance(item, dict)] if isinstance(graphics.get("devices"), list) else []
+        if not devices:
+            return default
+
+        active_gpu = None
+        normalized_pci = normalize_pci_address(active_pci_address) if active_pci_address else None
+        if normalized_pci:
+            matches = [item for item in devices if normalize_pci_address(item.get("pci_address")) == normalized_pci]
+            if len(matches) != 1:
                 return default
-            active_device_id = active_gpu.get("device_id")
-        active_device_id = normalize_device_id(active_device_id)
+            active_gpu = matches[0]
+        else:
+            active_matches = [item for item in devices if type(item.get("active")) is bool and item.get("active") is True]
+            if len(active_matches) == 1:
+                active_gpu = active_matches[0]
+            elif len(devices) == 1:
+                active_gpu = devices[0]
+            else:
+                return default
+
+        active_vendor_id = normalize_device_id(active_gpu.get("vendor_id"))
+        active_device_id = normalize_device_id(active_gpu.get("device_id"))
+        if not active_vendor_id or not active_device_id:
+            return default
 
         display = display_snapshot if isinstance(display_snapshot, dict) else {}
         output = display.get("active_output", {}) if isinstance(display.get("active_output"), dict) else {}
@@ -236,7 +259,8 @@ def magnificence_from_capabilities(
         db = read_json(install / "assets/magnificence_profiles.json")
         for profile_id, profile_data in db.get("profiles", {}).items():
             profile_gpu = profile_data.get("gpu", {})
-            if active_device_id != normalize_device_id(profile_gpu.get("pci_id")):
+            profile_ids = normalize_vendor_device_id(profile_gpu.get("pci_id"))
+            if not profile_ids or profile_ids != (active_vendor_id, active_device_id):
                 continue
             cpu_contains = str(profile_data.get("match", {}).get("cpu_model_contains", "")).strip().casefold()
             if cpu_contains and cpu_contains not in cpu_model:
@@ -260,7 +284,42 @@ def magnificence_from_capabilities(
                 "gpu": clean_gpu_display_name(profile_gpu.get("model")),
                 "display": profile_data.get("display_scope", {}).get("resolution"),
                 "source_class": profile_data.get("source_scope", {}).get("class"),
+                "selection_source": "STATIC_PROFILE_DB",
+                "classification_tier": profile_data.get("classification", {}).get("gpu_tier"),
+                "classification_confidence": "OPENHTPC_PHYSICAL_QUALIFICATION",
             }
+
+        policy_path = install / "openhtpc-playback-policy.py"
+        if active_gpu and policy_path.is_file():
+            spec = importlib.util.spec_from_file_location("openhtpc_playback_policy_mag_model", policy_path)
+            if spec and spec.loader:
+                policy = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(policy)
+                if hasattr(policy, "_magnificence_family_choice"):
+                    choice = policy._magnificence_family_choice(
+                        install, caps, active_gpu, "DVD_PAL_FILM", active_resolution
+                    )
+                    if choice:
+                        method = choice.get("classification_method")
+                        baseline = method == "CAPABILITY_BASELINE_LIGHT"
+                        return {
+                            "profile_id": choice.get("profile_id"),
+                            "status": "CAPABILITY_BASELINE" if baseline else "FAMILY_CLASSIFIED",
+                            "selected_recipe": choice.get("recipe_id", "RECIPE_0_PURE"),
+                            "selected_label": choice.get("label", "MAGNIFICENCE"),
+                            "reason_fr": (
+                                "Recette Magnificence provisoire appliquée à partir des capacités Vulkan et MPEG-2 observées."
+                                if baseline else
+                                "Recette Magnificence sélectionnée selon une famille explicitement validée par OPENHTPC."
+                            ),
+                            "gpu": clean_gpu_display_name(active_gpu.get("model")),
+                            "display": active_resolution,
+                            "source_class": "DVD_PAL_FILM",
+                            "selection_source": choice.get("selection_source", "GPU_KNOWLEDGE_DB"),
+                            "classification_method": method,
+                            "classification_tier": choice.get("classification_tier"),
+                            "classification_confidence": choice.get("classification_confidence"),
+                        }
     except Exception:
         return default
     return default
@@ -495,14 +554,14 @@ def build(
             gpu_item = per_gpu_caps.get(key, {})
             hw_status = gpu_item.get("hardware_decode", {}).get("status")
             if hw_status == "SUPPORTED":
-                hardware_str = "Signalée"
+                hardware_str = "Pris en charge"
             elif hw_status == "UNSUPPORTED":
-                hardware_str = "Non signalée"
+                hardware_str = "Non pris en charge"
             else:
-                hardware_str = "Non déterminée"
+                hardware_str = "Non déterminé"
             backend_str = ", ".join(gpu_item.get("hardware_backends", [])).upper() or "Indéterminé"
         else:
-            hardware_str = "Non déterminée"
+            hardware_str = "Non déterminé"
             backend_str = "Indéterminé"
 
         codecs.append({
@@ -530,13 +589,14 @@ def build(
     checks = health.get("checks", []) if isinstance(health.get("checks"), list) else []
     action = read_json(home / ".local/state/openhtpc/system-action.json")
 
+    current_depth = active.get("color_depth", {}).get("current_bits") if isinstance(active.get("color_depth"), dict) else None
     display_dict = {
         "connector": clean(active.get("connector")),
         "resolution": res_str,
         "refresh": ref_str,
         "summary": display_summary_str,
         "scale": f"{active.get('scale') * 100:g} %" if isinstance(active.get("scale"), (int, float)) else "Non déterminée",
-        "depth": "Non déterminée",
+        "depth": f"{current_depth} bpc" if type(current_depth) is int and 6 <= current_depth <= 16 else None,
         "hdr_current": {"ACTIVE": "Activé", "INACTIVE": "Désactivé"}.get(active.get("current_hdr_mode", {}).get("status"), "Non déterminé"),
         "hdr_capable": {"SUPPORTED": "Oui", "UNSUPPORTED": "Non"}.get(active.get("hdr_capable", {}).get("status"), "Non déterminé"),
         "hdr_pipeline": "Non déterminé",
@@ -620,11 +680,15 @@ def build(
     else:
         effective_label = "Sortie système — Fedora"
 
+    audio_connection = short_device(audio.get("connection_class") or audio.get("default_sink"))
+    audio_channels = f"{audio.get('channels')} canaux" if audio.get("channels") else None
+    audio_backend = clean(audio.get("backend"), "")
+    audio_summary = " • ".join(part for part in (audio_connection, audio_channels, audio_backend) if part and part not in {"Indéterminé", "N/A"}) or "Sortie audio non détectée"
     audio_dict = {
-        "audio_output": short_device(audio.get("default_sink")),
+        "audio_output": audio_summary,
         "audio_backend": clean(audio.get("backend")),
         "connection": clean(audio.get("connection_class")),
-        "channels": f"{audio.get('channels')} canaux" if audio.get("channels") else "Indéterminés",
+        "channels": audio_channels or "Indéterminés",
         "requested_mode": requested_audio_mode,
         "receiver": short_device(audio.get("default_sink")),
         "passthrough": {"ACTIVE":"Actif", "INACTIVE":"Inactif", "UNAVAILABLE":"Non disponible", "UNKNOWN":"Indéterminé"}[observed],
@@ -703,8 +767,6 @@ def build(
             "gpu_backend": gpu_backend_str,
             "render_backend": render_backend_str,
             "output": _display_summary(processing.get("output_mode", {})),
-            "benchmark": state(processing.get("benchmark", {}).get("status")),
-            "recommendation": state(processing.get("recommendation_status")),
             "active_video_profile": "PURE",
             "map_present": False,
         },
@@ -771,14 +833,33 @@ def build(
     except Exception:
         active_profile = "PURE"
 
-    # Magnificence is resolved from the cached Hardware Passport and the static
-    # qualified profile database. No calibration/performance map is required.
-    active_mag_gpu = next((item for item in gpus if item.get("role") == "GPU actif"), gpus[0] if gpus else {})
+    # Magnificence is resolved from the cached Hardware Passport and the
+    # exact/evolving GPU knowledge databases. No calibration/performance map
+    # is required. On an unresolved multi-GPU display path, prefer the
+    # Hardware Passport processing GPU rather than the first enumerated iGPU.
+    passport_mag = profile.get("gpu_selection", {}).get("gpu", {}) if isinstance(profile.get("gpu_selection"), dict) else {}
+    passport_pci = normalize_pci_address(
+        passport_mag.get("pci_slot") or passport_mag.get("pci_address")
+    ) if isinstance(passport_mag, dict) else None
+    active_mag_gpu = None
+    if passport_pci:
+        active_mag_gpu = next(
+            (item for item in gpus if normalize_pci_address(item.get("pci")) == passport_pci),
+            None,
+        )
+    if active_mag_gpu is None:
+        active_candidates = [item for item in gpus if item.get("role") == "GPU actif"]
+        if len(active_candidates) == 1:
+            active_mag_gpu = active_candidates[0]
+        elif len(gpus) == 1:
+            active_mag_gpu = gpus[0]
+        else:
+            active_mag_gpu = {}
     mag_result = magnificence_from_capabilities(
         caps,
         install,
         display_snapshot=display,
-        active_device_id=active_mag_gpu.get("device_id"),
+        active_pci_address=active_mag_gpu.get("pci"),
     )
     profile_available = mag_result.get("status") != "NO_PROFILE"
     decision_human = mag_result.get("selected_label") if profile_available else "PURE"
@@ -787,7 +868,9 @@ def build(
         "active": active_profile,
         "profile_available": profile_available,
         "profile_id": mag_result.get("profile_id"),
-        "selection_source": "STATIC_PROFILE_DB",
+        "selection_source": mag_result.get("selection_source", "STATIC_PROFILE_DB"),
+        "classification_tier": mag_result.get("classification_tier"),
+        "classification_confidence": mag_result.get("classification_confidence"),
         # Compatibility fields for the retired calibration UI path.
         "map_present": profile_available,
         "map_stale": False,
@@ -816,6 +899,17 @@ def build(
     except (OSError, AttributeError, ImportError):
         result["playback_policy"] = {"presentation_mode":"PURE","audio_language_policy":"AUTO","subtitle_policy":"AUTO"}
         result["playback_runtime"] = read_json(home / ".local/state/openhtpc/playback-runtime-last.json") or None
+
+    # The persistent playback preference is the user-facing source of truth.
+    # Keep overview/root pages aligned with LECTURE instead of showing the
+    # legacy capability snapshot's historical active_profile value.
+    presentation_mode = result["playback_policy"].get("presentation_mode", active_profile)
+    if presentation_mode not in {"PURE", "CINEMA_AUTO"}:
+        presentation_mode = "PURE"
+    result["video_profile"]["active"] = presentation_mode
+    result["profile"] = presentation_mode
+    result["processing"]["active_video_profile"] = presentation_mode
+    result["processing"]["profile"] = "MAGNIFICENCE" if presentation_mode == "CINEMA_AUTO" else "PURE"
     if available:
         result["vulkan"] = clean(graphics.get("vulkan", {}).get("loader", {}).get("status"), "N/A")
         result["vaapi"] = clean(graphics.get("vaapi", {}).get("status", {}).get("status"), "N/A")

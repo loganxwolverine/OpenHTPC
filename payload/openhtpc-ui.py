@@ -349,7 +349,7 @@ def system_page_png(
                 ("Audio", a.get("audio_output"), None),
                 ("Moteur vidéo", p.get("profile"), None),
                 ("Santé globale", product.get("health", "PRÊT"), health_color),
-                ("Instantané", "À actualiser" if model.get("stale") else "À jour", None),
+                ("Informations système", "À actualiser" if model.get("stale") else "À jour", None),
             ],
         )
         draw.rounded_rectangle(
@@ -379,23 +379,30 @@ def system_page_png(
             "ÉTAT OPENHTPC",
             [
                 ("Santé globale", product.get("health", "PRÊT"), health_color),
-                ("Instantané", "À actualiser" if model.get("stale") else "À jour", None),
+                ("Informations système", "À actualiser" if model.get("stale") else "À jour", None),
                 ("Généré le", model.get("generated_at"), None),
             ],
         )
         p = model["processing"]
+        mag = model.get("magnificence", {})
+        mode_is_mag = p.get("profile") == "MAGNIFICENCE"
+        source_label = {
+            "STATIC_PROFILE_DB": "Profil OPENHTPC qualifié",
+            "GPU_KNOWLEDGE_DB": "Base GPU évolutive",
+        }.get(mag.get("selection_source"), "Non déterminée")
+        recipe_label = mag.get("selected_label") if mode_is_mag and mag.get("status") != "NO_PROFILE" else "PURE"
         card(
             (960, 480, 890, 360),
             "TRAITEMENT VIDÉO",
             [
-                ("Profil actuel", p["profile"], None),
+                ("Mode", p["profile"], "#22c7ff" if mode_is_mag else "#78d9ae"),
                 ("Sortie", p["output"], None),
-                ("Benchmark de rendu", p["benchmark"], None),
-                ("Recommandation", p["recommendation"], None),
+                ("Recette", recipe_label, None),
+                ("Sélection", source_label if mode_is_mag else "Référence directe", None),
             ],
         )
     elif page == "codecs":
-        x, y, w, h = 70, 170, 1780, 680
+        x, y, w, h = 250, 170, 1420, 680
         draw.rounded_rectangle(
             (xy(x), xy(y), xy(x + w), xy(y + h)),
             radius=xy(24),
@@ -403,33 +410,38 @@ def system_page_png(
             outline="#168fbd",
             width=max(2, xy(2)),
         )
-        txt((x + 28, y + 22), "COMPATIBILITÉ ET VALIDATION DES CODECS VIDÉO", 24, "#22c7ff", True)
+        txt((x + 34, y + 26), "CAPACITÉS DE LECTURE MATÉRIELLE", 26, "#22c7ff", True)
         subtitle = model.get("codecs_subtitle") or model.get("display", {}).get("codecs_subtitle") or "GPU de rendu : Indéterminé"
-        txt((x + 28, y + 54), subtitle, 16, "#93a9c2", False)
-        for pos, label in ((x + 480, "LOGICIEL"), (x + 780, "CAPACITÉ GPU"), (x + 1120, "LECTURE VALIDÉE")):
-            txt((pos, y + 78), label, 18, "#93a9c2", True)
+        accel = model.get("overview", {}).get("video_accel")
+        if accel and accel != "Non déterminé":
+            subtitle = f"{subtitle} • Accélération : {accel}"
+        txt((x + 34, y + 64), subtitle, 17, "#93a9c2", False, 1320)
+        txt((x + 34, y + 108), "FORMAT", 18, "#93a9c2", True)
+        txt((x + 760, y + 108), "DÉCODAGE MATÉRIEL", 18, "#93a9c2", True)
         codec_list = model.get("codecs") or model.get("display", {}).get("codecs", [])
         for index, item in enumerate(codec_list):
-            yy = y + 118 + index * 68
-            txt((x + 28, yy), item["name"], 22, "#f7fbff", True, 420)
-            txt((x + 480, yy), item["software"], 19, "#d8e5f1", False, 260)
-            txt((x + 780, yy), item["hardware"], 19, "#d8e5f1", False, 300)
-            val_color = "#78d9ae" if item["validated"] == "Validé" else "#a9bdd1"
-            txt((x + 1120, yy), item["validated"], 19, val_color, True, 220)
-            if item.get("detail"):
-                txt((x + 1370, yy + 2), item["detail"], 16, "#829bb5", False, 380)
+            yy = y + 154 + index * 66
+            txt((x + 34, yy), item["name"], 23, "#f7fbff", True, 650)
+            status = item.get("hardware") or "Non déterminé"
+            status_color = "#78d9ae" if status == "Pris en charge" else "#ffad42" if status == "Non pris en charge" else "#a9bdd1"
+            txt((x + 760, yy), status, 21, status_color, True, 360)
+            backend = item.get("backend")
+            if backend and backend != "Indéterminé":
+                txt((x + 1140, yy + 2), backend, 17, "#829bb5", False, 220)
     elif page == "display":
         d = model["display"]
+        display_rows = [
+            ("Sortie active", d["connector"], None),
+            ("Résolution", d["resolution"], None),
+            ("Fréquence", d["refresh"], None),
+            ("Échelle KDE", d["scale"], None),
+        ]
+        if d.get("depth"):
+            display_rows.append(("Profondeur de couleur", d["depth"], None))
         card(
             (70, 170, 860, 680),
             "AFFICHAGE ACTIF",
-            [
-                ("Sortie active", d["connector"], None),
-                ("Résolution", d["resolution"], None),
-                ("Fréquence", d["refresh"], None),
-                ("Échelle KDE", d["scale"], None),
-                ("Profondeur de couleur", d["depth"], None),
-            ],
+            display_rows,
         )
         card(
             (960, 170, 890, 320),
@@ -527,129 +539,73 @@ def system_page_png(
             ],
         )
     elif page == "processing":
-        p = model.get("processing", {})
-        vp = model.get("video_profile", {})
-        active_vp = vp.get("active") or p.get("active_video_profile") or "PURE"
-        map_present = vp.get("map_present") if "map_present" in vp else p.get("map_present", False)
-        map_stale = vp.get("map_stale") if "map_stale" in vp else p.get("map_stale", False)
-        decision = vp.get("decision") or p.get("decision") or "PURE"
-        cal_ui_status = vp.get("cal_ui_status") or p.get("cal_ui_status")
+        p = model.get("playback_policy", {})
+        mag = model.get("magnificence", {})
+        enabled = p.get("presentation_mode") == "CINEMA_AUTO"
+        available = mag.get("status") != "NO_PROFILE"
 
-        # Top card: PROFIL ACTIF
-        profile_color = "#78d9ae" if active_vp == "PURE" else "#22c7ff"
-        if active_vp == "PURE":
-            badge_text = "PURE (Actif)"
-            desc_text = "Image de référence directe, sans traitement vidéo additionnel."
-        elif map_present and not map_stale:
-            badge_text = "MAGNIFICENCE (Actif — Prêt)"
-            desc_text = "OPENHTPC adapte automatiquement le rendu au matériel et au contenu."
-        elif not map_present:
-            badge_text = "MAGNIFICENCE (Configuration requise)"
-            profile_color = "#ffad42"
-            desc_text = "Une courte analyse locale du matériel est nécessaire pour activer ce mode."
+        if not enabled:
+            mode_label = "PURE"
+            mode_color = "#78d9ae"
+            summary = "Image de référence directe, sans traitement vidéo additionnel."
+        elif available:
+            mode_label = "MAGNIFICENCE"
+            mode_color = "#22c7ff"
+            summary = "OPENHTPC sélectionne automatiquement une recette adaptée au matériel et à l'affichage."
         else:
-            badge_text = "MAGNIFICENCE (Recalibration requise)"
-            profile_color = "#ffad42"
-            desc_text = "L'affichage ou le matériel a changé ; une recalibration est nécessaire."
+            mode_label = "MAGNIFICENCE — REPLI PURE"
+            mode_color = "#ffad42"
+            summary = "Aucune recette qualifiée n'est disponible pour cette combinaison ; PURE reste actif en sécurité."
 
-        # Top card container (1780 wide x 270 high)
-        draw.rounded_rectangle(
-            (xy(70), xy(170), xy(1850), xy(440)),
-            radius=xy(24),
-            fill="#071426",
-            outline="#168fbd",
-            width=max(2, xy(2)),
-        )
-        txt((98, 192), "TRAITEMENT VIDÉO — PROFIL SÉLECTIONNÉ", 24, "#22c7ff", True)
-        txt((98, 240), "Profil actif", 18, "#93a9c2", False)
-        txt((240, 236), badge_text, 24, profile_color, True)
-        txt((98, 288), "Description", 18, "#93a9c2", False)
-        txt((240, 286), desc_text, 20, "#f4f8ff", False)
-
-        # Decision line
-        if map_present and not map_stale:
-            scope_line = f"Périmètre DVD cinéma PAL (576p) : Rendu automatique — {decision}"
-            scope_col = "#78d9ae" if decision == "PURE" else "#22c7ff"
-        elif not map_present:
-            scope_line = "Périmètre DVD cinéma PAL (576p) : Repli certifié PURE"
-            scope_col = "#ffad42"
+        source_labels = {
+            "STATIC_PROFILE_DB": "Profil OPENHTPC qualifié",
+            "GPU_KNOWLEDGE_DB": "Base GPU évolutive",
+        }
+        confidence_labels = {
+            "OPENHTPC_PHYSICAL_QUALIFICATION": "Validation physique OPENHTPC",
+            "COMMUNITY_DERIVED": "Référence communautaire prudente",
+            "CONSERVATIVE_CAPABILITY_BASELINE": "Base de capacités prudente",
+        }
+        selection_source = source_labels.get(mag.get("selection_source"), "Non déterminée")
+        confidence_key = mag.get("classification_confidence")
+        confidence = confidence_labels.get(confidence_key, confidence_key or "Non déterminée")
+        if confidence_key == "OPENHTPC_PHYSICAL_QUALIFICATION":
+            validation_label = "Qualifiée sur ce matériel"
+        elif mag.get("status") == "FAMILY_CLASSIFIED":
+            validation_label = "Famille validée OPENHTPC"
+        elif mag.get("status") == "CAPABILITY_BASELINE":
+            validation_label = "Base de capacités prudente"
         else:
-            scope_line = "Périmètre DVD cinéma PAL (576p) : Repli certifié PURE (recalibration requise)"
-            scope_col = "#ffad42"
-        txt((98, 336), "Résolution", 18, "#93a9c2", False)
-        txt((240, 334), scope_line, 19, scope_col, False)
+            validation_label = "Sélection automatique"
+        recipe = mag.get("selected_label") or mag.get("selected_recipe") or "PURE"
+        scope_labels = {"DVD_PAL_FILM": "DVD PAL / SD"}
+        scope_label = scope_labels.get(mag.get("source_class"), mag.get("source_class") or "DVD PAL / SD")
 
-        txt((98, 384), "Fidélité", 18, "#93a9c2", False)
-        txt((240, 382), "Mode PURE permanent en cas d'absence d'analyse ou d'instabilité.", 18, "#93a9c2", False)
-
-        # Left bottom card: PROFILS (860 x 400)
         draw.rounded_rectangle(
-            (xy(70), xy(470), xy(930), xy(870)),
-            radius=xy(24),
-            fill="#071426",
-            outline="#168fbd",
-            width=max(2, xy(2)),
+            (xy(70), xy(170), xy(1850), xy(430)), radius=xy(24),
+            fill="#071426", outline="#168fbd", width=max(2, xy(2)),
         )
-        txt((98, 492), "MODES DE RESTITUTION", 22, "#22c7ff", True)
+        txt((98, 194), "MAGNIFICENCE — ÉTAT DU TRAITEMENT VIDÉO", 24, "#22c7ff", True)
+        txt((98, 246), "Mode actif", 18, "#93a9c2", False)
+        txt((280, 242), mode_label, 28, mode_color, True, 1480)
+        txt((98, 304), "Comportement", 18, "#93a9c2", False)
+        txt((280, 302), summary, 20, "#f4f8ff", False, 1480)
+        txt((98, 362), "Sélection", 18, "#93a9c2", False)
+        txt((280, 360), "Automatique selon le matériel, l'affichage et le média, sans réglage manuel.", 18, "#93a9c2", False, 1480)
 
-        # PURE section
-        txt((98, 540), "PURE (Mode de référence)", 20, "#78d9ae" if active_vp == "PURE" else "#f4f8ff", True)
-        txt((98, 574), "Image directe sans shader ni artifice. Stabilité absolue.", 17, "#b8cce0", False)
-        txt((98, 604), "Préservation intégrale du signal d'origine.", 16, "#8298b0", False)
-
-        # Separator line
-        draw.line((xy(98), xy(644), xy(900), xy(644)), fill="#12304d", width=1)
-
-        # CINEMA AUTO section
-        txt((98, 664), "MAGNIFICENCE (Mode adaptatif)", 20, "#22c7ff" if active_vp == "CINEMA_AUTO" else "#f4f8ff", True)
-        txt((98, 698), "Choisit automatiquement le rendu le plus qualifié et stable.", 17, "#b8cce0", False)
-        txt((98, 728), "Analyse 100% locale, sans terminal ni compte requis.", 16, "#8298b0", False)
-
-        # Right bottom card: ETAT & ACTIONS (890 x 400)
-        draw.rounded_rectangle(
-            (xy(960), xy(470), xy(1850), xy(870)),
-            radius=xy(24),
-            fill="#071426",
-            outline="#168fbd",
-            width=max(2, xy(2)),
-        )
-        txt((988, 492), "ACTIONS & NAVIGATION", 22, "#22c7ff", True)
-
-        if not map_present:
-            if cal_ui_status == "FAILED":
-                txt((988, 542), "Dernière analyse", 18, "#93a9c2", False)
-                txt((1220, 540), "Interrompue ou incomplète", 20, "#ffad42", True)
-                txt((988, 592), "État système", 18, "#93a9c2", False)
-                txt((1220, 590), "PURE reste actif en sécurité", 20, "#78d9ae", False)
-                txt((988, 642), "Action", 18, "#93a9c2", False)
-                txt((1220, 640), "RÉESSAYER L'ANALYSE ci-dessous", 20, "#22c7ff", True)
-            else:
-                txt((988, 542), "Analyse matérielle", 18, "#93a9c2", False)
-                txt((1220, 540), "Non effectuée", 20, "#ffad42", True)
-                txt((988, 592), "Action requise", 18, "#93a9c2", False)
-                txt((1220, 590), "CONFIGURER MAGNIFICENCE", 20, "#22c7ff", True)
-                txt((988, 642), "Durée estimée", 18, "#93a9c2", False)
-                txt((1220, 640), "Quelques dizaines de secondes", 19, "#f4f8ff", False)
-        elif map_stale:
-            txt((988, 542), "Analyse matérielle", 18, "#93a9c2", False)
-            txt((1220, 540), "Obsolète (affichage modifié)", 20, "#ffad42", True)
-            txt((988, 592), "Action requise", 18, "#93a9c2", False)
-            txt((1220, 590), "RECALIBRER ci-dessous", 20, "#22c7ff", True)
-            txt((988, 642), "Sécurité", 18, "#93a9c2", False)
-            txt((1220, 640), "Repli PURE appliqué automatiquement", 19, "#78d9ae", False)
-        else:
-            txt((988, 542), "Analyse matérielle", 18, "#93a9c2", False)
-            txt((1220, 540), "À jour et opérationnelle", 20, "#78d9ae", True)
-            txt((988, 592), "Choix DVD PAL", 18, "#93a9c2", False)
-            txt((1220, 590), f"Rendu {decision}", 20, "#22c7ff", True)
-            txt((988, 642), "Changer de profil", 18, "#93a9c2", False)
-            next_action = "UTILISER PURE" if active_vp == "CINEMA_AUTO" else "UTILISER MAGNIFICENCE"
-            txt((1220, 640), f"{next_action} ci-dessous", 19, "#f4f8ff", False)
-
-        # Navigation row
-        draw.line((xy(988), xy(710), xy(1820), xy(710)), fill="#12304d", width=1)
-        txt((988, 730), "Navigation", 18, "#93a9c2", False)
-        txt((1220, 728), "Entrée : Valider  |  Échap : Retour", 19, "#93a9c2", False)
+        card((70, 460, 860, 390), "RECETTE SÉLECTIONNÉE", [
+            ("GPU", mag.get("gpu") or "Non déterminé", None),
+            ("Affichage", mag.get("display") or "Non déterminé", None),
+            ("Recette", recipe if enabled and available else "PURE", "#22c7ff" if enabled and available else "#78d9ae"),
+            ("Validation", validation_label if enabled and available else "Référence directe", None),
+        ], label_ratio=0.28, step=66)
+        card((960, 460, 890, 390), "ORIGINE DE LA DÉCISION", [
+            ("Source", selection_source if enabled and available else "Mode PURE", None),
+            ("Confiance", confidence if enabled and available else "Référence directe", None),
+            ("Périmètre", scope_label, None),
+            ("Sécurité", "PURE automatique si les prérequis sont absents", "#78d9ae"),
+        ], label_ratio=0.30, step=66)
+        txt((90, 900), "PURE et MAGNIFICENCE se choisissent dans LECTURE / MODE VIDÉO. Cette page explique la décision appliquée.", 18, "#93a9c2", False, 1720)
     elif page == "playback":
         p = model.get("playback_policy", {})
         mag = model.get("magnificence", {})
@@ -668,7 +624,7 @@ def system_page_png(
                 ("Langue audio", audio, None),
                 ("Sous-titres", subtitle, None),
                 ("Application", "À la prochaine lecture", None),
-                ("Persistance", "Configuration utilisateur", None),
+                ("Réglages mémorisés", "Oui", None),
             ]
         else:
             rows = [
@@ -678,7 +634,7 @@ def system_page_png(
                 ("Langue audio", audio, None),
                 ("Sous-titres", subtitle, None),
                 ("Application", "À la prochaine lecture", None),
-                ("Persistance", "Configuration utilisateur", None),
+                ("Réglages mémorisés", "Oui", None),
             ]
         card((70, 170, 1780, 500), "LECTURE — PRÉFÉRENCES ACTIVES", rows)
         txt((90, 715), "ACTIONS", 20, "#22c7ff", True)

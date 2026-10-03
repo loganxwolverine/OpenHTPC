@@ -78,7 +78,7 @@ def write_profile(profile: str, home: pathlib.Path | None = None) -> None:
 
 
 def cinema_auto_status(home: pathlib.Path | None = None, install: pathlib.Path | None = None) -> dict:
-    """Return static-profile CINÉMA AUTO status without probing or benchmarking."""
+    """Return MAGNIFICENCE status without runtime benchmarking."""
     _home = home or pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
     _install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", _home / ".local/lib/openhtpc"))
     result = {
@@ -112,6 +112,9 @@ def cinema_auto_status(home: pathlib.Path | None = None, install: pathlib.Path |
             "profile_id": decision.get("profile_id"),
             "selected_recipe": decision.get("recipe_id", "RECIPE_0_PURE"),
             "reason": decision.get("reason", result["reason"]),
+            "selection_source": decision.get("selection_source", result["selection_source"]),
+            "classification_tier": decision.get("classification_tier"),
+            "classification_confidence": decision.get("classification_confidence"),
             "map_present": available,
             "map_schema_ok": available,
             "map_current": available,

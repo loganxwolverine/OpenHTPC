@@ -38,8 +38,10 @@ def trace_event(home,event,**fields):
     atomic_text(target,"\n".join([*previous,json.dumps(row,ensure_ascii=False,sort_keys=True)])+"\n")
 
 def run(command):
-    try: return subprocess.run(command,text=True,capture_output=True,timeout=8)
-    except (OSError,subprocess.TimeoutExpired): return subprocess.CompletedProcess(command,127,"","")
+    try:
+        return subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=8)
+    except (OSError,subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(command,127,"","")
 
 def optical_devices(sys_block=pathlib.Path("/sys/class/block")):
     try: entries=sorted(sys_block.iterdir(),key=lambda p:p.name)
@@ -572,8 +574,15 @@ def probe_device(device,runner=run,header_reader=_bdmv_header,protection_reader=
     return value
 
 def eject_guard(home):
+    target=home/".local/state/openhtpc/optical-ejecting.json"
     try:
-        data=json.loads((home/".local/state/openhtpc/optical-ejecting.json").read_text())
+        # An interrupted session must never leave optical detection permanently
+        # stuck in EJECTING. Normal eject transitions observe an empty drive within
+        # a few polling cycles; anything older is an orphaned guard.
+        if datetime.datetime.now().timestamp() - target.stat().st_mtime > 30:
+            target.unlink(missing_ok=True)
+            return None
+        data=json.loads(target.read_text())
         return data if isinstance(data.get("device"),str) else None
     except (OSError,json.JSONDecodeError,AttributeError): return None
 

@@ -201,10 +201,17 @@ atexit.register(action_controller.close)
 atexit.register(search_controller.close)
 atexit.register(activity_publisher.close)
 stop_requested = False
+stop_signal = None
 
-def stop_home(_signal, _frame):
-    global stop_requested
+def stop_home(received_signal, _frame):
+    global stop_requested, stop_signal
     stop_requested = True
+    try:
+        stop_signal = signal.Signals(received_signal).name
+    except (ValueError, TypeError):
+        stop_signal = str(received_signal)
+    if runtime:
+        runtime.log(home, "ui", "HOME_STOP_SIGNAL_RECEIVED", signal=stop_signal, flex_pid=proc.pid)
 
 signal.signal(signal.SIGTERM, stop_home)
 signal.signal(signal.SIGINT, stop_home)
@@ -277,11 +284,35 @@ while proc.poll() is None and not stop_requested:
         if runtime:
             runtime.log(home, "ui", "OPTICAL_GENERATION_DEFERRED", flex_pid=proc.pid, action_type="STATE_UPDATE", source_page="ANY", destination_page="CURRENT", optical_generation=optical_state().get("generation", 0))
 
+if stop_requested and proc.poll() is None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
 activity_publisher.close()
 search_controller.close()
 action_controller.close()
 update_controller.close()
 if runtime:
-    runtime.record_flex_exit(home, proc.returncode, time.monotonic() - started)
-    runtime.log(home, "ui", "FLEX_STOPPED", ui_instance_identity=f"flex-{proc.pid}", stop_reason="NORMAL_EXIT" if proc.returncode == 0 else "CRASH", caller_component="flex", caller_pid=proc.pid, returncode=proc.returncode)
-raise SystemExit(proc.returncode)
+    if stop_requested:
+        runtime.log(home, "ui", "FLEX_STOPPED", ui_instance_identity=f"flex-{proc.pid}", stop_reason="SIGNAL_STOP", caller_component="home-controller", caller_pid=os.getpid(), flex_pid=proc.pid, signal=stop_signal, returncode=proc.returncode)
+    else:
+        runtime.record_flex_exit(home, proc.returncode, time.monotonic() - started)
+        runtime.log(home, "ui", "FLEX_STOPPED", ui_instance_identity=f"flex-{proc.pid}", stop_reason="NORMAL_EXIT" if proc.returncode == 0 else "CRASH", caller_component="flex", caller_pid=proc.pid, returncode=proc.returncode)
+
+# In appliance mode, a vanished Flex window must never leave only KWin and a
+# black screen behind.  A zero exit status is not proof that the user asked to
+# leave OPENHTPC: only the controller's explicit stop intent is authoritative.
+# Preserve the existing crash-loop protection so a persistently broken Flex
+# cannot restart forever.
+if not stop_requested:
+    blocked = runtime.crash_loop_state(home)["blocked"] if runtime else False
+    if not blocked:
+        if runtime:
+            runtime.log(home, "ui", "FLEX_RECOVERY_REQUESTED", failed_pid=proc.pid, returncode=proc.returncode)
+        os.execv(sys.executable, [sys.executable, str(pathlib.Path(__file__)), str(target)])
+
+raise SystemExit(0 if stop_requested else (proc.returncode or 0))

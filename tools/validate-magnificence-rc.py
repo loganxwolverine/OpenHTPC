@@ -16,8 +16,18 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAYLOAD = ROOT / "payload"
 PROFILES = PAYLOAD / "assets/magnificence_profiles.json"
+GPU_KNOWLEDGE = PAYLOAD / "assets/magnificence_gpu_knowledge.json"
 SHADER_CATALOG = PAYLOAD / "assets/shaders/catalog.json"
 MANAGED = PAYLOAD / "managed-files.txt"
+
+FROZEN_MAGNIFICENCE_SHADERS = {
+    "KrigBilateral.glsl",
+    "FSRCNNX_x2_8-0-4-1.glsl",
+    "FSRCNNX_x2_16-0-4-1.glsl",
+    "FSRCNN_x2_r2_32-0-2.glsl",
+    "SSimSuperRes.glsl",
+    "OpenHTPC_Vibrance_Mild.glsl",
+}
 
 STABLE_REF = "release/1.2.0-stable-prep"
 STABLE_COMMIT = "cae1f8f496dfd71c243bfef4fa199b66d1c7cd30"
@@ -34,12 +44,19 @@ EXPECTED_TIERS = {
 
 ACTIVE_TESTS = [
     "tests/test_dev32_playback_policy.py",
+    "tests/test_dev33_ui_osd_polish.py",
     "tests/test_dev34_playback_ui_persistence_osd.py",
     "tests/test_dev35_playback_ux.py",
     "tests/test_dev36_playback_corrective.py",
     "tests/test_magnificence_policy.py",
     "tests/test_magnificence_static_auto.py",
+    "tests/test_flex_recovery_rc4.py",
+    "tests/test_rc4_autostart_migration.py",
+    "tests/test_rc4_visual_polish.py",
+    "tests/test_rc7_display_runtime.py",
+    "tests/test_rc7_gpu_runtime.py",
     "tests/test_rc7_system_model.py",
+    "tests/test_runtime_graphical_context.py",
     "tests/test_refresh_match.py",
     "tests/test_audio_passthrough_p0.py",
     "tests/test_audio_passthrough_rc2.py",
@@ -75,6 +92,7 @@ def capture(*cmd: str) -> str:
 
 def static_contract() -> None:
     profiles_doc = json.loads(PROFILES.read_text(encoding="utf-8"))
+    knowledge_doc = json.loads(GPU_KNOWLEDGE.read_text(encoding="utf-8"))
     catalog_doc = json.loads(SHADER_CATALOG.read_text(encoding="utf-8"))
     managed = set(MANAGED.read_text(encoding="utf-8").splitlines())
 
@@ -119,6 +137,30 @@ def static_contract() -> None:
 
     if profiles_doc.get("policy") != "PURE_OR_MAGNIFICENCE":
         raise RuntimeError("PUBLIC_MODE_CONTRACT_CHANGED")
+
+    if set(knowledge_doc.get("shader_allowlist", [])) != FROZEN_MAGNIFICENCE_SHADERS:
+        raise RuntimeError("MAGNIFICENCE_SHADER_ALLOWLIST_CHANGED")
+    knowledge_policy = knowledge_doc.get("policy", {})
+    if knowledge_policy.get("runtime_benchmark_required") is not False:
+        raise RuntimeError("GPU_KNOWLEDGE_RUNTIME_BENCHMARK_NOT_DISABLED")
+    if knowledge_policy.get("community_reference_rules_active") is not False:
+        raise RuntimeError("COMMUNITY_REFERENCE_RULES_MUST_REMAIN_INACTIVE")
+    if "assets/magnificence_gpu_knowledge.json" not in managed:
+        raise RuntimeError("GPU_KNOWLEDGE_NOT_MANAGED")
+    for rule in knowledge_doc.get("family_rules", []):
+        if not isinstance(rule, dict):
+            raise RuntimeError("GPU_FAMILY_RULE_INVALID")
+        status = rule.get("selection_status")
+        if status not in {"REFERENCE_ONLY", "ACTIVE"}:
+            raise RuntimeError(f"GPU_FAMILY_RULE_STATUS_INVALID:{rule.get('id')}")
+        if rule.get("confidence") == "COMMUNITY_DERIVED" and status != "REFERENCE_ONLY":
+            raise RuntimeError(f"COMMUNITY_RULE_ACTIVATED_WITHOUT_OPENHTPC_PROMOTION:{rule.get('id')}")
+    for tier, recipe in knowledge_doc.get("family_recipes", {}).items():
+        for shader in recipe.get("shaders", []):
+            if shader not in FROZEN_MAGNIFICENCE_SHADERS:
+                raise RuntimeError(f"{tier}:UNAPPROVED_MAGNIFICENCE_SHADER:{shader}")
+            if not (PAYLOAD / "assets/shaders" / shader).is_file():
+                raise RuntimeError(f"{tier}:SHADER_MISSING:{shader}")
 
     stable = capture("git", "rev-parse", STABLE_REF)
     if stable != STABLE_COMMIT:

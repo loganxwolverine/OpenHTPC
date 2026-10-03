@@ -568,7 +568,10 @@ static bool is_home_menu(void)
         &&
         current_menu->name != NULL
         &&
-        strcmp(current_menu->name, "Accueil") == 0
+        (
+            strcmp(current_menu->name, "OPENHTPC") == 0
+            || strcmp(current_menu->name, "Accueil") == 0
+        )
     );
 }
 
@@ -627,6 +630,7 @@ static void fill_rounded_rect(
 }
 
 
+
 static void draw_home_card(const SDL_Rect *icon_rect, bool selected)
 {
     SDL_Rect card = {
@@ -681,7 +685,6 @@ static void draw_home_card(const SDL_Rect *icon_rect, bool selected)
             ? (SDL_Color) {4, 5, 8, 205}
             : (SDL_Color) {4, 5, 8, 168});
 }
-
 
 // A function to handle key presses from keyboard
 static void handle_keypress(SDL_Keysym *key)
@@ -2341,18 +2344,6 @@ static void draw_screen()
             }
         }
 
-        // Plaques de contraste propres à l'accueil. Elles restent derrière
-        // l'illustration et remplacent le highlight carré historique.
-        if (is_home_menu()) {
-            Entry *card_entry = current_menu->root_entry;
-            for (int i = 0; i < geo.num_buttons; i++) {
-                draw_home_card(
-                    &card_entry->icon_rect,
-                    i == (int) current_menu->highlight_position
-                );
-                card_entry = card_entry->next;
-            }
-        }
         if (is_disc_ambiguous()) {
             Entry *cand_entry = current_menu->root_entry;
             for (int i = 0; i < geo.num_buttons && cand_entry != NULL; i++) {
@@ -2572,8 +2563,49 @@ static void draw_screen()
                 }
             }
 
+            if (icon != NULL && is_home_menu()) {
+                Uint8 old_r = 255, old_g = 255, old_b = 255, old_a = 255;
+                SDL_GetTextureColorMod(icon, &old_r, &old_g, &old_b);
+                SDL_GetTextureAlphaMod(icon, &old_a);
+
+                /* True drop shadow: silhouette only, no card and no coloured halo. */
+                SDL_SetTextureColorMod(icon, 0, 0, 0);
+                SDL_SetTextureAlphaMod(icon, 22);
+                int dx = (geo.screen_width * 5) / 1000;
+                int dy = (geo.screen_height * 8) / 1000;
+                if (dx < 5) dx = 5;
+                if (dy < 7) dy = 7;
+                const int shadow_offsets[5][2] = {
+                    {0,0},{-2,0},{2,0},{0,-2},{0,2}
+                };
+                for (int s = 0; s < 5; s++) {
+                    SDL_Rect shadow_rect = artwork_rect;
+                    shadow_rect.x += dx + shadow_offsets[s][0];
+                    shadow_rect.y += dy + shadow_offsets[s][1];
+                    SDL_RenderCopy(renderer, icon, NULL, &shadow_rect);
+                }
+
+                SDL_SetTextureColorMod(icon, old_r, old_g, old_b);
+                SDL_SetTextureAlphaMod(icon, old_a);
+            }
             if (icon != NULL)
                 SDL_RenderCopy(renderer, icon, NULL, &artwork_rect);
+
+            /* Minimal home selection marker: a thin cyan underline only. */
+            if (is_home_menu() && entry == current_entry) {
+                int line_w = artwork_rect.w * 44 / 100;
+                int line_h = geo.screen_height / 540;
+                if (line_w < 36) line_w = 36;
+                if (line_h < 3) line_h = 3;
+                SDL_Rect selection_line = {
+                    artwork_rect.x + (artwork_rect.w - line_w) / 2,
+                    artwork_rect.y + artwork_rect.h + (geo.screen_height / 180),
+                    line_w, line_h
+                };
+                fill_rounded_rect(renderer, &selection_line, line_h / 2,
+                    (SDL_Color){34, 199, 255, 185});
+            }
+
             if (config.titles_enabled)
                 SDL_RenderCopy(renderer, entry->title_texture, NULL, &entry->text_rect);
 

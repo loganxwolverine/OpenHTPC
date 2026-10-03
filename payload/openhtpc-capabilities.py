@@ -336,7 +336,8 @@ def parse_kscreen(text: str) -> list[dict[str, Any]]:
         if not first: continue
         active = bool(re.search(r"^\s*enabled\s*$", block, re.I|re.M)); connected = bool(re.search(r"^\s*connected\s*$", block, re.I|re.M))
         display = {"connector": first.group(1), "active": active, "connected": connected,
-                   "current_mode": None, "available_modes": [], "physical_size_mm": None, "hdr_capable": fact("UNKNOWN", ["DRM"]), "current_hdr_mode": fact("UNKNOWN", ["KDE"])}
+                   "current_mode": None, "available_modes": [], "physical_size_mm": None, "hdr_capable": fact("UNKNOWN", ["DRM"]), "current_hdr_mode": fact("UNKNOWN", ["KDE"]),
+                   "color_depth": {"current_bits": None, "evidence": []}}
         geometry = re.search(r"Geometry:\s*\d+,\d+\s+(\d+)x(\d+)", block)
         modes = re.search(r"Modes:\s*(.+)", block)
         if geometry: display["logical_geometry"] = {"width": int(geometry.group(1)), "height": int(geometry.group(2))}
@@ -351,6 +352,9 @@ def parse_kscreen(text: str) -> list[dict[str, Any]]:
         if scale: display["scale"] = float(scale.group(1))
         hdr = re.search(r"^\s*HDR:\s*(enabled|disabled)", block, re.I|re.M)
         if hdr: display["current_hdr_mode"] = fact("ACTIVE" if hdr.group(1).lower()=="enabled" else "INACTIVE",["KDE"])
+        depth = re.search(r"^\s*Color resolution:\s*.*\((\d+)\)", block, re.I|re.M)
+        if depth:
+            display["color_depth"] = {"current_bits": int(depth.group(1)), "evidence": ["KSCREEN_COLOR_RESOLUTION"]}
         displays.append(display)
     return displays
 
@@ -445,6 +449,15 @@ def collect_display(home: pathlib.Path, install: pathlib.Path, runner: Runner = 
             result = run_probe("display", argv, diagnostics, runner, 6)
             if result.get("status") == "OK":
                 outputs = parse_kscreen_json(result.get("stdout", ""))
+                active_outputs = [item for item in outputs if item.get("active")]
+                if len(active_outputs) == 1:
+                    text_argv = [*argv[:-1], "-o"]
+                    text_result = run_probe("display-color", text_argv, diagnostics, runner, 6)
+                    if text_result.get("status") == "OK":
+                        by_connector = {item.get("connector"): item for item in parse_kscreen(text_result.get("stdout", ""))}
+                        parsed = by_connector.get(active_outputs[0].get("connector"))
+                        if parsed and parsed.get("color_depth", {}).get("current_bits"):
+                            active_outputs[0]["color_depth"] = parsed["color_depth"]
     enabled = [o for o in outputs if o["active"]]
     active = enabled[0] if len(enabled) == 1 else None
     if active:
@@ -749,7 +762,7 @@ def generate(
       "audio":audio,
       "optical":{"drives":optical_devices,"dvd":{"physical_support":fact("DETECTED" if optical_devices else "UNAVAILABLE",["HARDWARE_PASSPORT"] if optical_devices else []),"css_support":fact("AVAILABLE" if shutil.which("lsdvd") else "UNKNOWN",["OPENHTPC_RUNTIME"]),"validated_playback":fact("UNVALIDATED")},"protected_media":protected_optical_model(home),"bluray_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"]),"uhd_plugin":fact("UNAVAILABLE",["PLUGIN_REGISTRY"])},
       "media":{"configured_sources":len(sources),"accessible_sources":sum(item["accessible"] for item in sources),"sources":sources,"playback_backend":"mpv"},
-      "video_processing":{"gpu_backend":fact("AVAILABLE" if any(item.get('device_type')!='PHYSICAL_DEVICE_TYPE_CPU' for item in vulkan_devices) else "UNKNOWN",["VULKAN"]),"render_backend":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"]),"output_mode":active_display.get("current_mode") if active_display else None,"benchmark":{"version":None,"status":"NOT_RUN","results":{}},"recommended_profile":None,"recommendation_status":"NOT_EVALUATED","active_profile":"PURE"},
+      "video_processing":{"gpu_backend":fact("AVAILABLE" if any(item.get('device_type')!='PHYSICAL_DEVICE_TYPE_CPU' for item in vulkan_devices) else "UNKNOWN",["VULKAN"]),"render_backend":fact("AVAILABLE" if "gpu-next" in mpv_help.get("stdout","") else "UNKNOWN",["MPV"]),"output_mode":active_display.get("current_mode") if active_display else None,"active_profile":"PURE"},
       "validation":{"records":history},"confidence":{"partial":any(item.get("status") not in {"OK"} for item in diagnostics.values()),"probe_diagnostics":diagnostics}}
     validate_snapshot(snapshot)
     return snapshot
@@ -901,7 +914,7 @@ def summary(value: dict[str, Any]) -> str:
         lines.append(f"{key:<16} logiciel {item['software_decode']['status']:<11} matériel {item['hardware_decode']['status']:<11} validation {item['validated_playback']['status']}")
     for change in value.get("confidence", {}).get("capability_changes", []):
         lines.append(f"CAPABILITY_CHANGE capability={change['capability']} before={str(change['before']).lower()} after={str(change['after']).lower()} change={change['change']}")
-    lines.extend(["","AUDIO",f"{audio.get('backend','Inconnu')} / {audio.get('default_sink') or 'sortie inconnue'}",f"Canaux : {audio.get('channels') or 'inconnus'} / Passthrough : {audio.get('passthrough',{}).get('status','UNKNOWN')}","","TRAITEMENT VIDÉO",f"Benchmark : {processing.get('benchmark',{}).get('status','NOT_RUN')}",f"Profil adaptatif : {processing.get('recommendation_status','NOT_EVALUATED')}"])
+    lines.extend(["","AUDIO",f"{audio.get('backend','Inconnu')} / {audio.get('default_sink') or 'sortie inconnue'}",f"Canaux : {audio.get('channels') or 'inconnus'} / Passthrough : {audio.get('passthrough',{}).get('status','UNKNOWN')}","","MAGNIFICENCE","Sélection : profil matériel / affichage / média", "Benchmark runtime : non utilisé pour choisir la recette"])
     return "\n".join(lines)
 
 

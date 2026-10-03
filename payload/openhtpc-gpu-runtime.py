@@ -809,12 +809,20 @@ def default_vulkan_runner() -> tuple[int, str, str]:
     Never raises; returns (-1, "", str(err)) on failure.
     """
     try:
+        # This probe only needs physical-device identity data.  In appliance
+        # sessions DISPLAY may point at Xwayland without a matching Xauthority,
+        # which makes vulkaninfo fail before enumerating any device.  Force the
+        # identity probe to stay headless while preserving the rest of the
+        # session environment.
+        runner_env = os.environ.copy()
+        runner_env.pop("DISPLAY", None)
         proc = subprocess.run(
             ["vulkaninfo"],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
+            env=runner_env,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except Exception as exc:

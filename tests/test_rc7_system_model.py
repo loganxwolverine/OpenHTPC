@@ -227,6 +227,7 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         n150.update({
             "pci_address": "0000:00:02.0",
             "model": "Intel Corporation Alder Lake-N [Intel Graphics]",
+            "vendor_id": "8086",
             "device_id": "0x46d4",
             "kernel_driver": "i915",
             "memory_type": "shared",
@@ -281,6 +282,57 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         self.assertEqual(model["magnificence"]["profile_id"], "amd_picasso_15d8_vega3_sd_2160p")
         self.assertEqual(model["magnificence"]["selected_label"], "KrigBilateral")
         self.assertIn("4K", model["magnificence"]["reason_fr"])
+
+    def test_system_model_uses_passport_processing_a310_when_display_gpu_is_unresolved(self):
+        self.profile["gpu_selection"] = {"gpu": {
+            "pci_slot": "0000:03:00.0", "vendor_id": "8086", "device_id": "56a6", "model": "Intel Corporation Arc A310 Graphics [DG2]"
+        }}
+        (self.home / ".config/openhtpc/profile.json").write_text(json.dumps(self.profile), encoding="utf-8")
+        self.capabilities["graphics"]["devices"][0].update({"vendor_id": "8086", "device_id": "1912"})
+        self.capabilities["graphics"]["devices"][1].update({"vendor_id": "8086", "device_id": "56a6"})
+        self.capabilities["display"] = {
+            "active_output": {"connector": "DP-1", "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}}
+        }
+        (self.home / ".config/openhtpc/runtime/capabilities.json").write_text(json.dumps(self.capabilities), encoding="utf-8")
+
+        model = sys_model.build(self.home, self.install, self.health, self.version, display_snapshot={})
+        self.assertEqual(model["magnificence"]["profile_id"], "intel_arc_a310_8086_56a6_sd_2160p")
+        self.assertEqual(model["video_profile"]["selection_source"], "STATIC_PROFILE_DB")
+        self.assertEqual(model["video_profile"]["classification_tier"], "MEDIUM")
+
+    def test_system_model_exposes_capability_baseline_for_reference_only_gtx1660(self):
+        gpu = {
+            "pci_address": "0000:01:00.0",
+            "model": "NVIDIA Corporation TU116 [GeForce GTX 1660]",
+            "vendor_id": "10de",
+            "device_id": "2184",
+            "kernel_driver": "nvidia",
+            "memory_type": "dedicated",
+            "render_nodes": ["renderD128"],
+            "video_decode": {"backends": {"nvdec": {"profiles": {"mpeg2": True}}}},
+        }
+        self.capabilities["graphics"]["devices"] = [gpu]
+        self.capabilities["graphics"]["vulkan"]["devices"] = [{
+            "vendor_id": "10de", "device_id": "2184", "name": "NVIDIA GeForce GTX 1660"
+        }]
+        self.capabilities["display"] = {
+            "active_output": {"connector": "HDMI-A-1", "current_mode": {"width": 3840, "height": 2160, "refresh_hz": 60.0}}
+        }
+        self.profile["gpu_selection"] = {"gpu": {
+            "pci_slot": "0000:01:00.0", "vendor_id": "10de", "device_id": "2184", "model": gpu["model"],
+            "nvdec_decode": {"mpeg2": True},
+            "vulkan_device": {"name": "NVIDIA GeForce GTX 1660"},
+        }}
+        (self.home / ".config/openhtpc/profile.json").write_text(json.dumps(self.profile), encoding="utf-8")
+        (self.home / ".config/openhtpc/runtime/capabilities.json").write_text(json.dumps(self.capabilities), encoding="utf-8")
+
+        model = sys_model.build(self.home, self.install, self.health, self.version, display_snapshot={})
+        self.assertEqual(model["magnificence"]["status"], "CAPABILITY_BASELINE")
+        self.assertEqual(model["magnificence"]["classification_method"], "CAPABILITY_BASELINE_LIGHT")
+        self.assertEqual(model["magnificence"]["selected_recipe"], "RECIPE_MAG_FAMILY_LIGHT_KRIG")
+        self.assertNotIn("LIGHT", model["magnificence"]["reason_fr"])
+        self.assertEqual(model["video_profile"]["selection_source"], "GPU_KNOWLEDGE_DB")
+        self.assertEqual(model["video_profile"]["classification_tier"], "LIGHT")
 
     def test_validator_exception_and_unavailable_fail_closed(self):
         node = self.dev_root / "dri/renderD129"
@@ -622,17 +674,17 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         codecs_by_key = {item["key"]: item for item in model["codecs"]}
 
         # G. Arc fixture: VC1=false, AV1=true, HEVC10=true => UI shows Arc values only
-        self.assertEqual(codecs_by_key["vc1"]["hardware"], "Non signalée")
-        self.assertEqual(codecs_by_key["av1_main"]["hardware"], "Signalée")
-        self.assertEqual(codecs_by_key["hevc_main10"]["hardware"], "Signalée")
+        self.assertEqual(codecs_by_key["vc1"]["hardware"], "Non pris en charge")
+        self.assertEqual(codecs_by_key["av1_main"]["hardware"], "Pris en charge")
+        self.assertEqual(codecs_by_key["hevc_main10"]["hardware"], "Pris en charge")
 
         # H. Legacy union still has VC1=SUPPORTED, AV1=SUPPORTED, HEVC10=SUPPORTED
         legacy_union = self.capabilities["video_decode"]["codecs"]
         self.assertEqual(legacy_union["vc1"]["hardware_decode"]["status"], "SUPPORTED")
         self.assertEqual(legacy_union["av1_main"]["hardware_decode"]["status"], "SUPPORTED")
         self.assertEqual(legacy_union["hevc_main10"]["hardware_decode"]["status"], "SUPPORTED")
-        # But UI matrix for Arc does NOT show VC1 as Signalée
-        self.assertNotEqual(codecs_by_key["vc1"]["hardware"], "Signalée")
+        # But the Arc hardware sheet must still report VC-1 as unsupported.
+        self.assertNotEqual(codecs_by_key["vc1"]["hardware"], "Pris en charge")
 
     def test_I_runtime_vs_stale_passport_disagreement_runtime_wins(self):
         """I. Runtime vs stale Passport disagreement => runtime wins."""
@@ -813,7 +865,7 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         )
 
         av1_item = next(item for item in model["codecs"] if item["key"] == "av1_main")
-        self.assertEqual(av1_item["hardware"], "Non déterminée")
+        self.assertEqual(av1_item["hardware"], "Non déterminé")
 
     def test_N_validator_unavailable_no_per_gpu_capability_attribution(self):
         """N. Validator unavailable -> NO per-GPU capability attribution."""
@@ -1112,3 +1164,27 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_public_processing_profile_follows_playback_preference_not_stale_capability_snapshot():
+    case = TestRc7SystemModelRuntimeGpu(methodName="runTest")
+    case.setUp()
+    try:
+        case.profile["gpu_selection"] = {"gpu": {
+            "pci_slot": "0000:03:00.0", "vendor_id": "8086", "device_id": "56a6",
+            "model": "Intel Corporation Arc A310 Graphics [DG2]",
+        }}
+        (case.home / ".config/openhtpc/profile.json").write_text(json.dumps(case.profile), encoding="utf-8")
+        case.capabilities["graphics"]["devices"][0].update({"vendor_id": "8086", "device_id": "1912"})
+        case.capabilities["graphics"]["devices"][1].update({"vendor_id": "8086", "device_id": "56a6"})
+        (case.home / ".config/openhtpc/runtime/capabilities.json").write_text(json.dumps(case.capabilities), encoding="utf-8")
+        (case.home / ".config/openhtpc/user-config.json").write_text(json.dumps({
+            "schema": 1, "presentation_mode": "CINEMA_AUTO"
+        }), encoding="utf-8")
+        model = sys_model.build(case.home, case.install, case.health, case.version)
+        assert model["playback_policy"]["presentation_mode"] == "CINEMA_AUTO"
+        assert model["video_profile"]["active"] == "CINEMA_AUTO"
+        assert model["processing"]["profile"] == "MAGNIFICENCE"
+    finally:
+        case.tearDown()
+        case.doCleanups()

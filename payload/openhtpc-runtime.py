@@ -13,7 +13,7 @@ import tempfile
 import time
 
 START_REASONS = frozenset({"SESSION_START", "USER_START", "CONTROLLED_REFRESH", "PLAYBACK_RETURN", "CRASH_RECOVERY"})
-STOP_REASONS = frozenset({"CONTROLLED_REFRESH", "NORMAL_EXIT", "USER_QUIT", "UPDATE_CLEANUP", "CRASH"})
+STOP_REASONS = frozenset({"CONTROLLED_REFRESH", "NORMAL_EXIT", "USER_QUIT", "UPDATE_CLEANUP", "SIGNAL_STOP", "CRASH"})
 EXIT_REASONS = frozenset({"USER_QUIT_TO_DESKTOP","USER_POWEROFF","PLAYER_RETURN","FLEX_UNEXPECTED_EXIT","SESSION_STOP","UNKNOWN"})
 MAX_LOG_BYTES=512*1024
 
@@ -134,7 +134,11 @@ def cleanup_legacy(home: pathlib.Path, install: pathlib.Path, proc_root: pathlib
     backdrop = read_pid(paths(home)["backdrop"])
     if backdrop: stop_pid(backdrop, "--title=OPENHTPC-Backdrop", proc_root)
     found = managed_processes(home, install, proc_root); stopped = []
-    for kind, pids in found.items():
+    # Stop the controller before Flex.  Otherwise an active recovery watchdog
+    # can legitimately interpret the killed UI as an unexpected exit and
+    # relaunch it while cleanup is still in progress.
+    for kind in ("controllers", "ui", "monitor"):
+        pids = found[kind]
         expected = str(install / ("openhtpc-optical-monitor" if kind == "monitor" else "flex/bin/flex-launcher"))
         for pid in pids:
             command = process_command(pid, proc_root)
@@ -149,7 +153,9 @@ def cleanup_legacy(home: pathlib.Path, install: pathlib.Path, proc_root: pathlib
 
 def stop_session(home: pathlib.Path, install: pathlib.Path, proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict:
     found = managed_processes(home, install, proc_root); stopped = []
-    for kind in ("ui", "controllers", "monitor"):
+    # Controller first, for the same reason as cleanup_legacy: an intentional
+    # session stop must not look like an unexpected Flex disappearance.
+    for kind in ("controllers", "ui", "monitor"):
         for pid in found[kind]:
             command = process_command(pid, proc_root)
             marker = next((arg for arg in command if arg == str(install / "flex/bin/flex-launcher") or arg.startswith(str(install) + "/")), "")

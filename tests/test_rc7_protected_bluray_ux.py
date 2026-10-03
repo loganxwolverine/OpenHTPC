@@ -226,7 +226,7 @@ class TestRC7T6AacsPluginArchitecture(unittest.TestCase):
     # ── Test 4: DVD unchanged ──────────────────────────────────────────────────
 
     def test_04_dvd_flow_untouched(self):
-        """DVD-Video menu remains completely untouched."""
+        """DVD-Video keeps playback/eject/back while video mode stays global."""
         state = {
             "canonical_state": "DVD_VIDEO", "state": "DVD",
             "device": "/dev/sr0", "generation": 4,
@@ -236,7 +236,9 @@ class TestRC7T6AacsPluginArchitecture(unittest.TestCase):
         menu = session_engine.disc_menu_entries(state, PAYLOAD, self.icons, self.home)
         self.assertIn("LIRE LE DVD", menu)
         self.assertIn("openhtpc-play-dvd", menu)
-        self.assertIn("MODE VIDÉO", menu)
+        # DEV35 consolidated video-mode selection into SYSTÈME → LECTURE.
+        self.assertNotIn("MODE VIDÉO", menu)
+        self.assertNotIn("DVD_VIDEO_MODE", menu)
         self.assertIn("ÉJECTER", menu)
         self.assertIn("RETOUR", menu)
         self.assertNotIn("BLU-RAY PROTÉGÉ", menu)

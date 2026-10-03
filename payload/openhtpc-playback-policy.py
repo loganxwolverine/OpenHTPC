@@ -40,6 +40,14 @@ VALID = {
 }
 FR_LANGS = {"fr", "fra", "fre"}
 MPV_DEFAULT_HWDEC_CODEC_WHITELIST = "h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx"
+FROZEN_MAGNIFICENCE_SHADERS = {
+    "KrigBilateral.glsl",
+    "FSRCNNX_x2_8-0-4-1.glsl",
+    "FSRCNNX_x2_16-0-4-1.glsl",
+    "FSRCNN_x2_r2_32-0-2.glsl",
+    "SSimSuperRes.glsl",
+    "OpenHTPC_Vibrance_Mild.glsl",
+}
 
 
 def config_path(home: pathlib.Path) -> pathlib.Path:
@@ -95,6 +103,239 @@ def _magnificence_source_scope(kind: str, probe: dict | None) -> str | None:
     return None
 
 
+def _normalize_pci_address(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    return candidate if re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", candidate) else None
+
+
+def _strict_true(value: Any) -> bool:
+    return type(value) is bool and value is True
+
+
+def _magnificence_selected_gpu(home: pathlib.Path, caps: dict) -> dict | None:
+    """Resolve the processing GPU against the *current* capability snapshot.
+
+    A cached Hardware Passport may nominate the processing PCI device, but it
+    never supplies runtime capability truth.  If that nominated device is no
+    longer present or conflicts with the current vendor/device identity, fail
+    closed instead of silently selecting another GPU.
+    """
+    graphics = caps.get("graphics", {}) if isinstance(caps.get("graphics"), dict) else {}
+    devices = [item for item in graphics.get("devices", []) if isinstance(item, dict)] if isinstance(graphics.get("devices"), list) else []
+    if not devices:
+        return None
+
+    try:
+        passport = json.loads((home / ".config/openhtpc/profile.json").read_text(encoding="utf-8"))
+        if isinstance(passport, dict):
+            gpu_selection = passport.get("gpu_selection", {})
+            selected = gpu_selection.get("gpu") if isinstance(gpu_selection, dict) else None
+        else:
+            selected = None
+    except (OSError, ValueError, TypeError):
+        selected = None
+
+    if isinstance(selected, dict):
+        selected_pci = _normalize_pci_address(selected.get("pci_slot") or selected.get("pci_address"))
+        selected_vendor = _normalize_hex_id(selected.get("vendor_id"))
+        selected_device = _normalize_hex_id(selected.get("device_id"))
+        if selected_pci:
+            matches = [item for item in devices if _normalize_pci_address(item.get("pci_address")) == selected_pci]
+            if len(matches) != 1:
+                return None
+            current = matches[0]
+            if selected_vendor and _normalize_hex_id(current.get("vendor_id")) != selected_vendor:
+                return None
+            if selected_device and _normalize_hex_id(current.get("device_id")) != selected_device:
+                return None
+            return current
+        if selected_vendor or selected_device:
+            # A Passport that identifies a GPU but lacks persistent PCI identity
+            # is not sufficient authority on a multi-GPU system.
+            if len(devices) != 1:
+                return None
+            current = devices[0]
+            if selected_vendor and _normalize_hex_id(current.get("vendor_id")) != selected_vendor:
+                return None
+            if selected_device and _normalize_hex_id(current.get("device_id")) != selected_device:
+                return None
+            return current
+
+    active = [item for item in devices if _strict_true(item.get("active"))]
+    if len(active) == 1:
+        return active[0]
+    if len(devices) == 1:
+        return devices[0]
+    return None
+
+
+def _normalized_gpu_alias(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", " ", value.casefold().replace("_", " ").replace("-", " ")).strip()
+
+
+def _magnificence_gpu_names(gpu: dict, caps: dict | None = None) -> list[str]:
+    names = []
+    for candidate in (gpu.get("model"), (gpu.get("vulkan_device") or {}).get("name") if isinstance(gpu.get("vulkan_device"), dict) else None):
+        normalized = _normalized_gpu_alias(candidate)
+        if normalized and normalized not in names:
+            names.append(normalized)
+    if isinstance(caps, dict):
+        vendor_id = _normalize_hex_id(gpu.get("vendor_id"))
+        device_id = _normalize_hex_id(gpu.get("device_id"))
+        matches = [
+            item for item in caps.get("graphics", {}).get("vulkan", {}).get("devices", [])
+            if isinstance(item, dict)
+            and _normalize_hex_id(item.get("vendor_id")) == vendor_id
+            and _normalize_hex_id(item.get("device_id")) == device_id
+        ]
+        if len(matches) == 1:
+            normalized = _normalized_gpu_alias(matches[0].get("name"))
+            if normalized and normalized not in names:
+                names.append(normalized)
+    return names
+
+
+def _alias_matches(name: str, alias: str) -> bool:
+    alias = _normalized_gpu_alias(alias)
+    if not alias:
+        return False
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", name))
+
+
+def _magnificence_family_rule(
+    gpu: dict,
+    knowledge: dict,
+    caps: dict | None = None,
+    *,
+    include_reference: bool = False,
+) -> dict | None:
+    vendor_id = _normalize_hex_id(gpu.get("vendor_id"))
+    names = _magnificence_gpu_names(gpu, caps)
+    if not vendor_id or not names:
+        return None
+    candidates = []
+    for rule in knowledge.get("family_rules", []):
+        if not isinstance(rule, dict) or _normalize_hex_id(rule.get("vendor_id")) != vendor_id:
+            continue
+        if not include_reference and rule.get("selection_status") != "ACTIVE":
+            continue
+        for alias in rule.get("contains_any", []):
+            if not isinstance(alias, str):
+                continue
+            normalized_alias = _normalized_gpu_alias(alias)
+            if normalized_alias and any(_alias_matches(name, normalized_alias) for name in names):
+                candidates.append((len(normalized_alias), rule))
+        for pattern in rule.get("regex_any", []):
+            if not isinstance(pattern, str) or not pattern:
+                continue
+            try:
+                if any(re.search(pattern, name) for name in names):
+                    candidates.append((1000 + len(pattern), rule))
+            except re.error:
+                continue
+    if not candidates:
+        return None
+    best_len = max(length for length, _ in candidates)
+    best = [rule for length, rule in candidates if length == best_len]
+    tiers = {str(rule.get("tier", "")).upper() for rule in best}
+    rule_ids = {str(rule.get("id", "")) for rule in best}
+    if len(tiers) != 1 or len(rule_ids) != 1:
+        return None
+    return best[0]
+
+
+def _magnificence_capability_baseline(caps: dict, gpu: dict) -> bool:
+    """Require current, unambiguous Vulkan + MPEG-2 hardware evidence."""
+    vendor_id = _normalize_hex_id(gpu.get("vendor_id"))
+    device_id = _normalize_hex_id(gpu.get("device_id"))
+    if not vendor_id or not device_id:
+        return False
+
+    vulkan_devices = caps.get("graphics", {}).get("vulkan", {}).get("devices", [])
+    vulkan_matches = [
+        item for item in vulkan_devices
+        if isinstance(item, dict)
+        and _normalize_hex_id(item.get("vendor_id")) == vendor_id
+        and _normalize_hex_id(item.get("device_id")) == device_id
+    ] if isinstance(vulkan_devices, list) else []
+    if len(vulkan_matches) != 1:
+        return False
+
+    direct_va = gpu.get("vaapi_decode") if isinstance(gpu.get("vaapi_decode"), dict) else {}
+    direct_nv = gpu.get("nvdec_decode") if isinstance(gpu.get("nvdec_decode"), dict) else {}
+    mpeg2_ok = _strict_true(direct_va.get("mpeg2")) or _strict_true(direct_nv.get("mpeg2"))
+    if not mpeg2_ok:
+        backends = gpu.get("video_decode", {}).get("backends", {}) if isinstance(gpu.get("video_decode"), dict) else {}
+        if not isinstance(backends, dict):
+            return False
+        va = backends.get("vaapi", {}) if isinstance(backends.get("vaapi"), dict) else {}
+        nv = backends.get("nvdec", {}) if isinstance(backends.get("nvdec"), dict) else {}
+        va_profiles = va.get("profiles", {}) if isinstance(va.get("profiles"), dict) else {}
+        nv_profiles = nv.get("profiles", {}) if isinstance(nv.get("profiles"), dict) else {}
+        mpeg2_ok = _strict_true(va_profiles.get("mpeg2")) or _strict_true(nv_profiles.get("mpeg2"))
+    return mpeg2_ok
+
+
+def _magnificence_family_choice(install: pathlib.Path, caps: dict, gpu: dict, scope: str, resolution: str) -> dict | None:
+    if scope != "DVD_PAL_FILM" or not isinstance(resolution, str):
+        return None
+    match = re.fullmatch(r"([1-9][0-9]*)x([1-9][0-9]*)", resolution)
+    if not match:
+        return None
+    width, height = int(match.group(1)), int(match.group(2))
+    if width > 3840 or height > 2160:
+        return None
+
+    try:
+        knowledge = json.loads((install / "assets/magnificence_gpu_knowledge.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(knowledge, dict) or set(knowledge.get("shader_allowlist", [])) != FROZEN_MAGNIFICENCE_SHADERS:
+        return None
+
+    if not _magnificence_capability_baseline(caps, gpu):
+        return None
+
+    rule = _magnificence_family_rule(gpu, knowledge, caps)
+    if rule:
+        tier = str(rule.get("tier", "")).upper()
+        source = "OPENHTPC_VALIDATED_FAMILY_RULE"
+        profile_id = f"family:{rule.get('id', 'unknown')}"
+        confidence = rule.get("confidence", "OPENHTPC_FAMILY_EVIDENCE")
+    else:
+        tier = "LIGHT"
+        source = "CAPABILITY_BASELINE_LIGHT"
+        profile_id = "family:capability-baseline-light"
+        confidence = "CONSERVATIVE_CAPABILITY_BASELINE"
+
+    recipe = knowledge.get("family_recipes", {}).get(tier)
+    if not isinstance(recipe, dict):
+        return None
+    shader_names = [str(item) for item in recipe.get("shaders", []) if item]
+    if any(name not in FROZEN_MAGNIFICENCE_SHADERS for name in shader_names):
+        return None
+    shader_paths = [install / "assets/shaders" / name for name in shader_names]
+    if any(not path.is_file() for path in shader_paths):
+        return None
+    return {
+        "profile_id": profile_id,
+        "recipe_id": recipe.get("recipe_id", "RECIPE_0_PURE"),
+        "label": recipe.get("label", tier),
+        "shader_files": [str(path) for path in shader_paths],
+        "mpv_args": [str(item) for item in recipe.get("mpv_args", []) if isinstance(item, str) and item.startswith("--")],
+        "source_scope": scope,
+        "display": resolution,
+        "selection_source": "GPU_KNOWLEDGE_DB",
+        "classification_method": source,
+        "classification_tier": tier,
+        "classification_confidence": confidence,
+    }
+
+
 def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> dict | None:
     """Return the qualified hardware/output recipe, or None for safe PURE fallback."""
     scope = _magnificence_source_scope(kind, probe)
@@ -102,16 +343,16 @@ def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> d
         return None
     try:
         caps = json.loads((home / ".config/openhtpc/runtime/capabilities.json").read_text(encoding="utf-8"))
-        graphics = caps.get("graphics", {}).get("devices", [])
-        gpu = next((item for item in graphics if isinstance(item, dict) and item.get("active")), None)
-        if gpu is None:
-            gpu = next((item for item in graphics if isinstance(item, dict)), None)
+        gpu = _magnificence_selected_gpu(home, caps)
         mode = caps.get("display", {}).get("active_output", {}).get("current_mode", {})
-        if not gpu or not mode.get("width") or not mode.get("height"):
+        if not gpu or not isinstance(mode, dict):
+            return None
+        width, height = mode.get("width"), mode.get("height")
+        if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
             return None
         vendor_id = _normalize_hex_id(gpu.get("vendor_id"))
         device_id = _normalize_hex_id(gpu.get("device_id"))
-        resolution = f"{int(mode['width'])}x{int(mode['height'])}"
+        resolution = f"{width}x{height}"
 
         install = pathlib.Path(__file__).resolve().parent
         db = json.loads((install / "assets/magnificence_profiles.json").read_text(encoding="utf-8"))
@@ -149,10 +390,15 @@ def _magnificence_choice(home: pathlib.Path, kind: str, probe: dict | None) -> d
                 "mpv_args": profile_mpv_args,
                 "source_scope": scope,
                 "display": resolution,
+                "selection_source": "STATIC_PROFILE_DB",
+                "classification_method": "EXACT_QUALIFIED_PROFILE",
+                "classification_tier": profile.get("classification", {}).get("gpu_tier"),
+                "classification_confidence": "OPENHTPC_PHYSICAL_QUALIFICATION",
             }
+
+        return _magnificence_family_choice(install, caps, gpu, scope, resolution)
     except (OSError, ValueError, TypeError, KeyError):
         return None
-    return None
 
 
 def _load_audio_module():

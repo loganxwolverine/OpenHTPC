@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """O1 deterministic physical optical detection and playback separation."""
-import importlib.util, json, pathlib, subprocess, tempfile, unittest
+import importlib.util, json, os, pathlib, subprocess, tempfile, unittest
+from unittest import mock
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location("o1_optical",ROOT/"payload/openhtpc-optical.py")
@@ -90,5 +91,27 @@ class Transitions(unittest.TestCase):
         family=optical._state("BLURAY_FAMILY","/dev/x","BLURAY",uhd_status="UNKNOWN")
         uhd=optical._state("UHD_BLURAY_VIDEO","/dev/x","UHD",uhd_status="CONFIRMED")
         self.assertNotEqual(optical.ui_state_hash(family),optical.ui_state_hash(uhd))
+
+    def test_orphaned_eject_guard_expires(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home=pathlib.Path(raw)
+            target=home/".local/state/openhtpc/optical-ejecting.json"
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps({"device":"/dev/sr0","state":"EJECTING","empty_observed":False})+"\n")
+            old=target.stat().st_mtime-60
+            os.utime(target,(old,old))
+            self.assertIsNone(optical.eject_guard(home))
+            self.assertFalse(target.exists())
+
+    def test_command_output_with_non_utf8_bytes_is_tolerated(self):
+        fake=subprocess.CompletedProcess(["lsdvd"],0,b"title=Coeur\xff\n",b"")
+        with mock.patch.object(subprocess,"run",return_value=fake) as run_mock:
+            result=optical.run(["lsdvd","-x","-Ox","/dev/sr0"])
+            kwargs=run_mock.call_args.kwargs
+            self.assertEqual(kwargs["encoding"],"utf-8")
+            self.assertEqual(kwargs["errors"],"replace")
+            # Real subprocess.run performs the decoding; the contract here is
+            # that our wrapper explicitly requests tolerant decoding.
+            self.assertEqual(result.returncode,0)
 
 if __name__=="__main__": unittest.main()

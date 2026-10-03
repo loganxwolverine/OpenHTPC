@@ -141,6 +141,9 @@ def test_magnificence_database_is_installed():
     assert 'assets/magnificence_profiles.json' in manifest
     assert 'assets/magnificence_profiles.json' in installer
     assert '$INSTALL_DIR/assets/magnificence_profiles.json' in installer
+    assert 'assets/magnificence_gpu_knowledge.json' in manifest
+    assert 'assets/magnificence_gpu_knowledge.json' in installer
+    assert '$INSTALL_DIR/assets/magnificence_gpu_knowledge.json' in installer
 
 
 def test_all_profiles_use_static_hardware_tiers_without_runtime_benchmark_selection():
@@ -181,6 +184,27 @@ def test_all_selected_magnificence_shaders_are_cataloged_and_managed():
         assert by_filename[shader].get("redistributable") is True, shader
         assert by_filename[shader].get("license"), shader
         assert f"assets/shaders/{shader}" in manifest, shader
+
+
+def test_evolving_gpu_knowledge_is_limited_to_frozen_magnificence_shader_set():
+    knowledge = json.loads((PAYLOAD / "assets/magnificence_gpu_knowledge.json").read_text(encoding="utf-8"))
+    allowed = {
+        "KrigBilateral.glsl",
+        "FSRCNNX_x2_8-0-4-1.glsl",
+        "FSRCNNX_x2_16-0-4-1.glsl",
+        "FSRCNN_x2_r2_32-0-2.glsl",
+        "SSimSuperRes.glsl",
+        "OpenHTPC_Vibrance_Mild.glsl",
+    }
+    assert set(knowledge["shader_allowlist"]) == allowed
+    used = {
+        shader
+        for recipe in knowledge["family_recipes"].values()
+        for shader in recipe.get("shaders", [])
+    }
+    assert used <= allowed
+    assert not any(name.startswith(("RAVU", "ArtCNN", "CfL")) for name in used)
+    assert knowledge["policy"]["runtime_benchmark_required"] is False
 
 
 def make_vega_home(cpu_model: str) -> tuple[tempfile.TemporaryDirectory, pathlib.Path]:
@@ -483,3 +507,34 @@ def test_qualified_amd_4k_profiles_do_not_apply_at_1080p():
             assert decision["presentation"]["reason"] == "no_qualified_magnificence_profile"
         finally:
             temp.cleanup()
+
+
+def test_community_gpu_tiers_are_reference_only_until_openhtpc_promotion():
+    knowledge = json.loads((PAYLOAD / "assets/magnificence_gpu_knowledge.json").read_text(encoding="utf-8"))
+    assert knowledge["policy"]["community_reference_rules_active"] is False
+    community = [
+        rule for rule in knowledge["family_rules"]
+        if rule.get("confidence") == "COMMUNITY_DERIVED"
+    ]
+    assert community
+    assert all(rule.get("selection_status") == "REFERENCE_ONLY" for rule in community)
+
+
+def test_public_magnificence_ui_does_not_expose_internal_tiers_or_retired_calibration():
+    ui_source = (PAYLOAD / "openhtpc-ui.py").read_text(encoding="utf-8")
+    session_source = (PAYLOAD / "openhtpc-session-engine.py").read_text(encoding="utf-8")
+    public_source = ui_source + session_source
+    for stale in ("CONFIGURER MAGNIFICENCE", "RECALIBRER", "RÉESSAYER L'ANALYSE", "performance_map"):
+        assert stale not in public_source
+    processing = ui_source[ui_source.index('elif page == "processing":'):ui_source.index('elif page == "playback":')]
+    for internal_tier in ("LIGHT", "MEDIUM", "STRONG", "HIGH"):
+        assert internal_tier not in processing
+
+
+def test_capabilities_summary_uses_current_magnificence_contract():
+    source = (PAYLOAD / "openhtpc-capabilities.py").read_text(encoding="utf-8")
+    assert '"MAGNIFICENCE"' in source
+    assert "Benchmark runtime : non utilisé pour choisir la recette" in source
+    summary_block = source[source.index("def summary("):source.index("def main()", source.index("def summary("))]
+    assert "Profil adaptatif" not in summary_block
+    assert "Benchmark :" not in summary_block
