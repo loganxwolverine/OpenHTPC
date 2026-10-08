@@ -1,11 +1,12 @@
 # Changelog
 
-# OPENHTPC 1.3.0 — 1.3.0
+# OPENHTPC 1.3.0 — Patina
 
 - Promotes the profile-driven Magnificence pipeline and the physically exercised DVD lifecycle fixes.
 - Adds the qualified Arc A310 DVD/SD CLEAN prefilter: HQDN3D `1.4:1.0:0.05:0.05` before FSRCNNX-16 + KrigBilateral + Vibrance Mild, with `vaapi-copy` preserving MPEG-2 hardware decoding while exposing frames to the native-resolution filter.
-- Keeps CLEAN scoped to the exact Arc A310 SD-to-2160p profile; PURE and other qualified GPU profiles remain unchanged.
+- Keeps the new CLEAN stage scoped to the exact Arc A310 SD-to-2160p profile; Magnificence itself remains profile-driven for other qualified GPUs, with PURE fallback when no suitable profile exists.
 - Retains tracked DVD playback ownership and a single-instance `flock` guard, validated during multi-day real-film use on the salon A310 system.
+- Hardens updates: `--check` no longer stops a live session, active DVD playback blocks in-place updates, and a previously running OPENHTPC session is restored automatically after success.
 - Rejects Adaptive Sharpen, SSimSuperRes and isolated RCAS as default A310 DETAIL stages because their perceptual gain at normal viewing distance did not justify their GPU cost.
 
 # OPENHTPC 1.2.0 — 1.2.0

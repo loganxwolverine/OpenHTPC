@@ -6,7 +6,7 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.3.0
+# OPENHTPC 1.3.0 — Patina
 
 Version: `1.3.0`
 Build: `public-release-1.3.0`
@@ -17,7 +17,7 @@ Flex Launcher provides the ten-foot interface and MPV provides playback. The
 Hardware Passport, capabilities, media configuration and playback history stay
 on the local machine; normal operation does not require a cloud service.
 
-OPENHTPC 1.3.0 promotes the Magnificence profile-driven video pipeline and the
+OPENHTPC 1.3.0 **Patina** promotes the Magnificence profile-driven video pipeline and the
 field-validated DVD lifecycle fixes. On the qualified Intel Arc A310 4K profile,
 DVD/SD Magnificence now applies a restrained native-resolution CLEAN pass before
 FSRCNNX-16 + KrigBilateral reconstruction and Vibrance Mild. Extra DETAIL
