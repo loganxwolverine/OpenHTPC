@@ -1,5 +1,13 @@
 # Changelog
 
+# OPENHTPC 1.3.0 — 1.3.0
+
+- Promotes the profile-driven Magnificence pipeline and the physically exercised DVD lifecycle fixes.
+- Adds the qualified Arc A310 DVD/SD CLEAN prefilter: HQDN3D `1.4:1.0:0.05:0.05` before FSRCNNX-16 + KrigBilateral + Vibrance Mild, with `vaapi-copy` preserving MPEG-2 hardware decoding while exposing frames to the native-resolution filter.
+- Keeps CLEAN scoped to the exact Arc A310 SD-to-2160p profile; PURE and other qualified GPU profiles remain unchanged.
+- Retains tracked DVD playback ownership and a single-instance `flock` guard, validated during multi-day real-film use on the salon A310 system.
+- Rejects Adaptive Sharpen, SSimSuperRes and isolated RCAS as default A310 DETAIL stages because their perceptual gain at normal viewing distance did not justify their GPU cost.
+
 # OPENHTPC 1.2.0 — 1.2.0
 
 - Promotes the physically qualified RC9 media UX to the stable 1.2.0 release without product-behavior changes.

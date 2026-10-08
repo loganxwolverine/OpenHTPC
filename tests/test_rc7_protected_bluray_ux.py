@@ -236,6 +236,7 @@ class TestRC7T6AacsPluginArchitecture(unittest.TestCase):
         menu = session_engine.disc_menu_entries(state, PAYLOAD, self.icons, self.home)
         self.assertIn("LIRE LE DVD", menu)
         self.assertIn("openhtpc-play-dvd", menu)
+        self.assertIn(":tracked", menu)
         # DEV35 consolidated video-mode selection into SYSTÈME → LECTURE.
         self.assertNotIn("MODE VIDÉO", menu)
         self.assertNotIn("DVD_VIDEO_MODE", menu)

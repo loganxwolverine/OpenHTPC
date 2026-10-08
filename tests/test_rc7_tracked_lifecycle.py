@@ -753,8 +753,8 @@ sys.exit(0)
                 self.assertNotIn(":tracked", line)
                 self.assertIn("openhtpc-play", line)
 
-    # 12. DVD REGRESSION: UNCHANGED
-    def test_12_dvd_playback_regression_unchanged(self):
+    # 12. DVD LIFECYCLE: CORE AND STANDALONE SHEET USE TRACKED OWNERSHIP
+    def test_12_dvd_playback_uses_tracked_lifecycle(self):
         optical_state = {
             "canonical_state": "DVD_VIDEO",
             "state": "DVD",
@@ -767,9 +767,24 @@ sys.exit(0)
         self.assertIn("LIRE LE DVD", menu)
         for line in menu.splitlines():
             if "LIRE LE DVD" in line:
-                self.assertNotIn(":tracked", line)
+                self.assertIn(":tracked", line)
                 self.assertIn("openhtpc-play-dvd", line)
                 self.assertIn("OPENHTPC_FLEX_RETAINED=1", line)
+
+        data = {
+            "title": "Test DVD",
+            "state": optical_state,
+            "metadata": {"status": "PASS", "release_date": "1995-01-01"},
+            "artwork": pathlib.Path("icon.png"),
+            "duration": "2 h 00",
+        }
+        with mock.patch.object(optical_model, "canonical_state", return_value="DVD_VIDEO"):
+            sheet_menu_path = disc_sheet.write_menu(self.home, PAYLOAD, data)
+        sheet_text = sheet_menu_path.read_text(encoding="utf-8")
+        sheet_play = [line for line in sheet_text.splitlines() if "LIRE · Test DVD" in line][0]
+        self.assertIn(":tracked", sheet_play)
+        self.assertIn("openhtpc-play-dvd", sheet_play)
+        self.assertIn("OPENHTPC_FLEX_RETAINED=1", sheet_play)
 
     # 13. PROTECTED OPTICAL BACKEND REGRESSION: UNCHANGED EXCEPT LIFECYCLE OWNERSHIP
     def test_13_protected_optical_backend_regression_unchanged(self):

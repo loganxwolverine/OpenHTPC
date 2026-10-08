@@ -4,6 +4,12 @@ readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
 readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
 readonly PROFILE="$HOME_DIR/.config/openhtpc/profile.json"
 readonly OPTICAL_STATE="$HOME_DIR/.local/state/openhtpc/optical-current.json"
+readonly DVD_LOCK="$HOME_DIR/.local/state/openhtpc/play-dvd.lock"
+mkdir -p "$HOME_DIR/.local/state/openhtpc"
+exec 9>"$DVD_LOCK"
+if ! flock -n 9; then
+    exit 0
+fi
 fail_and_return_ui(){
     local reason="${1:-DISPATCH_REFUSED}"
     python3 -c '

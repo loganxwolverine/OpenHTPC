@@ -101,3 +101,9 @@ Future legacy work should isolate driver installation, rollback and update behav
 Status: `POST-RC EXPLORATION`
 
 The first RC keeps GPU/output qualification static and simple. A later phase may add source-aware restoration for difficult DVD masters, for example material with visible MPEG-2 mosquito noise or other compression damage. Any such mode must be separately qualified and must not silently replace the normal HIGH/STRONG recipes.
+## OPENHTPC 1.3.0 Arc A310 CLEAN / DETAIL decision
+
+- CLEAN retained for the exact Arc A310 DVD/SD-to-2160p profile: `hqdn3d=1.4:1.0:0.05:0.05` at native source resolution, using `vaapi-copy` so MPEG-2 hardware decoding remains active before the existing FSRCNNX-16 + KrigBilateral + Vibrance Mild shader chain.
+- Visual qualification on `Alerte.mkv`: subtle smoothing, no coarse/plastic rendering at normal viewing distance.
+- DETAIL not retained on A310. Adaptive Sharpen 0.4, SSimSuperRes and isolated RCAS all produced a measurable finishing effect, but their GPU cost was disproportionate to the near-invisible benefit at approximately 2.5 m viewing distance.
+- Product rule: prefer natural image and healthy GPU reserve over maximum processing complexity.

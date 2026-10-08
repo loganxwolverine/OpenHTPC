@@ -1430,7 +1430,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
-                            f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
+                            f":tracked env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
         elif is_protected_unplayable:
             entries.append(("DIAGNOSTIC", diagnostic_icon, ":submenu SYSTEM_MEDIA_OPTICAL"))
     elif is_protected_unplayable:
@@ -1443,7 +1443,7 @@ def disc_menu_entries(optical: dict, install: pathlib.Path, icons: tuple[pathlib
         if state == "DVD_VIDEO":
             device = shlex.quote(str(optical.get("device") or ""))
             entries.append(("LIRE LE DVD", media_play_icon,
-                            f"env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
+                            f":tracked env OPENHTPC_FLEX_RETAINED=1 {install/'openhtpc-play-dvd'} {device}"))
         elif optical.get("state") == "INITIALIZING": entries.append(("INITIALISATION DU DISQUE…", media_play_icon, ":fork true"))
         elif state in {"BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY"}:
             pass

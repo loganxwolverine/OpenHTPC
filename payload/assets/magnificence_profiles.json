@@ -494,22 +494,29 @@
         "selected_recipe": "RECIPE_MAG_SD_FSRCNNX16_KRIG_VIBRANCE_MILD",
         "fallback_recipe": "RECIPE_0_PURE",
         "status": "TECHNICALLY_QUALIFIED_ARC_A310_SD_2160P",
-        "selected_label": "FSRCNNX-16 + KrigBilateral + Vibrance légère",
+        "selected_label": "CLEAN léger + FSRCNNX-16 + KrigBilateral + Vibrance légère",
         "selected_shaders": [
           "FSRCNNX_x2_16-0-4-1.glsl",
           "KrigBilateral.glsl",
           "OpenHTPC_Vibrance_Mild.glsl"
         ],
-        "reason": "FSRCNNX-16 + KrigBilateral remains the qualified SD-to-2160p reconstruction chain. OPENHTPC Vibrance Mild was then selected in a blind color comparison as the preferred middle ground between the neutral reference and a stronger vibrance variant; plain saturation +6 was rejected for overly red facial tones.",
-        "visual_basis": "Two independent blind recipe comparisons selected FSRCNNX-16 + KrigBilateral for reconstruction. A subsequent blind A/B/C color comparison selected OPENHTPC Vibrance Mild as the preferred color extension.",
-        "ui_reason_fr": "Traitement renforcé : FSRCNNX-16 + KrigBilateral + Vibrance légère.",
+        "reason": "A310 SD-to-2160p qualified chain: conservative HQDN3D CLEAN at source resolution precedes the retained FSRCNNX-16 luma reconstruction, KrigBilateral chroma reconstruction and OPENHTPC Vibrance Mild color extension. vaapi-copy keeps MPEG-2 hardware decode while exposing frames to the native-resolution CLEAN filter.",
+        "visual_basis": "FSRCNNX-16 + KrigBilateral won two independent blind reconstruction comparisons; Vibrance Mild won the subsequent color comparison. HQDN3D 1.4/1.0/0.05/0.05 was then validated on Alerte as a subtle source cleanup without waxy/plastic rendering at normal viewing distance. Additional DETAIL sharpening was rejected on Arc A310 because Adaptive Sharpen, SSimSuperRes and isolated RCAS had poor perceptual-gain/GPU-cost ratios.",
+        "ui_reason_fr": "CLEAN léger avant reconstruction : HQDN3D subtil, puis FSRCNNX-16 + KrigBilateral + Vibrance légère.",
         "rejected_default_candidates": {
           "RECIPE_C2_DVD_KRIG_BILATERAL": "Technically stable, but visually close to PURE in both Arc A310 blind comparisons.",
           "RECIPE_MAG_SD_RAVU_KRIG": "Technically stable; no Arc-specific blind preference demonstrated.",
           "RECIPE_C2_DVD_ARTCNN_C4F16": "Dropped output frames in the Arc A310 4K benchmark.",
-          "RECIPE_MAG_SD_FSRCNNX8_KRIG": "Technically efficient, but ranked below FSRCNNX-16 + Krig in two later Arc A310 blind comparisons."
+          "RECIPE_MAG_SD_FSRCNNX8_KRIG": "Technically efficient, but ranked below FSRCNNX-16 + Krig in two later Arc A310 blind comparisons.",
+          "DETAIL_ADAPTIVE_SHARPEN": "Visually subtle and natural, but the gain was nearly imperceptible at ~2.5 m and cost too much GPU time on Arc A310.",
+          "DETAIL_SSIMSUPERRES": "Useful finishing on stronger GPUs, but too expensive for the A310 quality/cost target.",
+          "DETAIL_RCAS": "Standalone RCAS was tested both at OUTPUT and LUMA; neither delivered the expected low-cost advantage on the A310."
         },
-        "experimental_candidates": {}
+        "experimental_candidates": {},
+        "mpv_args": [
+          "--hwdec=vaapi-copy",
+          "--vf=lavfi=[hqdn3d=1.4:1.0:0.05:0.05]"
+        ]
       },
       "color_extension_validation": {
         "date": "2026-09-27",

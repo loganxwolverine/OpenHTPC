@@ -92,6 +92,13 @@ class EffectiveOsd(unittest.TestCase):
             self.assertNotIn("--force-window=immediate", source)
 
 
+class DvdSingleInstanceGuard(unittest.TestCase):
+    def test_dvd_script_has_single_instance_lock(self):
+        source = (PAYLOAD / "openhtpc-play-dvd").read_text(encoding="utf-8")
+        self.assertIn('play-dvd.lock', source)
+        self.assertIn('flock -n 9', source)
+
+
 class VideoModeSingleEntryPoint(unittest.TestCase):
     def test_dvd_menu_does_not_expose_video_mode(self):
         with tempfile.TemporaryDirectory() as value:

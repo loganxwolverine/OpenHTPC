@@ -131,6 +131,8 @@ def test_pure_never_adds_magnificence_shader():
         assert decision["presentation"]["resolved"] == "PURE"
         assert decision["presentation"]["reason"] == "requested_pure"
         assert not any(arg.startswith("--glsl-shaders=") for arg in decision["mpv_args"])
+        assert not any("hqdn3d=" in arg for arg in decision["mpv_args"])
+        assert "--hwdec=vaapi-copy" not in decision["mpv_args"]
     finally:
         temp.cleanup()
 
@@ -287,6 +289,10 @@ def test_arc_a310_4k_resolves_fsrcnnx16_krig_vibrance():
         assert "OpenHTPC_Vibrance_Mild.glsl" in shader_args[0]
         assert shader_args[0].index("FSRCNNX_x2_16-0-4-1.glsl") < shader_args[0].index("KrigBilateral.glsl")
         assert shader_args[0].index("KrigBilateral.glsl") < shader_args[0].index("OpenHTPC_Vibrance_Mild.glsl")
+        assert "--hwdec=vaapi-copy" in decision["mpv_args"]
+        clean_arg = "--vf=lavfi=[hqdn3d=1.4:1.0:0.05:0.05]"
+        assert clean_arg in decision["mpv_args"]
+        assert decision["mpv_args"].index(clean_arg) < decision["mpv_args"].index(shader_args[0])
     finally:
         temp.cleanup()
 
@@ -402,6 +408,8 @@ def test_hd630_1080p_resolves_fsrcnnx8_krig():
         assert "KrigBilateral.glsl" in chain
         assert chain.index("FSRCNNX_x2_8-0-4-1.glsl") < chain.index("KrigBilateral.glsl")
         assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
+        assert not any("hqdn3d=" in arg for arg in decision["mpv_args"])
+        assert "--hwdec=vaapi-copy" not in decision["mpv_args"]
     finally:
         temp.cleanup()
 
