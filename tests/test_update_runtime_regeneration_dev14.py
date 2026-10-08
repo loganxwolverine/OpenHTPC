@@ -191,6 +191,30 @@ raise SystemExit(0)
         for path, value in persistent.items(): self.assertEqual(json.loads(path.read_text()), value)
         self.assertEqual(json.loads(self.profile_path.read_text())["runtime"]["status"], "ready")
 
+    def test_11b_update_check_is_non_mutating_before_cleanup(self):
+        source = (ROOT / "update.sh").read_text()
+        check_branch = 'if [[ $arg == "--check" ]]'
+        cleanup = '"$ROOT/payload/openhtpc-runtime.py" cleanup-legacy'
+        self.assertIn(check_branch, source)
+        self.assertIn('exec "$ROOT/install.sh" "$@"', source)
+        self.assertLess(source.index(check_branch), source.index(cleanup))
+
+    def test_11c_update_refuses_active_dvd_before_cleanup(self):
+        source = (ROOT / "update.sh").read_text()
+        guard = 'dvd_lock="$HOME/.local/state/openhtpc/play-dvd.lock"'
+        cleanup = '"$ROOT/payload/openhtpc-runtime.py" cleanup-legacy'
+        self.assertIn(guard, source)
+        self.assertIn('if ! flock -n 7; then', source)
+        self.assertIn('une lecture DVD est en cours', source)
+        self.assertLess(source.index(guard), source.index(cleanup))
+
+    def test_11d_update_restores_previously_running_session(self):
+        source = (ROOT / "update.sh").read_text()
+        self.assertIn('data.get("state") == "RUNNING"', source)
+        self.assertIn('if (( was_running )); then', source)
+        self.assertIn('"$INSTALL_DIR/openhtpc" start', source)
+        self.assertIn('OPENHTPC relancé automatiquement', source)
+
     def test_12_fixture_is_bounded_and_never_copies_the_repository(self):
         tree = ast.parse(pathlib.Path(__file__).read_text())
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]

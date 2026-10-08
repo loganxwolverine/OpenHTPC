@@ -219,7 +219,7 @@ def test_deployment_consistency():
     products = re.search(r'readonly PRODUCT_FILES=\(([^)]*)\)', installer).group(1).split()
     assert manifest.count(name) == products.count(name) == 1
     assert 'for name in "${PRODUCT_FILES[@]}"; do install -m 0755 "$SCRIPT_DIR/$name" "$INSTALL_DIR/$name"; done' in installer
-    assert 'exec "$ROOT/install.sh" "$@"' in (ROOT / 'update.sh').read_text()
+    assert '"$ROOT/install.sh" "$@"' in (ROOT / 'update.sh').read_text()
     assert 'exec "$ROOT/payload/install-openhtpc-fedora.sh" "$@"' in (ROOT / 'install.sh').read_text()
 
 
