@@ -558,7 +558,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             "dev_tranche": dev_tranche,
             "product": "OPENHTPC",
             "sha256": sha,
-            "status": f"OPENHTPC_RC8_{workstream}_{dev_tranche}_READY_FOR_PHYSICAL_VALIDATION",
+            "status": f"OPENHTPC_{workstream}_{dev_tranche}_READY_FOR_PHYSICAL_VALIDATION",
             "tests": tests,
             "version": version,
             "workstream": workstream,
