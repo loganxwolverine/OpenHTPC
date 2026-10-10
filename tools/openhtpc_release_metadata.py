@@ -103,7 +103,11 @@ def validate_distribution_readme(text: str, version: str) -> None:
     base, separator, suffix = version.partition("-")
     display_version = f"{base} {suffix.upper()}" if separator else base
     headings = re.findall(r"(?m)^# OPENHTPC (.+)$", text)
-    if not headings or headings[0] != display_version:
+    active_heading = headings[0] if headings else ""
+    # Public releases may append a human codename after the canonical version
+    # (for example: "1.3.0 — Patina") without changing release identity.
+    valid_heading = active_heading == display_version or active_heading.startswith(display_version + " — ")
+    if not valid_heading:
         raise ValueError("RELEASE_README_ACTIVE_IDENTITY_MISMATCH")
     if f"Version: `{version}`" not in text:
         raise ValueError("RELEASE_README_CANONICAL_VERSION_MISSING")

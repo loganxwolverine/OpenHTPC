@@ -77,7 +77,7 @@ class GlobalDvdDetailRefresh(unittest.TestCase):
         (self.install / "openhtpc-playback-setting").chmod(0o755)
         config = self.home / ".config/openhtpc"; config.mkdir(parents=True)
         self.flex = config / "flex-v1.ini"
-        self.flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=MODE VIDÉO : CINÉMA AUTO;i;:submenu DVD_VIDEO_MODE\n[DVD_VIDEO_MODE]\nEntry1=PURE;i;set\n", encoding="utf-8")
+        self.flex.write_text("[DISQUE]\nEntry1=LIRE LE DVD;i;play\nEntry2=MODE VIDÉO : MAGNIFICENCE;i;:submenu DVD_VIDEO_MODE\n[DVD_VIDEO_MODE]\nEntry1=PURE;i;set\n", encoding="utf-8")
         self.env = {**os.environ, "HOME":str(self.home), "OPENHTPC_HOME":str(self.home), "OPENHTPC_INSTALL_DIR":str(self.install),
                     "OPENHTPC_SESSION_ENGINE":str(PAYLOAD / "openhtpc-session-engine.py")}
         self.env.pop("DISPLAY", None); self.env.pop("WAYLAND_DISPLAY", None)
@@ -94,7 +94,7 @@ class GlobalDvdDetailRefresh(unittest.TestCase):
 
     def test_dvd_shortcut_return_is_immediately_current(self):
         self.apply("PURE"); self.apply("CINEMA_AUTO")
-        self.assertIn("MODE VIDÉO : CINÉMA AUTO", self.flex.read_text(encoding="utf-8"))
+        self.assertIn("MODE VIDÉO : MAGNIFICENCE", self.flex.read_text(encoding="utf-8"))
 
     def test_flex_applyback_refreshes_cached_disc_from_system_parent(self):
         source = (ROOT / "vendor/flex-launcher/src/launcher.c").read_text(encoding="utf-8")

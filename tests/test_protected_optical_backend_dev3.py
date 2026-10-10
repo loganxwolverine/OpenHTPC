@@ -30,14 +30,16 @@ class Fixture(unittest.TestCase):
   return run
 
 class Backend(Fixture):
- def capture(self,mode):
+ def capture(self,mode,prepare_status="SUCCESS"):
   config=self.home/".config/openhtpc/user-config.json";config.parent.mkdir(parents=True,exist_ok=True)
   config.write_text(json.dumps({"audio_output_mode":mode}));seen=[]
   def run(command,**_kwargs):
    seen.extend(command);target=pathlib.Path(next(arg.split("=",1)[1] for arg in command if arg.startswith("--log-file=")))
    target.write_text("Video: libbluray fixture\nAudio: dts 6ch 48000 Hz\nSelected decoder: spdif_dts_hd\nAO: [pipewire] fixture\n")
    return type("Result",(),{"returncode":0})()
-  result=BACKEND.open_disc(self.home,{"device":"/dev/sr1","generation":9,"media_type":"BLURAY","protection":"PROTECTED","provider_status":"AVAILABLE"},runner=run,finder=lambda _name:"mpv",clock=iter((0.0,1.0)).__next__)
+  diag={"audio_sink_id":42,"audio_sink_name":"alsa_output.fixture.hdmi-stereo","audio_sink_profile":"hdmi-stereo","audio_sink_is_hdmi":True,"iec958_prepare_status":prepare_status,"iec958_prepare_reason":"TEST_FIXTURE"}
+  with mock.patch.object(BACKEND._POLICY_MODULE,"prepare_audio_target_bitstream",return_value=diag):
+   result=BACKEND.open_disc(self.home,{"device":"/dev/sr1","generation":9,"media_type":"BLURAY","protection":"PROTECTED","provider_status":"AVAILABLE"},runner=run,finder=lambda _name:"mpv",clock=iter((0.0,1.0)).__next__)
   return result,seen
  def test_bitstream_policy_reaches_protected_bluray_after_runtime_include(self):
   _result,command=self.capture("BITSTREAM");option="--audio-spdif=ac3,eac3,dts,dts-hd,truehd"
@@ -46,6 +48,11 @@ class Backend(Fixture):
   self.assertLess(command.index("--audio-channels=auto"),command.index(option));self.assertLess(command.index(option),command.index("--bluray-device=/dev/sr1"))
  def test_pcm_policy_keeps_protected_bluray_passthrough_disabled(self):
   _result,command=self.capture("PCM");self.assertIn("--audio-spdif=",command);self.assertNotIn("--audio-channels=auto",command)
+ def test_unproven_bitstream_falls_back_for_current_playback_only(self):
+  _result,command=self.capture("BITSTREAM",prepare_status="FAILED")
+  self.assertIn("--audio-spdif=",command);self.assertNotIn("--audio-spdif=ac3,eac3,dts,dts-hd,truehd",command)
+  diagnostic=json.loads((self.home/".local/state/openhtpc/protected-optical-last-command.json").read_text())
+  self.assertEqual(diagnostic["requested_audio_mode"],"BITSTREAM");self.assertEqual(diagnostic["argv"],command)
  def test_audio_track_selection_is_stable_between_output_modes(self):
   _bitstream,bitstream=self.capture("BITSTREAM");_pcm,pcm=self.capture("PCM")
   self.assertEqual([value for value in bitstream if value.startswith("--aid=")],["--aid=auto"])

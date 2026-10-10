@@ -1,0 +1,11 @@
+{
+  "observed_at_utc": "2026-10-09T10:56:00.902000+00:00",
+  "branch": "feature/magnificence-sd-auto",
+  "head": "6cdaef763c593215550c241e70e13c773ac799d0",
+  "version": "1.3.0",
+  "status": " M AGENTS.md\n M docs/OPENHTPC_AUTOPILOT.md\n M payload/openhtpc-media-manual-search-ui\n M payload/openhtpc-session-engine.py\n M payload/openhtpc-text-entry.py\n M tests/test_media_manual_search_ui.py\n M tests/test_media_match_ui.py\n M tests/test_media_movie_detail.py\n M tests/test_rc7_tracked_lifecycle.py\n M tests/test_update_runtime_regeneration_dev14.py\n M tools/autopilot/openhtpc_autopilot.py\n M tools/autopilot/tests/test_openhtpc_autopilot.py\n M update.sh\n M vendor/flex-launcher/src/platform/unix.c\n?? OPENHTPC-ROADMAP.md\n?? docs/OPENHTPC_HERMES_AUDITOR.md\n?? docs/continuity/\n?? tests/test_1_3_1_stabilization_lifecycle.py\n",
+  "stash": "stash@{0}: On feature/magnificence-sd-auto: pre-sync stale RTX experiment 2026-10-02\nstash@{1}: On feature/rc7-salon-ux: RC7 T5 network deferred\n",
+  "operator_note_sha256": "4a26fcfa5853724a22874099df8cf89d2bae9201065b3173fb70fa514911e936",
+  "validation": "Recorded operator evidence; tests not rerun in this capture",
+  "scope": "Observation only, not authorization"
+}

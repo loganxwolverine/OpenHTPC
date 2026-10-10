@@ -107,3 +107,14 @@ The first RC keeps GPU/output qualification static and simple. A later phase may
 - Visual qualification on `Alerte.mkv`: subtle smoothing, no coarse/plastic rendering at normal viewing distance.
 - DETAIL not retained on A310. Adaptive Sharpen 0.4, SSimSuperRes and isolated RCAS all produced a measurable finishing effect, but their GPU cost was disproportionate to the near-invisible benefit at approximately 2.5 m viewing distance.
 - Product rule: prefer natural image and healthy GPU reserve over maximum processing complexity.
+
+## RX 5700 XT HIGH revalidation — 2026-10-09
+
+- Validator: Core i7-7700 + Radeon RX 5700 XT (`1002:731f`), Fedora 44 / KDE Wayland, 3840×2160 output through Elgato HD60 X.
+- The exact HIGH recipe remains `FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance Mild`, with `BWDIF send_frame` on interlaced material.
+- A Patina 1.3.0 runtime inconsistency was confirmed: zero-copy `hwdec=vaapi` could not feed the software `lavfi` BWDIF stage, so mpv silently disabled the filter. The corrected exact profile adds `--hwdec=vaapi-copy`; the same Alerte MPEG-2 720×576 TFF source then built and ran the BWDIF graph successfully.
+- Technical smoke on `Alerte.mkv`: mpv RC=0; Radeon Vulkan render path and MPEG-2 VA-API copy decode observed; BWDIF active; GPU busy after startup averaged about 34.6%, p95 about 76%, max 77% during the short qualification passage.
+- Physical A/B validation by Steve: Magnificence was clearly more dynamic than PURE, with stronger perceived punch, saturation and contrast. At approximately 30 cm viewing distance, source noise, pixelation and MPEG artifacts were also more visible, but were explicitly accepted as source limitations rather than Magnificence regressions. At normal living-room distance, these source defects are expected to be less prominent.
+- Matching Elgato captures were also reviewed independently and showed a modest increase in perceived detail/dynamics without obvious recurring halos, plastic skin, crushed blacks or gross over-processing.
+- Result: RX 5700 XT HIGH visual profile **VALIDATED** with the corrected `vaapi-copy + BWDIF` path. This is a profile qualification result, not by itself a full OPENHTPC 1.3.1 release GO.
+- 2026-10-10 validator performance pass on the physical DVD at 00:14:20 (bright, detailed scene), using `OPENHTPC 1.3.1-rc1-validator`: 90 one-second samples, GPU busy average 38.1%, median 35%, p90 72.3%, p95 76.6%, maximum 80%; 10% of samples at or above 75%, none at or above 90%. VRAM stayed at about 1.34 GB; GPU temperature averaged 62.8 °C (64 °C max); board power averaged 78.2 W (140 W max). `vaapi-copy` and the BWDIF graph were both confirmed active in the real mpv log; decoder frame drops remained 0. This closes the RX 5700 XT performance-headroom question in favour of keeping the current HIGH recipe unchanged and preserving the remaining margin rather than adding another sharpening/upscaling stage.

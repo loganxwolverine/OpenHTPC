@@ -74,6 +74,16 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(M.select(snapshot(),30)[0],'ALREADY_MATCHED')
         self.assertEqual(M.select(snapshot(current='1'),23.976)[0],'ALREADY_MATCHED')
 
+    def test_pal_25_prefers_50hz_over_native_25hz(self):
+        status, target = M.select(snapshot((60, 25, 50)), 25)
+        self.assertEqual(status, 'MATCH_AVAILABLE')
+        self.assertEqual(target['refresh_hz'], 50)
+
+    def test_2997_prefers_5994_over_native_2997(self):
+        status, target = M.select(snapshot((60, 29.97, 59.94)), 29.97)
+        self.assertEqual(status, 'MATCH_AVAILABLE')
+        self.assertAlmostEqual(target['refresh_hz'], 59.94, places=2)
+
     def test_no_clean_match(self):
         self.assertEqual(M.select(snapshot((60,)),23.976)[0],'NO_CLEAN_MATCH')
 
@@ -236,7 +246,35 @@ class RefreshTests(unittest.TestCase):
     def test_shared_paths(self):
         self.assertIn('policy.play_mpv(home, command, media=media', (ROOT/'payload/openhtpc-play').read_text())
         self.assertIn('policy.play_mpv(home,command,runner=runner', (ROOT/'payload/openhtpc-protected-optical-backend.py').read_text())
-        self.assertIn('refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --)', (ROOT/'payload/openhtpc-play-dvd').read_text())
+        dvd_source = (ROOT/'payload/openhtpc-play-dvd').read_text()
+        self.assertIn('refresh_runner=(python3 \"$INSTALL/openhtpc-refresh-match.py\" --decision-json \"$policy_json\")', dvd_source)
+        self.assertIn('refresh_runner+=(--rate \"$dvd_cadence\")', dvd_source)
+
+    def test_dvd_launcher_forwards_lsdvd_cadence_to_refresh_matcher(self):
+        source = (ROOT / 'payload' / 'openhtpc-play-dvd').read_text(encoding='utf-8')
+        self.assertIn('physical_edition', source)
+        self.assertIn('get(\"video\",{}).get(\"fps\")', source)
+        self.assertIn('refresh_runner+=(--rate \"$dvd_cadence\")', source)
+
+    def test_cli_accepts_explicit_rate_for_optical_callers(self):
+        source = (ROOT / 'payload' / 'openhtpc-refresh-match.py').read_text(encoding='utf-8')
+        self.assertIn("parser.add_argument('--rate', type=float", source)
+        self.assertIn("run_playback(home, command, rate=args.rate", source)
+
+    def test_explicit_rate_is_consumed_by_matcher_not_forwarded_to_runner(self):
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = None
+        cm.__exit__.return_value = False
+        runner = mock.Mock(return_value=mock.Mock(returncode=0))
+        collector = mock.MagicMock()
+        collector.return_value.result.return_value = None
+        with mock.patch.object(M, 'matching', return_value=cm) as matching_mock, \
+             mock.patch.object(M, 'TelemetryCollector', collector):
+            result = M.run_playback(self.home, ['mpv', 'dvd://longest'], rate=25.0, runner=runner)
+        self.assertEqual(result.returncode, 0)
+        matching_mock.assert_called_once_with(self.home, None, rate=25.0, dispatch_id=None)
+        runner.assert_called_once()
+        self.assertNotIn('rate', runner.call_args.kwargs)
 
     def test_refresh_matching_label_flex_sync(self):
         setting_mod = module('openhtpc-playback-setting')

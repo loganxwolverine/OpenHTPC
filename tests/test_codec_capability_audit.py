@@ -61,6 +61,50 @@ class CodecCapabilityAuditTests(unittest.TestCase):
         self.assertFalse(observed["mpeg2"])
         self.assertEqual(value["playback_validation"]["last_test"]["video"]["status"], "pending")
 
+    def test_multi_gpu_machine_union_allows_distinct_per_gpu_truth(self):
+        intel = {"mpeg2": True, "h264": True, "hevc": True, "hevc_main10": True, "vp9": True, "av1": False}
+        amd = {"mpeg2": True, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
+        value = {
+            "media_stack": {"observed_capabilities": {"vaapi_decode": intel}},
+            "detected": {"gpu_details": [
+                {"pci_slot": "0000:00:02.0", "vaapi_decode": intel},
+                {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+            ]},
+            "gpu_topology": {
+                "display_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+                "processing_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+                "gpus": [
+                    {"pci_slot": "0000:00:02.0", "vaapi_decode": intel},
+                    {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+                ],
+            },
+        }
+        result = MODULE.consistency(value)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["contradictions"], [])
+
+    def test_multi_gpu_role_must_match_its_exact_pci_entry(self):
+        intel = {"mpeg2": True, "h264": True, "hevc": True, "hevc_main10": True, "vp9": True, "av1": False}
+        amd = {"mpeg2": True, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
+        value = {
+            "media_stack": {"observed_capabilities": {"vaapi_decode": intel}},
+            "detected": {"gpu_details": [
+                {"pci_slot": "0000:00:02.0", "vaapi_decode": intel},
+                {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+            ]},
+            "gpu_topology": {
+                "display_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": intel},
+                "processing_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+                "gpus": [
+                    {"pci_slot": "0000:00:02.0", "vaapi_decode": intel},
+                    {"pci_slot": "0000:03:00.0", "vaapi_decode": amd},
+                ],
+            },
+        }
+        result = MODULE.consistency(value)
+        self.assertEqual(result["status"], "CONTRADICTION")
+        self.assertIn("display_gpu", result["contradictions"])
+
     def test_boolean_cli_reports_consistent_true(self):
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "profile.json"

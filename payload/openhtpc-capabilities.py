@@ -788,6 +788,7 @@ def snapshot_path(home: pathlib.Path) -> pathlib.Path:
 
 PROFILE_CODEC_MAP = {
     "mpeg2": ("mpeg2",),
+    "vc1": ("vc1",),
     "h264": ("h264_8bit",),
     "hevc": ("hevc_main",),
     "hevc_main10": ("hevc_main10",),
@@ -796,8 +797,7 @@ PROFILE_CODEC_MAP = {
 }
 
 
-def profile_codec_observation(snapshot: dict[str, Any]) -> dict[str, bool]:
-    codecs = snapshot.get("video_decode", {}).get("codecs", {})
+def _profile_codec_observation_from_matrix(codecs: dict[str, Any]) -> dict[str, bool]:
     result = {}
     for profile_name, canonical_names in PROFILE_CODEC_MAP.items():
         entries = [codecs.get(name, {}) for name in canonical_names]
@@ -810,8 +810,30 @@ def profile_codec_observation(snapshot: dict[str, Any]) -> dict[str, bool]:
     return result
 
 
-def synchronize_profile_capabilities(profile: dict[str, Any], observation: dict[str, bool], observed_at: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Make media_stack current and synchronize existing topology mirrors."""
+def profile_codec_observation(snapshot: dict[str, Any]) -> dict[str, bool]:
+    codecs = snapshot.get("video_decode", {}).get("codecs", {})
+    return _profile_codec_observation_from_matrix(codecs)
+
+
+def profile_device_codec_observations(snapshot: dict[str, Any]) -> dict[str, dict[str, bool]]:
+    devices = snapshot.get("video_decode", {}).get("devices", {})
+    if not isinstance(devices, dict):
+        return {}
+    result: dict[str, dict[str, bool]] = {}
+    for raw_pci, codecs in devices.items():
+        pci = normalize_pci_address(str(raw_pci))
+        if pci and isinstance(codecs, dict):
+            result[pci] = _profile_codec_observation_from_matrix(codecs)
+    return result
+
+
+def synchronize_profile_capabilities(
+    profile: dict[str, Any],
+    observation: dict[str, bool],
+    observed_at: str,
+    per_gpu_observations: dict[str, dict[str, bool]] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Make media_stack current while keeping GPU mirrors bound to exact PCI evidence."""
     media = profile.get("media_stack") if isinstance(profile.get("media_stack"), dict) else {}
     previous_observed = media.get("observed_capabilities") if isinstance(media.get("observed_capabilities"), dict) else {}
     previous = previous_observed.get("vaapi_decode") if isinstance(previous_observed.get("vaapi_decode"), dict) else None
@@ -831,10 +853,19 @@ def synchronize_profile_capabilities(profile: dict[str, Any], observation: dict[
         media["capability_change_history"] = history[-20:]
     profile["media_stack"] = media
 
+    per_gpu = per_gpu_observations or {}
+
     def sync_mirrors(value: Any) -> None:
         if isinstance(value, dict):
             if isinstance(value.get("vaapi_decode"), dict):
-                value["vaapi_decode"] = observation.copy()
+                raw_pci = value.get("pci_slot") or value.get("pci_address")
+                pci = normalize_pci_address(str(raw_pci or ""))
+                if pci and pci in per_gpu:
+                    value["vaapi_decode"] = per_gpu[pci].copy()
+                elif not per_gpu:
+                    # Legacy/single-GPU snapshots without per-device evidence retain
+                    # the historical aggregate mirror behavior.
+                    value["vaapi_decode"] = observation.copy()
             for child in value.values():
                 sync_mirrors(child)
         elif isinstance(value, list):
@@ -878,7 +909,10 @@ def refresh(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_
             if not isinstance(loaded, dict):
                 raise ValueError("CAPABILITY_PROFILE_INVALID")
             profile, changes = synchronize_profile_capabilities(
-                loaded, profile_codec_observation(value), str(value.get("generated_at") or "UNKNOWN")
+                loaded,
+                profile_codec_observation(value),
+                str(value.get("generated_at") or "UNKNOWN"),
+                profile_device_codec_observations(value),
             )
         value.setdefault("confidence", {})["capability_changes"] = changes
         validate_snapshot(value)

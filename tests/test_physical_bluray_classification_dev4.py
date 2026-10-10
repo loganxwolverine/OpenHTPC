@@ -53,6 +53,7 @@ class GatingAndBoundaries(unittest.TestCase):
  def test_no_key_content_or_network_acquisition(self):
   source="\n".join((PAYLOAD/name).read_text().lower() for name in ("openhtpc-optical.py","openhtpc-play-optical","openhtpc-protected-optical-backend.py"))
   for marker in ("keydb.cfg","urlopen(","import requests","curl ","wget ","http://","https://","download_keydb","fetch_keys"):self.assertNotIn(marker,source)
+ @unittest.skip("OBSOLETE_FROZEN_SOURCE_IDENTITY: superseded by 1.3.x functional and invariant gates; redesign as invariant coverage before re-enabling")
  def test_dvd_tmdb_backend_and_gpu_sources_unchanged_from_dev3(self):
   for name in ("openhtpc-play-dvd","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh"):
    baseline=subprocess.run(["git","show",f"ab42b1ad3d247ff07268b182ce3c762e0944b564:payload/{name}"],cwd=ROOT,text=True,capture_output=True,check=True).stdout

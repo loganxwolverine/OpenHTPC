@@ -674,7 +674,7 @@ class TestRc7SystemModelRuntimeGpu(unittest.TestCase):
         codecs_by_key = {item["key"]: item for item in model["codecs"]}
 
         # G. Arc fixture: VC1=false, AV1=true, HEVC10=true => UI shows Arc values only
-        self.assertEqual(codecs_by_key["vc1"]["hardware"], "Non pris en charge")
+        self.assertEqual(codecs_by_key["vc1"]["hardware"], "Indisponible via VA-API")
         self.assertEqual(codecs_by_key["av1_main"]["hardware"], "Pris en charge")
         self.assertEqual(codecs_by_key["hevc_main10"]["hardware"], "Pris en charge")
 

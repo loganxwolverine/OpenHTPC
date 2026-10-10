@@ -660,7 +660,7 @@ def _build_movie_detail_section(
     ]
     if background_image is not None:
         lines.append(f"BackgroundImage={background_image}")
-    play_cmd = f"$HOME/.local/lib/openhtpc/openhtpc-play {token}"
+    play_cmd = f":tracked $HOME/.local/lib/openhtpc/openhtpc-play {token}"
 
     # Determine presentation validity
     is_unmatched = (ident is None) or (ident.get("work_id") is None) or (ident.get("identification_state") == "UNMATCHED")
@@ -1616,6 +1616,56 @@ def flex_cjk_fallback_font() -> pathlib.Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
+SYSTEM_PAGE_KEYS = (
+    "overview", "codecs", "display", "audio", "media_optical", "metadata",
+    "tmdb", "processing", "playback", "diagnostics", "technical", "about",
+)
+
+
+def render_system_pages(home: pathlib.Path, install: pathlib.Path, ui_module=None) -> tuple[dict, pathlib.Path, dict]:
+    """Render the System views from current runtime truth.
+
+    This is intentionally separate from Flex configuration publication so the
+    home controller can refresh bootstrap health after the authoritative Flex
+    PID has been persisted, without rewriting the live menu configuration.
+    """
+    system_pages = {name: home / f".cache/openhtpc/system-{name}.png" for name in SYSTEM_PAGE_KEYS}
+    dashboard = home / ".cache/openhtpc/system-dashboard.png"
+    system_model = {}
+    system_page = install / "openhtpc-system-page"
+    if not system_page.is_file():
+        return system_pages, dashboard, system_model
+
+    loader = importlib.machinery.SourceFileLoader("openhtpc_system_live", str(system_page))
+    spec = importlib.util.spec_from_loader("openhtpc_system_live", loader)
+    system_live = importlib.util.module_from_spec(spec)
+    loader.exec_module(system_live)
+    system_model = system_live.status_model(home, install)
+
+    management_path = install / "openhtpc-tmdb-management.py"
+    if management_path.is_file():
+        loader = importlib.machinery.SourceFileLoader("openhtpc_tmdb_management_ui", str(management_path))
+        management_spec = importlib.util.spec_from_loader("openhtpc_tmdb_management_ui", loader)
+        management = importlib.util.module_from_spec(management_spec)
+        loader.exec_module(management)
+        system_model["tmdb_management"] = management.status(home)
+
+    ui = ui_module
+    if ui is None:
+        ui_path = install / "openhtpc-ui.py"
+        if not ui_path.is_file():
+            ui_path = pathlib.Path(__file__).with_name("openhtpc-ui.py")
+        ui_spec = importlib.util.spec_from_file_location("openhtpc_system_ui", ui_path)
+        ui = importlib.util.module_from_spec(ui_spec)
+        ui_spec.loader.exec_module(ui)
+
+    font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
+    ui.system_page_png(system_model, dashboard, font, "root")
+    for key in SYSTEM_PAGE_KEYS:
+        ui.system_page_png(system_model, system_pages[key], font, key)
+    return system_pages, dashboard, system_model
+
+
 def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pathlib.Path], install: pathlib.Path | None = None, expected_optical_generation: int | None = None, media_generation: str | None = None) -> bool:
     install = install or pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     font = install / "flex/assets/fonts/OpenSans-Regular.ttf"
@@ -1674,26 +1724,7 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
     ui = importlib.util.module_from_spec(ui_spec); ui_spec.loader.exec_module(ui)
     state_hash = hashlib.sha256(json.dumps(optical, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
     ui_generation_id = ui.generation_id(optical)
-    system_page_keys = ("overview", "codecs", "display", "audio", "media_optical", "metadata", "tmdb", "processing", "playback", "diagnostics", "technical", "about")
-    system_pages = {name: home / f".cache/openhtpc/system-{name}.png" for name in system_page_keys}
-    dashboard = home / ".cache/openhtpc/system-dashboard.png"
-    system_model = {}
-    system_page = install / "openhtpc-system-page"
-    if system_page.is_file():
-        loader = importlib.machinery.SourceFileLoader("openhtpc_system_live", str(system_page))
-        spec = importlib.util.spec_from_loader("openhtpc_system_live", loader)
-        system_live = importlib.util.module_from_spec(spec)
-        loader.exec_module(system_live)
-        system_model = system_live.status_model(home, install)
-        management_path = install / "openhtpc-tmdb-management.py"
-        if management_path.is_file():
-            loader = importlib.machinery.SourceFileLoader("openhtpc_tmdb_management_ui", str(management_path))
-            management_spec = importlib.util.spec_from_loader("openhtpc_tmdb_management_ui", loader)
-            management = importlib.util.module_from_spec(management_spec); loader.exec_module(management)
-            system_model["tmdb_management"] = management.status(home)
-        ui.system_page_png(system_model, dashboard, font, "root")
-        for key in system_page_keys:
-            ui.system_page_png(system_model, system_pages[key], font, key)
+    system_pages, dashboard, system_model = render_system_pages(home, install, ui)
     sys_ui_dir = install / "assets/ui"
     root_ui_dir = pathlib.Path(__file__).resolve().parent / "assets/ui"
 

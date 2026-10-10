@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.3.0"
+readonly OPENHTPC_VERSION="1.3.1"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,7 +103,7 @@ preflight_updates() {
 }
 
 collect_media_stack() {
-    local output_file=$1 render_node one_file
+    local output_file=$1 render_node one_file vendor_file vendor
     : >"$output_file"
 
     command -v vainfo >/dev/null 2>&1 || return 0
@@ -111,12 +111,35 @@ collect_media_stack() {
         [[ -c $render_node ]] || continue
         one_file="$TEMP_DIR/vainfo-$(basename "$render_node").txt"
         printf '[%s]\n' "$render_node" >>"$output_file"
+        vendor_file="/sys/class/drm/$(basename "$render_node")/device/vendor"
+        vendor=""
+        [[ -r $vendor_file ]] && vendor="$(<"$vendor_file")"
+        printf 'OPENHTPC_VENDOR=%s\n' "${vendor,,}" >>"$output_file"
         if vainfo --display drm --device "$render_node" >"$one_file" 2>&1; then
             grep -E 'Driver version|VAProfile' "$one_file" >>"$output_file" || true
         else
             printf 'test VA-API échoué ou accès refusé\n' >>"$output_file"
         fi
     done < <(find /dev/dri -maxdepth 1 -type c -name 'renderD*' -print 2>/dev/null | sort)
+}
+
+read_vendor_media_capabilities() {
+    local input_file=$1 prefix=$2 vendor=$3 block marker
+    marker="OPENHTPC_VENDOR=${vendor,,}"
+    block="$(awk -v marker="$marker" '
+        /^\[/ { active=0 }
+        $0 == marker { active=1; next }
+        active { print }
+    ' "$input_file")"
+    printf -v "${prefix}_VA_OBSERVED" '%s' false
+    printf -v "${prefix}_VA_H264" '%s' false
+    printf -v "${prefix}_VA_HEVC" '%s' false
+    printf -v "${prefix}_VA_HEVC10" '%s' false
+    grep -Fxq "$marker" "$input_file" && printf -v "${prefix}_VA_OBSERVED" '%s' true
+    grep -Eq 'VAProfileH264.*VAEntrypointVLD' <<<"$block" && printf -v "${prefix}_VA_H264" '%s' true
+    grep -Eq 'VAProfileHEVCMain[[:space:]]*:.*VAEntrypointVLD' <<<"$block" && printf -v "${prefix}_VA_HEVC" '%s' true
+    grep -Eq 'VAProfileHEVCMain10.*VAEntrypointVLD' <<<"$block" && printf -v "${prefix}_VA_HEVC10" '%s' true
+    return 0
 }
 
 read_media_capabilities() {
@@ -128,6 +151,8 @@ read_media_capabilities() {
     grep -Eq 'VAProfileHEVCMain10.*VAEntrypointVLD' "$input_file" && VA_HEVC10=true
     grep -Eq 'VAProfileVP9.*VAEntrypointVLD' "$input_file" && VA_VP9=true
     grep -Eq 'VAProfileAV1.*VAEntrypointVLD' "$input_file" && VA_AV1=true
+    read_vendor_media_capabilities "$input_file" AMD 0x1002
+    read_vendor_media_capabilities "$input_file" INTEL 0x8086
 
     FFMPEG_H264=false FFMPEG_HEVC=false FFMPEG_AV1=false
     if command -v ffmpeg >/dev/null 2>&1; then
@@ -137,6 +162,13 @@ read_media_capabilities() {
         grep -Eq '[[:space:]]av1[[:space:]]' <<<"$ffmpeg_decoders" && FFMPEG_AV1=true
     fi
     return 0
+}
+
+media_extension_required() {
+    $amd_gpu_present && { ! $AMD_VA_OBSERVED || ! $AMD_VA_H264 || ! $AMD_VA_HEVC || ! $AMD_VA_HEVC10; } && return 0
+    $intel_gpu_present && { ! $INTEL_VA_OBSERVED || ! $INTEL_VA_H264 || ! $INTEL_VA_HEVC || ! $INTEL_VA_HEVC10; } && return 0
+    { ! $FFMPEG_H264 || ! $FFMPEG_HEVC; } && return 0
+    return 1
 }
 
 mark() {
@@ -213,20 +245,9 @@ if changes:
     media["capability_change_history"] = history[-20:]
 profile["media_stack"] = media
 
-def sync_vaapi_mirrors(value):
-    """Synchronize existing topology compatibility mirrors without probing."""
-    if isinstance(value, dict):
-        if isinstance(value.get("vaapi_decode"), dict):
-            value["vaapi_decode"] = current_vaapi.copy()
-        for child in value.values():
-            sync_vaapi_mirrors(child)
-    elif isinstance(value, list):
-        for child in value:
-            sync_vaapi_mirrors(child)
-
-topology = profile.get("gpu_topology")
-if isinstance(topology, dict):
-    sync_vaapi_mirrors(topology)
+# media_stack is the machine-wide union. Per-GPU topology mirrors are owned by
+# the render-node-aware Builder/capabilities probe and must not be overwritten
+# from this aggregate installer observation on multi-GPU systems.
 fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
 try:
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -247,11 +268,11 @@ install_multimedia_extension() {
     local fedora_release answer
     local -a release_urls=() media_packages=() unavailable_packages=()
 
-    if $amd_gpu_present && { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10; } &&
+    if $amd_gpu_present && { ! $AMD_VA_OBSERVED || ! $AMD_VA_H264 || ! $AMD_VA_HEVC || ! $AMD_VA_HEVC10; } &&
        ! rpm -q mesa-va-drivers-freeworld >/dev/null 2>&1; then
         media_packages+=(mesa-va-drivers-freeworld)
     fi
-    if $intel_gpu_present && { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10; } &&
+    if $intel_gpu_present && { ! $INTEL_VA_OBSERVED || ! $INTEL_VA_H264 || ! $INTEL_VA_HEVC || ! $INTEL_VA_HEVC10; } &&
        ! rpm -q intel-media-driver >/dev/null 2>&1; then
         media_packages+=(intel-media-driver)
     fi
@@ -326,7 +347,7 @@ install_multimedia_extension() {
 [[ -r /etc/os-release ]] || die "/etc/os-release est introuvable."
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC 1.3.0 prend uniquement en charge Fedora 44 KDE."
+[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC 1.3.1 prend uniquement en charge Fedora 44 KDE."
 command -v rpm >/dev/null 2>&1 || die "La commande rpm est requise."
 
 if ! rpm -q plasma-workspace >/dev/null 2>&1 &&
@@ -357,7 +378,7 @@ fi
 [[ -x $SOURCE_DVD_DEPENDENCIES ]] || die "Le détecteur de dépendances DVD est absent."
 [[ -x $SOURCE_FEDORA_DEPENDENCIES ]] || die "Le vérificateur de dépendances Fedora est absent."
 [[ -x $SOURCE_DNF_TRANSACTION ]] || die "Le constructeur de transaction DNF est absent."
-[[ -r $SCRIPT_DIR/VERSION && -r $SCRIPT_DIR/plugins/README.md ]] || die "Les métadonnées produit 1.3.0 sont incomplètes."
+[[ -r $SCRIPT_DIR/VERSION && -r $SCRIPT_DIR/plugins/README.md ]] || die "Les métadonnées produit 1.3.1 sont incomplètes."
 for name in "${PRODUCT_FILES[@]}"; do [[ -r $SCRIPT_DIR/$name ]] || die "Composant produit absent : $name"; done
 [[ -x $SCRIPT_DIR/openhtpc-tmdb-recovery ]] || die "Le contrôleur de récupération TMDb est absent."
 log "Fedora ${VERSION_ID:-inconnue}, KDE Plasma détecté."
@@ -534,9 +555,12 @@ collect_media_stack "$MEDIA_FILE"
 read_media_capabilities "$MEDIA_FILE"
 show_media_stack "Media Stack actuellement observée"
 
-if [[ ${OPENHTPC_UPDATE_MODE:-0} != 1 ]] && { $intel_gpu_present || $amd_gpu_present; } &&
-   { ! $VA_H264 || ! $VA_HEVC || ! $VA_HEVC10 || ! $FFMPEG_H264 || ! $FFMPEG_HEVC; }; then
-    install_multimedia_extension
+if { $intel_gpu_present || $amd_gpu_present; } && media_extension_required; then
+    if [[ ${OPENHTPC_UPDATE_MODE:-0} == 1 ]]; then
+        log "Complément multimédia requis pour au moins un GPU ; installation différée au mode interactif."
+    else
+        install_multimedia_extension
+    fi
 fi
 
 if $DRY_RUN; then

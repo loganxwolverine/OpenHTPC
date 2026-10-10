@@ -4,12 +4,43 @@ from __future__ import annotations
 import argparse, hashlib, importlib.util, json, os, pathlib, re, textwrap
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
-VERSION="cinematic-v2"
+VERSION="cinematic-v3"
 def load(path,name):
  spec=importlib.util.spec_from_file_location(name,path); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 optical_model=load(pathlib.Path(__file__).with_name("openhtpc-optical.py"),"disc_view_optical_presentation")
 def safe_text(value,default=""):
  return str(value).replace("\x00","").strip() if value not in (None,"",[],{}) else default
+
+CJK_FALLBACK_CANDIDATES=(
+ pathlib.Path("/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc"),
+ pathlib.Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
+ pathlib.Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+)
+def cjk_fallback_font():
+ return next((path for path in CJK_FALLBACK_CANDIDATES if path.is_file()),None)
+def _needs_cjk_fallback(ch):
+ cp=ord(ch)
+ return (0x2E80<=cp<=0x303F or 0x3040<=cp<=0x30FF or 0x3100<=cp<=0x318F or
+         0x31A0<=cp<=0x31BF or 0x31F0<=cp<=0x31FF or 0x3400<=cp<=0x4DBF or
+         0x4E00<=cp<=0x9FFF or 0xF900<=cp<=0xFAFF or 0x1100<=cp<=0x11FF or
+         0x3130<=cp<=0x318F or 0xA960<=cp<=0xA97F or 0xAC00<=cp<=0xD7AF or
+         0xD7B0<=cp<=0xD7FF or 0xFF00<=cp<=0xFFEF or 0x20000<=cp<=0x2FA1F)
+def text_runs(value):
+ text=safe_text(value)
+ if not text:return []
+ runs=[];start=0;fallback=_needs_cjk_fallback(text[0])
+ for i,ch in enumerate(text[1:],1):
+  current=_needs_cjk_fallback(ch)
+  if current!=fallback:
+   runs.append((text[start:i],fallback));start=i;fallback=current
+ runs.append((text[start:],fallback));return runs
+def draw_text_fallback(draw,xy,value,primary,fallback=None,fill="#f0f5fa"):
+ x,y=xy
+ for segment,use_fallback in text_runs(value):
+  active=fallback if use_fallback and fallback is not None else primary
+  draw.text((x,y),segment,font=active,fill=fill)
+  x+=draw.textlength(segment,font=active)
+ return x
 def duration_text(value):
  if value in (None,"",[],{}): return ""
  if isinstance(value,(int,float)):
@@ -263,7 +294,10 @@ def _render_physical_edition(d, phys, font, y_start, x=585, max_y=858):
 
 def render(home,install,state,metadata,target):
  font_path=install/"flex/assets/fonts/OpenSans-Regular.ttf"
+ fallback_path=cjk_fallback_font()
  def font(n): return ImageFont.truetype(str(font_path),n)
+ def fallback_font(n): return ImageFont.truetype(str(fallback_path),n) if fallback_path else None
+ def dynamic_text(xy,value,size,fill): return draw_text_fallback(d,xy,value,font(size),fallback_font(size),fill)
  wallpaper=install/"assets/branding/openhtpc-wallpaper.png"
  poster_path=committed_poster(metadata)
  allowed_artwork=(home/".cache/openhtpc/tmdb",home/".local/share/openhtpc/media-cache")
@@ -297,7 +331,7 @@ def render(home,install,state,metadata,target):
  d.text((82,55),"OPENHTPC",font=font(36),fill="#f5f8ff")
  title_size=68 if len(title)<=30 else 56 if len(title)<=52 else 46
  title_lines=wrapped(title,34 if title_size>55 else 44,2)
- for i,line in enumerate(title_lines): d.text((585,150+i*(title_size+5)),line,font=font(title_size),fill="#ffffff")
+ for i,line in enumerate(title_lines): dynamic_text((585,150+i*(title_size+5)),line,title_size,"#ffffff")
  y=150+len(title_lines)*(title_size+5)+12
  # Textual fallback badge remains attached to the poster when no logo exists.
  if not logo_drawn:
@@ -311,9 +345,9 @@ def render(home,install,state,metadata,target):
  if local_duration or tmdb_duration: bits.append(local_duration or tmdb_duration)
  if bits: d.text((585,y+3),"  •  ".join(bits),font=font(27),fill="#8ee7ff")
  y+=50; genres=(metadata.get("genres") or []) if is_committed else []
- if genres: d.text((585,y)," • ".join(map(str,genres[:4])),font=font(26),fill="#dceaf5"); y+=46
+ if genres: dynamic_text((585,y)," • ".join(map(str,genres[:4])),26,"#dceaf5"); y+=46
  tagline=safe_text(metadata.get("tagline")) if is_committed else ""
- if tagline: d.text((585,y),tagline,font=font(26),fill="#ffba69"); y+=54
+ if tagline: dynamic_text((585,y),tagline,26,"#ffba69"); y+=54
  overview=safe_text(metadata.get("overview")) if is_committed else ""
  has_token=(home/".config/openhtpc/secrets/tmdb-token").is_file()
  playback_note=("La lecture locale reste disponible." if state.get("playable") is True else "La lecture de ce disque n'est pas disponible.")
@@ -346,13 +380,13 @@ def render(home,install,state,metadata,target):
             "La fiche optique est prête. L'enrichissement TMDb reste facultatif. "+playback_note)
  d.text((585,y),section,font=font(24),fill="#22c7ff"); y+=36
  if status=="AMBIGUOUS":
-  d.text((585,y),overview,font=font(20),fill="#dceaf5"); y+=32
+  dynamic_text((585,y),overview,20,"#dceaf5"); y+=32
  else:
-  for line in wrapped(overview,72,5): d.text((585,y),line,font=font(25),fill="#edf4fa"); y+=34
+  for line in wrapped(overview,72,5): dynamic_text((585,y),line,25,"#edf4fa"); y+=34
  y=max(y+16,630)
  credits=[("RÉALISATION",metadata.get("director")),("SCÉNARIO",", ".join(metadata.get("writers") or [])),("AVEC",", ".join((metadata.get("cast") or [])[:4]))] if is_committed else []
  for label,value in credits:
-  if value and y+34<=790: d.text((585,y),label,font=font(19),fill="#84dfff"); d.text((760,y),safe_text(value),font=font(21),fill="#f0f5fa"); y+=34
+  if value and y+34<=790: d.text((585,y),label,font=font(19),fill="#84dfff"); dynamic_text((760,y),safe_text(value),21,"#f0f5fa"); y+=34
  # Physical edition block — rendered from lsdvd data embedded in optical state
  phys=state.get("physical_edition")
  y=_render_physical_edition(d,phys,font,y+10,x=585,max_y=858)

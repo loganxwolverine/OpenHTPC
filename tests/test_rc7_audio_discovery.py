@@ -61,7 +61,7 @@ def test_single_hdmi_suggestion_only_interactive():
     ('alsa_output.pci.analog-stereo', {}, 'ANALOG'),
     ('alsa_output.usb-headset.analog-stereo', {'device.bus': 'usb'}, 'USB'),
     ('bluez_output.headset', {'device.api': 'bluez5'}, 'BLUETOOTH'),
-    ('alsa_output.pci.iec958-stereo', {}, 'UNKNOWN'),
+    ('alsa_output.pci.iec958-stereo', {}, 'SPDIF'),
 ])
 def test_non_hdmi(name, props, kind):
     rows = discover(sink(name=name, **props))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import fcntl
 import argparse
 import hashlib
 import importlib.util
@@ -226,7 +227,8 @@ def record_capability_validation(home:pathlib.Path,install:pathlib.Path,media:pa
 
 def flex_instances(install:pathlib.Path)->tuple[int,list[int]]:
     try:
-        result=subprocess.run(["pgrep","-f",f"^{re.escape(str(install/'flex/bin/flex-launcher'))}(?: |$)"],text=True,capture_output=True,timeout=2,check=False)
+        # pgrep accepts POSIX ERE, not Python's non-capturing ``(?:...)``.
+        result=subprocess.run(["pgrep","-f",f"^{re.escape(str(install/'flex/bin/flex-launcher'))}( |$)"],text=True,capture_output=True,timeout=2,check=False)
         pids=[int(value) for value in result.stdout.split() if value.isdigit()]
     except (OSError,subprocess.TimeoutExpired,ValueError):pids=[]
     return len(pids),pids
@@ -301,6 +303,18 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
         notify("Le fichier média est indisponible ou n'appartient plus à une source configurée.")
+        return return_to_ui(home, install)
+
+    playback_lock_path = home / ".local/state/openhtpc/playback-active.lock"
+    playback_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    playback_lock = playback_lock_path.open("a+")
+    try:
+        fcntl.flock(playback_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        playback_lock.close()
+        append_event(log, kind="local", process_started=False, error_class="PLAYBACK_ALREADY_ACTIVE")
+        update_action_state(home, process_started=False, error_class="PLAYBACK_ALREADY_ACTIVE")
+        notify("Une autre lecture ou une mise à jour OPENHTPC est déjà en cours.")
         return return_to_ui(home, install)
 
     policy_path = install / "openhtpc-playback-policy.py"
@@ -445,6 +459,10 @@ def main(argv: list[str] | None = None) -> int:
     runtime_event(home,install, "PLAYBACK_END")
     if error_class != "NONE":
         notify("Impossible d'ouvrir ce média. Les diagnostics de lecture ont été enregistrés.")
+    try:
+        fcntl.flock(playback_lock.fileno(), fcntl.LOCK_UN)
+    finally:
+        playback_lock.close()
     return return_to_ui(home, install)
 
 

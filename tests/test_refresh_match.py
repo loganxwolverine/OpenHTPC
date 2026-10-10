@@ -293,5 +293,19 @@ class TestRefreshModesetSettling(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 2.0)
 
 
+    def test_18_cli_forwards_resolved_decision_to_post_modeset_audio_stage(self):
+        decision = {'audio_output': {'requested': 'BITSTREAM'}, 'audio_target': {'configured': 'SYSTEM'}}
+        completed = mock.Mock(returncode=0)
+        with mock.patch.object(sys, 'argv', ['openhtpc-refresh-match.py', '--rate', '25', '--decision-json', json.dumps(decision), '--', 'mpv', 'dvd://longest']), \
+             mock.patch.object(M, 'run_playback', return_value=completed) as run_playback:
+            rc = M.main()
+        self.assertEqual(rc, 0)
+        args, kwargs = run_playback.call_args
+        self.assertEqual(args[1], ['mpv', 'dvd://longest'])
+        self.assertEqual(kwargs['rate'], 25.0)
+        self.assertEqual(kwargs['decision'], decision)
+
+
+
 if __name__ == '__main__':
     unittest.main()

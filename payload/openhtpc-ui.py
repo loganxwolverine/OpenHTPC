@@ -423,7 +423,7 @@ def system_page_png(
             yy = y + 154 + index * 66
             txt((x + 34, yy), item["name"], 23, "#f7fbff", True, 650)
             status = item.get("hardware") or "Non déterminé"
-            status_color = "#78d9ae" if status == "Pris en charge" else "#ffad42" if status == "Non pris en charge" else "#a9bdd1"
+            status_color = "#78d9ae" if status == "Pris en charge" else "#ffad42" if status.startswith("Indisponible") else "#a9bdd1"
             txt((x + 760, yy), status, 21, status_color, True, 360)
             backend = item.get("backend")
             if backend and backend != "Indéterminé":
@@ -456,29 +456,23 @@ def system_page_png(
             (960, 510, 890, 340),
             "ENVIRONNEMENT D'AFFICHAGE",
             [
-                ("Gestionnaire de session", d.get("session", "Non déterminé"), None),
-                ("Résolveur de capacités", d.get("resolver", "Non déterminé"), None),
-                ("Mode de rafraîchissement", d.get("auto_refresh") if d.get("auto_refresh") in ("Automatique", "Désactivé") else "Non déterminé", None),
+                ("Session graphique", d.get("session", "Non déterminé"), None),
+                ("Détection écran", d.get("resolver", "Non déterminé"), None),
+                ("Adaptation de fréquence", d.get("auto_refresh") if d.get("auto_refresh") in ("Automatique", "Désactivé") else "Non déterminé", None),
             ],
         )
     elif page == "audio":
         a = model.get("audio_section") or model.get("audio_media") or {}
         configured_label = a.get("configured_label") or a.get("audio_output") or "Sortie système — Fedora"
-        state_label = a.get("state_label", "Disponible")
-        state_color = "#78d9ae" if state_label == "Disponible" else "#ffad42"
-        effective_label = a.get("effective_label") or configured_label
+        active_label = a.get("active_label") or a.get("effective_label") or configured_label
         rows_output = [
-            ("Sortie configurée", configured_label, None),
-            ("État", state_label, state_color),
-        ]
-        if a.get("is_fallback"):
-            rows_output.append(("Cible effective", effective_label, "#ffad42"))
-        else:
-            rows_output.append(("Cible effective", effective_label, None))
-        rows_output.extend([
+            ("Sortie active", active_label, None),
+            ("Connexion", a.get("active_connection") or a.get("connection") or "Indéterminé", None),
+            ("Routage", a.get("routing_label") or "Sortie système Fedora", None),
             ("Serveur audio", a.get("audio_backend") or "PipeWire", None),
-            ("Type de connexion", a.get("connection") or "Indéterminé", None),
-        ])
+        ]
+        if a.get("offline_preference"):
+            rows_output.append(("Préférence hors ligne", a["offline_preference"], "#ffad42"))
         card(
             (70, 170, 860, 680),
             "SORTIE AUDIO",
@@ -489,8 +483,8 @@ def system_page_png(
             "MODE AUDIO & CONFIGURATION",
             [
                 ("Mode audio", a.get("requested_mode", "PCM"), None),
-                ("Passthrough numérique", a.get("passthrough", "Inactif"), None),
-                ("Récepteur", a.get("receiver"), None),
+                ("Passthrough (dernière lecture)", a.get("passthrough", "Inactif"), None),
+                ("Récepteur actif", a.get("receiver"), None),
                 ("Contrôle du volume", "Géré par PipeWire", None),
                 ("Gestionnaire de flux", "PipeWire / WirePlumber", None),
             ],

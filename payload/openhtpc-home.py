@@ -181,6 +181,23 @@ if runtime:
     session.update(authoritative_flex_pid=proc.pid, ui_generation=engine.menu_identity(target), session_id=os.environ.get("OPENHTPC_SESSION_ID", session.get("session_id", "unknown")))
     runtime.atomic_json(runtime.paths(home)["session"], session)
 
+try:
+    flex_observed = runtime is None
+    deadline = time.monotonic() + 2.0
+    while runtime and proc.poll() is None and time.monotonic() < deadline:
+        if proc.pid in runtime.managed_processes(home, install)["ui"]:
+            flex_observed = True
+            break
+        time.sleep(0.02)
+    engine.render_system_pages(home, install)
+    if runtime:
+        runtime.log(home, "ui", "SYSTEM_PAGES_POST_START_REFRESHED", authoritative_flex_pid=proc.pid, flex_observed=flex_observed)
+except Exception as exc:
+    # Flex is already the authoritative UI. A diagnostic image refresh must
+    # never orphan it or turn a successful session start into a crash loop.
+    if runtime:
+        runtime.log(home, "ui", "SYSTEM_PAGES_POST_START_REFRESH_FAILED", authoritative_flex_pid=proc.pid, error_type=type(exc).__name__)
+
 start_enrichment()
 if runtime:
     runtime.log(home, "ui", "FLEX_STARTED", ui_instance_identity=f"flex-{proc.pid}", authoritative_flex_pid=proc.pid, session_id=os.environ.get("OPENHTPC_SESSION_ID", "unknown"), start_reason="SESSION_START", caller_component="home-controller", caller_pid=os.getpid(), optical_generation=optical_state().get("generation", 0), menu_generation=engine.menu_identity(target), current_optical_state=optical_state().get("state"))

@@ -27,6 +27,8 @@ Authority precedence is:
 
 Canonical project state never overrides code truth.
 
+If `OPENHTPC_CURRENT_STATE.json` is incompatible with the checked-out HEAD, release identity, active workstream, or its own schema only represents a superseded workstream, classify it as `STALE`. A stale state file is historical evidence only: it MUST NOT authorize implementation, deployment, release, or physical actions. Report the mismatch and use code/tests/artifacts plus current qualification documents until the state schema is deliberately modernized.
+
 
 ## Platform
 
@@ -55,6 +57,21 @@ When invoked by OPENHTPC Autopilot:
 - return the required structured report
 - stop on any safety or policy ambiguity
 
+
+## External read-only reviewer — Hermes / DeepSeek
+
+Hermes is an external contradictory reviewer, not an implementation authority.
+
+For OPENHTPC audits Hermes MUST:
+- receive an isolated snapshot whose provenance records the verified branch, HEAD and dirty worktree;
+- run without `.git` authority and without credentials for the canonical Fedora/Unraid hosts;
+- have project files technically read-only; prompt-only restrictions are insufficient;
+- use only explicitly bounded toolsets for the mission;
+- distinguish FACT from HYPOTHESIS and cite file paths plus line ranges;
+- never commit, merge, deploy, restart OPENHTPC, operate physical validators, or alter the canonical worktree;
+- return a report for human/agent comparison before any development task is delegated.
+
+Hermes does not replace AGY planning/review, Codex execution, CodeGraph architecture mapping, Autopilot policy, tests, or physical qualification. Its detailed operating procedure is documented in `docs/OPENHTPC_HERMES_AUDITOR.md`.
 
 ## Evidence vocabulary
 
@@ -857,3 +874,36 @@ stash state
 
 When something is uncertain:
 report NOT_PROVEN.
+
+
+## Global roadmap maintenance
+
+`OPENHTPC-ROADMAP.md` is the human-readable global progress index.
+For every accepted milestone, priority change, decision, qualification result,
+or newly established limitation, the implementation/documentation owner MUST
+update its affected row, last-updated date, and dated evolution journal in the
+same work batch. Link the actual code/test/artifact/qualification evidence.
+Distinguish proposed, implemented, software-verified, physically-qualified,
+and published. Do not invent dates or promote evidence.
+Keep specialized roadmaps aligned when relevant. Report divergence with
+`OPENHTPC_CURRENT_STATE.json`; do not silently rewrite its gates or approved
+actions. Roadmap entries never authorize implementation, commit, deployment
+or publication. Hermes remains read-only and supplies findings to the operator.
+
+
+## Mandatory cross-conversation continuity
+
+At the start of every OPENHTPC task, before choosing an action, read
+`docs/OPENHTPC_CONTINUITY.md`, `OPENHTPC-ROADMAP.md`, and the latest checkpoint
+referenced there. Verify freshness against actual HEAD, worktree, VERSION and
+evidence. Read the local `.git/OPENHTPC_STATE.md` when available and consolidate
+newer operator facts into shared docs before a handoff. State discrepancies;
+never silently reconstruct project state from conversation memory.
+
+At each milestone and before final reporting/handoff, preserve new decisions,
+rejected approaches, test results with provenance, open incidents, uncommitted
+work, gate status, authorization limits and next action in shared continuity
+files. Retain dated checkpoints; do not erase history. Distinguish recorded
+operator claims from independently verified evidence. Read-only auditors hand
+their findings to the operator. This documentation duty grants no commit,
+push, deployment or release authority.

@@ -4,8 +4,13 @@ readonly HOME_DIR="${OPENHTPC_HOME:-$HOME}"
 readonly INSTALL="${OPENHTPC_INSTALL_DIR:-$HOME_DIR/.local/lib/openhtpc}"
 readonly PROFILE="$HOME_DIR/.config/openhtpc/profile.json"
 readonly OPTICAL_STATE="$HOME_DIR/.local/state/openhtpc/optical-current.json"
+readonly PLAYBACK_LOCK="$HOME_DIR/.local/state/openhtpc/playback-active.lock"
 readonly DVD_LOCK="$HOME_DIR/.local/state/openhtpc/play-dvd.lock"
 mkdir -p "$HOME_DIR/.local/state/openhtpc"
+exec 8>"$PLAYBACK_LOCK"
+if ! flock -n 8; then
+    exit 0
+fi
 exec 9>"$DVD_LOCK"
 if ! flock -n 9; then
     exit 0
@@ -27,7 +32,12 @@ except Exception:pass
 ' "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$reason" "${dispatch_id:-}" 2>/dev/null || true
     return_ui
 }
-return_ui(){ [[ ${OPENHTPC_FLEX_RETAINED:-0} == 1 ]] && exit 0; exec "$INSTALL/openhtpc-dvd-ui"; }
+return_ui(){
+    [[ ${OPENHTPC_FLEX_RETAINED:-0} == 1 ]] && exit 0
+    # The standalone UI must not inherit the completed dispatcher's locks.
+    exec 8>&- 9>&-
+    exec "$INSTALL/openhtpc-dvd-ui"
+}
 [[ $# -eq 1 && $1 == /dev/* ]] || fail_and_return_ui "DVD_ARGUMENT_INVALID"
 device=$1
 state="$(cat "$OPTICAL_STATE" 2>/dev/null)" || fail_and_return_ui "DVD_STATE_UNAVAILABLE"
@@ -121,17 +131,6 @@ target_fallback="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get
     --field "available=$target_available" --field "effective=$target_effective" \
     --field "audio_mode=$output_requested" --field "fallback=$target_fallback"
 
-pw_diag_json="$(python3 "$INSTALL/openhtpc-playback-policy.py" --home "$HOME_DIR" prepare-bitstream --decision "$policy_json" 2>/dev/null || printf '{}')"
-if [[ -n "$pw_diag_json" && "$pw_diag_json" != "{}" && -x $INSTALL/openhtpc-runtime.py ]]; then
-    pw_status="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_status",""))' "$pw_diag_json" 2>/dev/null || true)"
-    pw_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_reason",""))' "$pw_diag_json" 2>/dev/null || true)"
-    pw_attempted="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_attempted",""))' "$pw_diag_json" 2>/dev/null || true)"
-    pw_sink_id="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_sink_id",""))' "$pw_diag_json" 2>/dev/null || true)"
-    "$INSTALL/openhtpc-runtime.py" log --component playback --event AUDIO_PIPEWIRE_PREPARATION \
-        --field "status=$pw_status" --field "reason=$pw_reason" \
-        --field "attempted=$pw_attempted" --field "sink_id=$pw_sink_id"
-fi
-
 gpu_status="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("status","AUTO_FALLBACK"))' "$policy_json" 2>/dev/null || printf AUTO_FALLBACK)"
 gpu_pci="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("pci_address",""))' "$policy_json" 2>/dev/null || true)"
 gpu_drm="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("gpu_render_binding",json.loads(sys.argv[1]).get("gpu_binding",{})).get("drm_render_path",""))' "$policy_json" 2>/dev/null || true)"
@@ -153,8 +152,32 @@ PY
 )"
 
 dvd_attempt="$(mktemp "$HOME_DIR/.local/state/openhtpc/dvd-mpv.XXXXXX.log")"
+dvd_cadence="$(python3 -c 'import json,math,sys
+try:
+ v=float(json.loads(sys.argv[1]).get("physical_edition",{}).get("video",{}).get("fps"))
+ print(f"{v:.6f}".rstrip("0").rstrip(".")) if math.isfinite(v) and 1 <= v <= 120 else None
+except (TypeError,ValueError): pass' "$state" 2>/dev/null || true)"
 refresh_runner=()
-[[ ! -f $INSTALL/openhtpc-refresh-match.py ]] || refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --)
+if [[ -f $INSTALL/openhtpc-refresh-match.py ]]; then
+    # Display mutations MUST finish and settle before HDMI/PipeWire bitstream is prepared.
+    # The matcher owns this ordering and launches mpv immediately after audio preparation.
+    refresh_runner=(python3 "$INSTALL/openhtpc-refresh-match.py" --decision-json "$policy_json")
+    [[ -z $dvd_cadence ]] || refresh_runner+=(--rate "$dvd_cadence")
+    refresh_runner+=(--)
+else
+    # Conservative fallback when the matcher is unavailable: no display mutation occurs here,
+    # so prepare the current audio target immediately before launching mpv.
+    pw_diag_json="$(python3 "$INSTALL/openhtpc-playback-policy.py" --home "$HOME_DIR" prepare-bitstream --decision "$policy_json" 2>/dev/null || printf '{}')"
+    if [[ -n "$pw_diag_json" && "$pw_diag_json" != "{}" && -x $INSTALL/openhtpc-runtime.py ]]; then
+        pw_status="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_status",""))' "$pw_diag_json" 2>/dev/null || true)"
+        pw_reason="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_reason",""))' "$pw_diag_json" 2>/dev/null || true)"
+        pw_attempted="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("iec958_prepare_attempted",""))' "$pw_diag_json" 2>/dev/null || true)"
+        pw_sink_id="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("audio_sink_id",""))' "$pw_diag_json" 2>/dev/null || true)"
+        "$INSTALL/openhtpc-runtime.py" log --component playback --event AUDIO_PIPEWIRE_PREPARATION \
+            --field "status=$pw_status" --field "reason=$pw_reason" \
+            --field "attempted=$pw_attempted" --field "sink_id=$pw_sink_id"
+    fi
+fi
 "${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
 audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" "$rc" "${dispatch_id:-}" <<'PY'

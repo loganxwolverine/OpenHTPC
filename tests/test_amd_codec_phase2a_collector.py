@@ -76,15 +76,15 @@ VAProfileHEVCMain10 : VAEntrypointEncSliceLP
 
 
 class CanonicalCapabilityRefreshConsistency(unittest.TestCase):
-    CURRENT = {"mpeg2": False, "h264": True, "hevc": True, "hevc_main10": True, "vp9": True, "av1": False}
-    STALE = {"mpeg2": True, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
+    CURRENT = {"mpeg2": False, "vc1": True, "h264": True, "hevc": True, "hevc_main10": True, "vp9": True, "av1": False}
+    STALE = {"mpeg2": True, "vc1": False, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
 
     def setUp(self):
         self.capabilities = load_capabilities()
 
     def snapshot(self, observed=None):
         observed = observed or self.CURRENT
-        canonical = {"mpeg2": observed["mpeg2"], "h264_8bit": observed["h264"],
+        canonical = {"mpeg2": observed["mpeg2"], "vc1": observed["vc1"], "h264_8bit": observed["h264"],
                      "hevc_main": observed["hevc"], "hevc_main10": observed["hevc_main10"],
                      "vp9_profile0": observed["vp9"], "vp9_10bit": observed["vp9"],
                      "av1_main": observed["av1"]}
@@ -117,6 +117,42 @@ class CanonicalCapabilityRefreshConsistency(unittest.TestCase):
         self.assertEqual(profile["gpu_topology"]["display_gpu"]["vaapi_decode"], current)
         self.assertEqual(profile["gpu_topology"]["processing_gpu"]["vaapi_decode"], current)
         self.assertEqual(profile["gpu_topology"]["gpus"][0]["vaapi_decode"], current)
+
+    def test_dual_gpu_refresh_keeps_machine_union_but_publishes_exact_gpu_capabilities(self):
+        intel = {"mpeg2": True, "vc1": True, "h264": True, "hevc": True, "hevc_main10": True, "vp9": True, "av1": False}
+        amd = {"mpeg2": True, "vc1": False, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
+
+        def matrix(values):
+            canonical = {"mpeg2": values["mpeg2"], "vc1": values["vc1"], "h264_8bit": values["h264"],
+                         "hevc_main": values["hevc"], "hevc_main10": values["hevc_main10"],
+                         "vp9_profile0": values["vp9"], "vp9_10bit": values["vp9"],
+                         "av1_main": values["av1"]}
+            return {key: {"hardware_decode": {"status": "SUPPORTED" if enabled else "UNSUPPORTED"},
+                          "hardware_backends": ["vaapi"] if enabled else []}
+                    for key, enabled in canonical.items()}
+
+        snapshot = self.snapshot(intel)
+        snapshot["video_decode"]["devices"] = {
+            "0000:00:02.0": matrix(intel),
+            "0000:03:00.0": matrix(amd),
+        }
+        profile = {
+            "media_stack": {"observed_capabilities": {"vaapi_decode": self.STALE.copy()}},
+            "gpu_topology": {
+                "display_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": intel.copy()},
+                "processing_gpu": {"pci_slot": "0000:03:00.0", "vaapi_decode": intel.copy()},
+                "gpus": [
+                    {"pci_slot": "0000:00:02.0", "vaapi_decode": self.STALE.copy()},
+                    {"pci_slot": "0000:03:00.0", "vaapi_decode": intel.copy()},
+                ],
+            },
+        }
+        _, _, updated, _ = self.run_refresh(profile, snapshot)
+        self.assertEqual(updated["media_stack"]["observed_capabilities"]["vaapi_decode"], intel)
+        self.assertEqual(updated["gpu_topology"]["display_gpu"]["vaapi_decode"], amd)
+        self.assertEqual(updated["gpu_topology"]["processing_gpu"]["vaapi_decode"], amd)
+        self.assertEqual(updated["gpu_topology"]["gpus"][0]["vaapi_decode"], intel)
+        self.assertEqual(updated["gpu_topology"]["gpus"][1]["vaapi_decode"], amd)
 
     def test_gpu_identity_and_runtime_are_unchanged(self):
         original = self.physical_dev3_profile()

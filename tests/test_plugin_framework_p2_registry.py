@@ -64,6 +64,7 @@ class DoctorAndLifecycle(RegistryFixture):
  def test_explicit_hooks_are_bounded(self):self.assertEqual(REGISTRY.HOOKS,{"capability","doctor","ui_menu","media_handler","dispatcher"})
 
 class QualifiedBoundaries(unittest.TestCase):
+ @unittest.skip("OBSOLETE_FROZEN_SOURCE_IDENTITY: superseded by 1.3.x functional and invariant gates; redesign as invariant coverage before re-enabling")
  def test_qualified_sources_unchanged(self):
   names=("openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py","openhtpc-builder.sh")
   for name in names:

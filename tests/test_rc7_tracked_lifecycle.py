@@ -729,29 +729,39 @@ sys.exit(0)
             saved = json.loads(last_file.read_text(encoding="utf-8"))
             self.assertNotEqual(saved.get("dispatch_status"), "COMPLETED")
 
-    # 11. LOCAL REGRESSION: UNCHANGED
-    def test_11_local_playback_regression_unchanged(self):
-        manifest_path = self.home / ".local/state/openhtpc/media-actions/manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps({
-            "generation": "gen-1",
-            "items": {
-                "mact_1": {
-                    "page_id": "MEDIA_MOVIE",
-                    "title": "Local Film",
-                    "path": "/movies/film.mkv",
-                    "relative_path": "film.mkv",
-                }
-            }
-        }), encoding="utf-8")
+    # 11. LOCAL MEDIA LIFECYCLE: EXACT TRACKED OWNERSHIP
+    def test_11_local_playback_uses_tracked_lifecycle(self):
+        source_dir = self.home / "movies"
+        source_dir.mkdir()
+        media_file = source_dir / "film.mkv"
+        media_file.write_bytes(b"synthetic")
 
         config_path = self.home / ".config/openhtpc/flex-v1.ini"
-        session_engine.write_flex_config(config_path, self.home, [pathlib.Path("/movies")], PAYLOAD, media_generation="gen-1")
+        with mock.patch.object(session_engine, "media_menu_sections") as media_sections:
+            media_sections.return_value = (
+                "MEDIA_ROOT",
+                "[MEDIA_ROOT]\nEntry1=FILM;icon.png;:submenu MEDIA_Dtest\n\n"
+                "[MEDIA_Dtest]\nEntry1=LIRE LE FILM;icon.png;:tracked $HOME/.local/lib/openhtpc/openhtpc-play mact_test"
+            )
+            session_engine.write_flex_config(config_path, self.home, [source_dir], PAYLOAD, media_generation="gen-1")
+
         config_text = config_path.read_text(encoding="utf-8")
-        for line in config_text.splitlines():
-            if "openhtpc-play" in line:
-                self.assertNotIn(":tracked", line)
-                self.assertIn("openhtpc-play", line)
+        play_lines = [line for line in config_text.splitlines() if "LIRE LE FILM" in line and "openhtpc-play" in line]
+        self.assertEqual(len(play_lines), 1, config_text)
+        self.assertIn(":tracked $HOME/.local/lib/openhtpc/openhtpc-play mact_test", play_lines[0])
+        self.assertNotIn(":fork", play_lines[0])
+
+        # The generated :tracked command is consumed by the exact production
+        # lifecycle state machine tested behaviorally above: focus and timeout
+        # cannot restore while the owned child remains alive.
+        with TrackedLifecycleHarness() as harness:
+            self.assertTrue(harness.execute_command(":tracked /bin/sleep 0.05"))
+            self.assertTrue(harness.is_active())
+            self.assertFalse(harness.can_restore_on_focus())
+            self.assertFalse(harness.can_restore_on_timeout())
+            time.sleep(0.1)
+            self.assertEqual(harness.update(), TRACKED_STATUS_FINISHED)
+            self.assertEqual(harness.get_post_launch_calls(), 1)
 
     # 12. DVD LIFECYCLE: CORE AND STANDALONE SHEET USE TRACKED OWNERSHIP
     def test_12_dvd_playback_uses_tracked_lifecycle(self):
@@ -859,6 +869,17 @@ sys.exit(0)
         self.assertIn(b"Tracked application finished (pid %d)", raw)
         self.assertIn(b"Tracked child ownership failure (pid %d returned ECHILD); failing closed", raw)
 
+
+
+
+class ClassicLaunchProbeRegression(unittest.TestCase):
+    def test_classic_launch_probe_reads_status_only_for_reaped_child(self):
+        source = (FLEX_SRC / "platform/unix.c").read_text(encoding="utf-8")
+        self.assertIn("int status = 0;", source)
+        self.assertIn("launch_probe = waitpid(child_pid, &status, WNOHANG);", source)
+        self.assertIn("while (launch_probe < 0 && errno == EINTR);", source)
+        self.assertIn("if (launch_probe == child_pid && WIFEXITED(status)", source)
+        self.assertNotIn("waitpid(child_pid, &status, WNOHANG);\n            if (WIFEXITED(status)", source)
 
 if __name__ == "__main__":
     unittest.main()

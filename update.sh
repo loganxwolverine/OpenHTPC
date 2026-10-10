@@ -16,23 +16,30 @@ for arg in "$@"; do
     fi
 done
 
-# Refuse an in-place update while an authoritative DVD playback lock is held.
-# Tracked playback can inherit the UI session lock; stopping Flex underneath it
-# would strand the appliance on a black Plasma surface until playback exits.
+# Refuse an in-place update while any authoritative playback is active, and
+# hold the same lock for the whole update so a new playback cannot start after
+# this preflight.  Keep the legacy DVD lock as a transition guard for older
+# installed dispatchers which do not yet know playback-active.lock.
+playback_lock="$HOME/.local/state/openhtpc/playback-active.lock"
 dvd_lock="$HOME/.local/state/openhtpc/play-dvd.lock"
-mkdir -p "$(dirname "$dvd_lock")"
-exec 7>"$dvd_lock"
+mkdir -p "$(dirname "$playback_lock")"
+exec 7>"$playback_lock"
 if ! flock -n 7; then
+    printf '[OPENHTPC] ERREUR : une lecture est en cours. Arrêtez la lecture avant de mettre OPENHTPC à jour.\n' >&2
+    exit 4
+fi
+exec 8>"$dvd_lock"
+if ! flock -n 8; then
     printf '[OPENHTPC] ERREUR : une lecture DVD est en cours. Arrêtez la lecture avant de mettre OPENHTPC à jour.\n' >&2
     exit 4
 fi
-flock -u 7
-exec 7>&-
+# File descriptors 7 and 8 intentionally remain locked until update.sh exits.
 
 # Remember whether the appliance session was running before update cleanup.
 # A successful in-place update must restore the same user-visible state instead
 # of leaving Plasma in appliance mode with no Flex window.
 was_running=0
+restart_required=0
 runtime_state="$HOME/.local/state/openhtpc/runtime-session.json"
 if [[ -r $runtime_state ]] && python3 - "$runtime_state" <<'PY_STATE'
 import json, pathlib, sys
@@ -44,6 +51,33 @@ raise SystemExit(0 if data.get("state") == "RUNNING" else 1)
 PY_STATE
 then
     was_running=1
+fi
+
+restore_preupdate_session_on_exit() {
+    local rc=$?
+    if (( rc != 0 && was_running && restart_required )); then
+        trap - EXIT
+        if [[ -x $INSTALL_DIR/openhtpc ]]; then
+            if "$INSTALL_DIR/openhtpc" start; then
+                printf '[OPENHTPC] Échec de mise à jour : session OPENHTPC précédente restaurée.\n' >&2
+            else
+                printf '[OPENHTPC] ERREUR : échec de mise à jour et impossible de restaurer automatiquement OPENHTPC.\n' >&2
+            fi
+        else
+            printf '[OPENHTPC] ERREUR : échec de mise à jour et lanceur OPENHTPC indisponible pour restauration.\n' >&2
+        fi
+        exit "$rc"
+    fi
+}
+trap restore_preupdate_session_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+# From this point onward, a failed mutation must attempt to restore the session
+# that was active before cleanup.
+if (( was_running )); then
+    restart_required=1
 fi
 
 if [[ -x $ROOT/payload/openhtpc-runtime.py ]]; then
@@ -75,5 +109,6 @@ export OPENHTPC_UPDATE_MODE=1
 
 if (( was_running )); then
     "$INSTALL_DIR/openhtpc" start
+    restart_required=0
     printf '[OPENHTPC] Session active avant mise à jour : OPENHTPC relancé automatiquement.\n'
 fi

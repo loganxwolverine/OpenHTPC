@@ -59,7 +59,7 @@ class UserOsd(unittest.TestCase):
 
     def test_auto_uses_requested_preference_not_internal_profile(self):
         text = policy.osd_text(self.decision("CINEMA_AUTO"))
-        self.assertEqual(text, "Mode vidéo : CINÉMA AUTO\nAudio : Français\nSous-titres : Désactivés")
+        self.assertEqual(text, "Mode vidéo : MAGNIFICENCE\nAudio : Français\nSous-titres : Désactivés")
         self.assertNotIn("Profil appliqué", text)
         self.assertNotIn("→", text)
 

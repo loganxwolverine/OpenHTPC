@@ -27,6 +27,10 @@ def exercise(*, vendor: str, va_complete: bool, ffmpeg_complete: bool,
 amd_gpu_present={'true' if vendor == 'amd' else 'false'}
 intel_gpu_present={'true' if vendor == 'intel' else 'false'}
 VA_H264={values}; VA_HEVC={values}; VA_HEVC10={values}
+AMD_VA_OBSERVED={'true' if vendor == 'amd' else 'false'}
+AMD_VA_H264={values}; AMD_VA_HEVC={values}; AMD_VA_HEVC10={values}
+INTEL_VA_OBSERVED={'true' if vendor == 'intel' else 'false'}
+INTEL_VA_H264={values}; INTEL_VA_HEVC={values}; INTEL_VA_HEVC10={values}
 FFMPEG_H264={ffmpeg}; FFMPEG_HEVC={ffmpeg}
 DRY_RUN=false; DNF=fake-dnf; MEDIA_FILE="$TEMP_DIR/media"
 rpm() {{
@@ -57,6 +61,45 @@ install_multimedia_extension
 
 
 class AmdCodecPhase2BEnablement(unittest.TestCase):
+    def test_multi_gpu_union_cannot_hide_missing_amd_codec_driver(self):
+        scenario = function_prefix() + r'''
+amd_gpu_present=true; intel_gpu_present=true
+FFMPEG_H264=true; FFMPEG_HEVC=true
+MEDIA_FILE="$TEMP_DIR/media"
+printf '%s\n' \
+  '[/dev/dri/renderD128]' \
+  'OPENHTPC_VENDOR=0x8086' \
+  'VAProfileH264High : VAEntrypointVLD' \
+  'VAProfileHEVCMain : VAEntrypointVLD' \
+  'VAProfileHEVCMain10 : VAEntrypointVLD' \
+  '[/dev/dri/renderD129]' \
+  'OPENHTPC_VENDOR=0x1002' \
+  'VAProfileMPEG2Main : VAEntrypointVLD' \
+  'VAProfileVP9Profile0 : VAEntrypointVLD' >"$MEDIA_FILE"
+read_media_capabilities "$MEDIA_FILE"
+printf 'GLOBAL=%s,%s,%s AMD=%s,%s,%s INTEL=%s,%s,%s\n' \
+  "$VA_H264" "$VA_HEVC" "$VA_HEVC10" \
+  "$AMD_VA_H264" "$AMD_VA_HEVC" "$AMD_VA_HEVC10" \
+  "$INTEL_VA_H264" "$INTEL_VA_HEVC" "$INTEL_VA_HEVC10"
+media_extension_required
+'''
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "scenario.sh"
+            path.write_text(scenario, encoding="utf-8")
+            result = subprocess.run(
+                ["bash", str(path)], text=True, capture_output=True,
+                env={**os.environ, "HOME": raw, "TERM": "dumb"}, check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GLOBAL=true,true,true", result.stdout)
+        self.assertIn("AMD=false,false,false", result.stdout)
+        self.assertIn("INTEL=true,true,true", result.stdout)
+
+    def test_update_mode_reports_per_gpu_remediation_without_prompting(self):
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn("media_extension_required", installer)
+        self.assertIn("installation différée au mode interactif", installer)
+
     def test_amd_restricted_stack_proposes_both_required_complements(self):
         result = exercise(vendor="amd", va_complete=False, ffmpeg_complete=False)
         self.assertIn("mesa-va-drivers-freeworld libavcodec-freeworld", result.stdout)
@@ -157,7 +200,7 @@ refresh_profile_media_stack
         self.assertTrue(updated["media_stack"]["observed_capabilities"]["vaapi_decode"]["h264"])
         self.assertFalse(updated["media_stack"]["observed_capabilities"]["vaapi_decode"]["hevc_main10"])
 
-    def test_media_stack_owns_current_observation_and_all_topology_mirrors_follow(self):
+    def test_media_stack_owns_machine_union_without_overwriting_gpu_mirrors(self):
         old = {"mpeg2": True, "h264": False, "hevc": False, "hevc_main10": False, "vp9": True, "av1": False}
         initial = {"media_stack": {"observed_capabilities": {"vaapi_decode": old}},
                    "gpu_topology": {"display_gpu": {"vaapi_decode": old.copy()},
@@ -166,9 +209,10 @@ refresh_profile_media_stack
         result, updated = self.run_profile_refresh(initial, (False, True, True, True, True, False))
         self.assertEqual(result.returncode, 0, result.stderr)
         current = updated["media_stack"]["observed_capabilities"]["vaapi_decode"]
+        self.assertNotEqual(current, old)
         for gpu in (updated["gpu_topology"]["display_gpu"], updated["gpu_topology"]["processing_gpu"],
                     updated["gpu_topology"]["gpus"][0]):
-            self.assertEqual(gpu["vaapi_decode"], current)
+            self.assertEqual(gpu["vaapi_decode"], old)
         self.assertIn("capability=vaapi_decode.mpeg2 before=true after=false change=LOSS", result.stdout)
         self.assertIn("capability=vaapi_decode.h264 before=false after=true change=GAIN", result.stdout)
         self.assertIn("capability=vaapi_decode.hevc before=false after=true change=GAIN", result.stdout)

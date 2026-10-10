@@ -87,6 +87,14 @@ def load_canonical_state(root:pathlib.Path)->dict[str,Any]:
  value=load_json(root/"OPENHTPC_CURRENT_STATE.json")
  return validate_document(root,value,"project-state.schema.json")
 
+def ensure_canonical_state_applicable(root:pathlib.Path,state:dict[str,Any])->None:
+ try:version=(root/"VERSION").read_text(encoding="utf-8").strip()
+ except (OSError,UnicodeError) as exc:raise AutopilotError("PROJECT_VERSION_UNAVAILABLE") from exc
+ # The current project-state schema is intentionally the frozen 1.2.0/P2 contract.
+ # Do not let a valid historical document authorize work on a newer release line.
+ if state.get("workstream")=="PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2" and not version.startswith("1.2.0"):
+  raise AutopilotError(f"CANONICAL_STATE_STALE:state_workstream=P2:project_version={version}")
+
 def validate_plan_against_state(state:dict[str,Any],plan:dict[str,Any])->None:
  expected={"default_behavior_change":state["default_behavior_change_expected"],
            "hardware_io_ownership_change":state["hardware_io_ownership_change"],
@@ -257,6 +265,7 @@ class Autopilot:
  def context(self)->dict[str,Any]:
   context=git_context(self.root);context["architecture_documents"]=["AGENTS.md","PLUGIN_FRAMEWORK_P2_ARCHITECTURE.md","PLUGIN_FRAMEWORK_P2_PROTECTED_OPTICAL_BOUNDARY_FREEZE.md","OPENHTPC-PROTECTED-OPTICAL-ROADMAP.md"]
   context["canonical_project_state"]=load_canonical_state(self.root)
+  ensure_canonical_state_applicable(self.root,context["canonical_project_state"])
   state=self.runtime/"state.json";context["previous_state"]=load_json(state) if state.is_file() else None
   return context
  def _agy_command(self,prompt:str,schema:pathlib.Path|None,timeout:int)->list[str]:
@@ -353,8 +362,12 @@ class Autopilot:
   try:context=git_context(self.root,require_clean=False);checks["git_status"]="CLEAN" if not context["status"] else "DIRTY";checks["branch"]=context["branch"]
   except AutopilotError:checks["git_status"]="ERROR"
   for folder in ("schemas","prompts"):checks[folder]=all((self.root/f"tools/autopilot/{folder}"/name).is_file() for name in ({"schemas":["plan.schema.json","executor-report.schema.json","review.schema.json","project-state.schema.json"],"prompts":["planner.md","executor.md","reviewer.md"]}[folder]))
-  try:load_canonical_state(self.root);checks["canonical_state"]=True
-  except AutopilotError:checks["canonical_state"]=False
+  try:
+   canonical=load_canonical_state(self.root);checks["canonical_state"]=True
+   try:ensure_canonical_state_applicable(self.root,canonical);checks["canonical_state_applicable"]=True
+   except AutopilotError:checks["canonical_state_applicable"]=False
+  except AutopilotError:
+   checks["canonical_state"]=False;checks["canonical_state_applicable"]=False
   try:self.ensure_runtime();probe=self.runtime/".write-test";probe.write_text("ok");probe.unlink();checks["runtime_writable"]=True
   except OSError:checks["runtime_writable"]=False
   for key,executable in (("antigravity","agy"),("codex","codex")):

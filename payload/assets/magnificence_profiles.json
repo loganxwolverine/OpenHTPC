@@ -809,6 +809,7 @@
           "OpenHTPC_Vibrance_Mild.glsl"
         ],
         "mpv_args": [
+          "--hwdec=vaapi-copy",
           "--fbo-format=rgba16hf",
           "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
           "--scale=ewa_lanczossharp",
@@ -816,7 +817,7 @@
           "--sigmoid-upscaling=yes"
         ],
         "reason": "HIGH-class DVD-to-4K recipe validated on RDNA1 across dark, foggy, dusty and bright masters. FSRCNN-HQ r2_32 provides the main reconstruction, KrigBilateral restores chroma detail, SSimSuperRes adds controlled finishing and OpenHTPC Vibrance Mild preserves restrained color presence.",
-        "visual_basis": "Multi-master live review on GOTHIKA, GLADIATOR, REIGN_OF_FIRE and L_ECHANGE. The recipe remained natural across dark and bright material. REIGN_OF_FIRE exposed mosquito noise already present in PURE; SSimSuperRes could make that source defect slightly more visible but did not create it.",
+        "visual_basis": "Multi-master live review on GOTHIKA, GLADIATOR, REIGN_OF_FIRE, L_ECHANGE and ALERTE. The recipe remained natural across dark and bright material. ALERTE revalidated the corrected vaapi-copy + BWDIF path on interlaced MPEG-2; the image was clearly more dynamic while close-range source noise remained visible and accepted as source character. REIGN_OF_FIRE exposed mosquito noise already present in PURE; SSimSuperRes could make that source defect slightly more visible but did not create it.",
         "ui_reason_fr": "Profil HIGH DVD vers 4K validé : FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance légère, avec BWDIF send_frame pour les trames entrelacées."
       },
       "validation": {
@@ -826,15 +827,27 @@
           "GOTHIKA",
           "GLADIATOR",
           "REIGN_OF_FIRE",
-          "L_ECHANGE"
+          "L_ECHANGE",
+          "ALERTE"
         ],
         "output": "3840x2160",
         "cadence": "25 fps PAL source; BWDIF send_frame only for interlaced frames",
+        "latest_revalidation": {
+          "date": "2026-10-09",
+          "source": "Alerte.mkv",
+          "source_characteristics": "MPEG-2 720x576 25 fps interlaced TFF",
+          "runtime": "vaapi-copy + BWDIF send_frame + FSRCNN-HQ r2_32 + KrigBilateral + SSimSuperRes + Vibrance Mild",
+          "viewing_condition": "Close-range technical review at approximately 30 cm from the display; living-room distance expected to mask more source defects.",
+          "user_result": "VALIDATED",
+          "user_observation": "Magnificence is clearly more dynamic, with more perceived punch, saturation and contrast. Source noise, pixelation and MPEG artifacts are also more visible at very close range, but are accepted as source limitations rather than treatment regressions.",
+          "capture_review": "Matched Elgato captures independently showed a modest increase in perceived detail/dynamics without obvious recurring halo, plastic skin, black crush or gross over-processing."
+        },
         "observations": [
           "GOTHIKA remained convincing on dark faces, rain and contrast-heavy scenes.",
           "GLADIATOR retained natural fog, dust, skin and arena texture without obvious recurring halos.",
           "REIGN_OF_FIRE showed MPEG-2 mosquito noise already visible in PURE; removing SSimSuperRes reduced emphasis slightly but did not remove the source artifact.",
           "L_ECHANGE validated bright exterior, skin tone, vegetation and blue-lit scenes without a recurring treatment defect.",
+          "ALERTE revalidation on 2026-10-09 explicitly validated the corrected vaapi-copy + BWDIF path on real interlaced material.",
           "Observed playback checks remained at zero frame, decoder and delayed drops during the qualified passages."
         ]
       },

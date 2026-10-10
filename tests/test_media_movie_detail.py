@@ -552,7 +552,7 @@ def test_02_detail_lire_le_film_uses_exact_existing_resource_token(env):
     entry1 = detail_lines[0]
     parts = entry1.split(";")
     assert parts[0] == "Entry1=LIRE LE FILM"
-    assert parts[2].startswith("$HOME/.local/lib/openhtpc/openhtpc-play mact_")
+    assert parts[2].startswith(":tracked $HOME/.local/lib/openhtpc/openhtpc-play mact_")
 
 
 # ==============================================================================

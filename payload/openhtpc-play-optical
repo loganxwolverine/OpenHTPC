@@ -3,7 +3,7 @@
 # Copyright 2026 Steve Dehanne
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
-import argparse,datetime,hmac,importlib.machinery,importlib.util,json,os,pathlib,shutil,subprocess,sys,tempfile
+import argparse,datetime,fcntl,hmac,importlib.machinery,importlib.util,json,os,pathlib,shutil,subprocess,sys,tempfile
 from typing import Any,Callable
 
 def load(path:pathlib.Path):
@@ -53,8 +53,16 @@ def dispatch(home:pathlib.Path,install:pathlib.Path,device:str,generation:int,ac
     request={"device":device,"media_type":current["decision"]["media_type"],"protection":current["decision"]["protection"],
              "provider_status":current["decision"]["protected_media_support"],"generation":generation}
     if backend is None:backend=load(install/"openhtpc-protected-optical-backend.py").open_disc
-    atomic_playback_context(home,device,generation)
-    result={**backend(home,request),"generation":generation,"device":device};atomic_result(home,result);return result
+    lock_path=home/".local/state/openhtpc/playback-active.lock";lock_path.parent.mkdir(parents=True,exist_ok=True)
+    lock_stream=lock_path.open("a+")
+    try:
+        try:fcntl.flock(lock_stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError as error:raise ValueError("PLAYBACK_ALREADY_ACTIVE") from error
+        atomic_playback_context(home,device,generation)
+        result={**backend(home,request),"generation":generation,"device":device};atomic_result(home,result);return result
+    finally:
+        try:fcntl.flock(lock_stream.fileno(),fcntl.LOCK_UN)
+        finally:lock_stream.close()
 
 def notify(message:str)->None:
     if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("kdialog"):

@@ -243,6 +243,13 @@ def open_disc(home:pathlib.Path,request:dict[str,Any],*,runner:Callable[...,Any]
     status="OPEN_SUCCESS" if opened and elapsed>=0.75 else "OPEN_FAILED"
     result={"status":status,"process_started":exit_code!=127,"media_opened":opened,"exit_code":exit_code,
             "elapsed_seconds":round(elapsed,3),"reason":reason,"media_type":media_type,"protection":protection}
-    try:atomic_diagnostic(home,command,request,decision,raw,result,pw_diag)
+    effective_command = getattr(completed, "openhtpc_effective_command", None) if "completed" in locals() else None
+    if effective_command is None and "completed" in locals():
+        effective_command = getattr(completed, "args", None)
+    if not isinstance(effective_command, (list, tuple, str)):
+        effective_command = command
+    if isinstance(effective_command, tuple):
+        effective_command = list(effective_command)
+    try:atomic_diagnostic(home,effective_command,request,decision,raw,result,pw_diag)
     except (OSError,TypeError,ValueError):pass
     return result

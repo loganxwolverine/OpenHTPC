@@ -1,5 +1,16 @@
 # Changelog
 
+# OPENHTPC 1.3.1 — Patina
+
+- Stabilizes the physically qualified Magnificence 1.3 line on Radeon RX 5700 XT and Intel Arc A310 validators.
+- Publishes codec capabilities per exact PCI GPU instead of copying the machine-wide union into each GPU, and distinguishes a hardware feature from the currently available VA-API backend.
+- Restores AMD VA-API H.264/HEVC/Main10 visibility where the qualified Fedora multimedia extension is installed; preserves safe software fallback and never infers physical decode-GPU ownership from the render GPU.
+- Enforces DVD ordering as display modeset and settle, then effective audio resolution/preparation, then MPV launch; temporarily falls back to PCM when passthrough is not proven on the actual post-modeset sink.
+- Preserves HDMI passthrough when verified, PAL 25 fps to 50 Hz matching, and exact restoration to the previous 60 Hz interface mode.
+- Hardens tracked child lifecycle, updater recovery, Flex restoration, shared interaction guards and fail-closed ECHILD handling without process-name termination.
+- Corrects manual TMDb topmost behavior, local MEDIA tracked playback, CJK/Hangul disc-sheet glyph fallback and post-start System health refresh.
+- Final software gate: 2284 passed, 18 skipped, 0 failed. Final physical gates: RX 5700 XT and Arc A310 PASS, with the documented output-specific audio limits retained.
+
 # OPENHTPC 1.3.0 — Patina
 
 - Promotes the profile-driven Magnificence pipeline and the physically exercised DVD lifecycle fixes.

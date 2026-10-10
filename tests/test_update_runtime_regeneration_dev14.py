@@ -199,21 +199,57 @@ raise SystemExit(0)
         self.assertIn('exec "$ROOT/install.sh" "$@"', source)
         self.assertLess(source.index(check_branch), source.index(cleanup))
 
-    def test_11c_update_refuses_active_dvd_before_cleanup(self):
+    def test_11c_update_refuses_active_playback_before_cleanup(self):
         source = (ROOT / "update.sh").read_text()
-        guard = 'dvd_lock="$HOME/.local/state/openhtpc/play-dvd.lock"'
+        global_guard = 'playback_lock="$HOME/.local/state/openhtpc/playback-active.lock"'
+        legacy_guard = 'dvd_lock="$HOME/.local/state/openhtpc/play-dvd.lock"'
         cleanup = '"$ROOT/payload/openhtpc-runtime.py" cleanup-legacy'
-        self.assertIn(guard, source)
-        self.assertIn('if ! flock -n 7; then', source)
-        self.assertIn('une lecture DVD est en cours', source)
-        self.assertLess(source.index(guard), source.index(cleanup))
+        self.assertIn(global_guard, source); self.assertIn(legacy_guard, source)
+        self.assertIn('if ! flock -n 7; then', source); self.assertIn('if ! flock -n 8; then', source)
+        self.assertIn('une lecture est en cours', source); self.assertIn('une lecture DVD est en cours', source)
+        self.assertNotIn('flock -u 7', source)
+        self.assertLess(source.index(global_guard), source.index(cleanup)); self.assertLess(source.index(legacy_guard), source.index(cleanup))
 
     def test_11d_update_restores_previously_running_session(self):
         source = (ROOT / "update.sh").read_text()
         self.assertIn('data.get("state") == "RUNNING"', source)
         self.assertIn('if (( was_running )); then', source)
+        self.assertIn('trap restore_preupdate_session_on_exit EXIT', source)
+        self.assertIn('restart_required=1', source)
         self.assertIn('"$INSTALL_DIR/openhtpc" start', source)
         self.assertIn('OPENHTPC relancé automatiquement', source)
+
+    def test_11e_failed_update_restores_previously_running_session(self):
+        candidate = self.base / "candidate-failure"; payload = candidate / "payload"
+        payload.mkdir(parents=True)
+        shutil.copy2(ROOT / "update.sh", candidate / "update.sh")
+        (candidate / "install.sh").write_text("#!/bin/sh\nexit 23\n")
+        (candidate / "install.sh").chmod(0o755)
+        (candidate / "legacy-managed-files-dev27.txt").write_text("openhtpc\n")
+        (payload / "managed-files.txt").write_text("openhtpc\n")
+        (payload / "openhtpc-update-managed-files").write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n")
+        (payload / "openhtpc-update-managed-files").chmod(0o755)
+        (payload / "openhtpc-runtime.py").write_text("#!/bin/sh\nexit 0\n")
+        (payload / "openhtpc-runtime.py").chmod(0o755)
+
+        install = self.home / ".local/lib/openhtpc"; install.mkdir(parents=True, exist_ok=True)
+        (install / ".openhtpc-managed-files").write_text("openhtpc\n")
+        marker_path = self.home / "restart-observed"
+        (install / "openhtpc").write_text(
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = start ]; then printf 'start\\n' >> \"$HOME/restart-observed\"; exit 0; fi\n"
+            "exit 1\n"
+        )
+        (install / "openhtpc").chmod(0o755)
+        state = self.home / ".local/state/openhtpc/runtime-session.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"schema": 1, "state": "RUNNING"}))
+
+        env = {**os.environ, "HOME": str(self.home), "OPENHTPC_INSTALL_DIR": str(install)}
+        result = subprocess.run([str(candidate / "update.sh")], cwd=candidate, env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 23, result.stderr)
+        self.assertEqual(marker_path.read_text(), "start\n")
+        self.assertIn("session OPENHTPC précédente restaurée", result.stderr)
 
     def test_12_fixture_is_bounded_and_never_copies_the_repository(self):
         tree = ast.parse(pathlib.Path(__file__).read_text())

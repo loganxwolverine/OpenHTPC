@@ -332,12 +332,21 @@ bool start_process(char *cmd, bool application, bool replace_launcher)
                 close(handoff[0]);
             if (!application) 
                 return true;
-            int status;
+            int status = 0;
 
-            // Check to see if the shell successfully launched
+            // Check to see if the shell successfully launched.  WNOHANG may
+            // return 0 while the child is still running; status is meaningful
+            // only when waitpid reports that exact child.
             SDL_Delay(10);
-            waitpid(child_pid, &status, WNOHANG);
-            if (WIFEXITED(status) && WEXITSTATUS(status) > 126) {
+            pid_t launch_probe;
+            do {
+                launch_probe = waitpid(child_pid, &status, WNOHANG);
+            } while (launch_probe < 0 && errno == EINTR);
+            if (launch_probe < 0) {
+                log_error("Could not probe launched application process: %s", strerror(errno));
+                return false;
+            }
+            if (launch_probe == child_pid && WIFEXITED(status) && WEXITSTATUS(status) > 126) {
                 log_error("Application failed to launch");
                 return false;
             }

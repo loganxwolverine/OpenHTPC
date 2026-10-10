@@ -79,6 +79,8 @@ def parse_sinks(raw, default_sink=None):
             kind = 'BLUETOOTH'
         elif 'hdmi' in profile:
             kind = 'HDMI'
+        elif 'iec958' in profile or 'spdif' in profile:
+            kind = 'SPDIF'
         elif bus == 'usb' or name.startswith('alsa_output.usb-'):
             kind = 'USB'
         elif 'analog' in profile:

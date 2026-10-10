@@ -178,7 +178,17 @@ def select(snapshot, rate):
                   and isinstance(m.get('id'), str) and re.fullmatch(r'[A-Za-z0-9_-]+', m['id'])
                   and clean_multiple(m.get('refresh_hz'), rate)]
     if not candidates: return 'NO_CLEAN_MATCH', None
-    return 'MATCH_AVAILABLE', min(candidates, key=lambda m: (m['refresh_hz'], m['id']))
+
+    # For cinema/video cadences up to 30 fps, prefer a clean 2x display cadence
+    # when the display exposes one (25 -> 50 Hz, 29.97 -> 59.94 Hz, 30 -> 60 Hz).
+    # Native 23.976/24 Hz remains the fallback when no clean 2x mode exists.
+    def rank(candidate):
+        refresh = candidate['refresh_hz']
+        multiple = round(refresh / rate)
+        preferred = 0 if rate <= 30 and multiple == 2 else 1
+        return (preferred, abs(multiple - 2), refresh, candidate['id'])
+
+    return 'MATCH_AVAILABLE', min(candidates, key=rank)
 
 
 class Runtime:
@@ -626,14 +636,61 @@ def _run_guarded_subprocess(command, **kwargs):
             except subprocess.TimeoutExpired: pass
 
 
-def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
-    with matching(home, media, dispatch_id=dispatch_id) as tx:
+
+def _pin_resolved_bitstream_sink(command, decision, diag):
+    """Bind playback to the post-modeset sink and fail safely when passthrough is unproven.
+
+    A stored BITSTREAM preference is not proof that the sink which exists after an
+    HDMI modeset accepts encoded audio.  Pin the resolved digital sink so mpv does
+    not race a stale PipeWire default.  Preserve passthrough only after the audio
+    preparation stage reports SUCCESS; otherwise disable passthrough for this
+    launch and let mpv decode to PCM.  The persisted user preference is untouched.
+    """
+    if not isinstance(command, (list, tuple)):
+        return command
+    cmd = list(command)
+    output = (decision or {}).get('audio_output') or {}
+    if output.get('requested') != 'BITSTREAM':
+        return cmd
+    diag = diag if isinstance(diag, dict) else {}
+    sink_name = diag.get('audio_sink_name')
+    sink_profile = str(diag.get('audio_sink_profile') or '').lower()
+    digital = bool(diag.get('audio_sink_is_hdmi')) or 'iec958' in sink_profile or (isinstance(sink_name, str) and '.iec958-' in sink_name.lower())
+    if isinstance(sink_name, str) and sink_name and digital and not any(isinstance(arg, str) and arg.startswith('--audio-device=') for arg in cmd):
+        arg = f'--audio-device=pipewire/{sink_name}'
+        idx = cmd.index('--') if '--' in cmd else len(cmd)
+        cmd.insert(idx, arg)
+    if diag.get('iec958_prepare_status') != 'SUCCESS':
+        replaced = False
+        for index, arg in enumerate(cmd):
+            if isinstance(arg, str) and arg.startswith('--audio-spdif='):
+                cmd[index] = '--audio-spdif='
+                replaced = True
+        if not replaced:
+            idx = cmd.index('--') if '--' in cmd else len(cmd)
+            cmd.insert(idx, '--audio-spdif=')
+        if isinstance(output, dict):
+            output['effective_resolved'] = 'PCM'
+            output['effective_reason'] = 'passthrough_unproven_post_modeset'
+    else:
+        if isinstance(output, dict):
+            output['effective_resolved'] = 'BITSTREAM'
+            output['effective_reason'] = 'passthrough_confirmed_post_modeset'
+    return cmd
+
+
+def run_playback(home, command, *, media=None, rate=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
+    with matching(home, media, rate=rate, dispatch_id=dispatch_id) as tx:
         switched = bool(tx and tx.record.get('switch_requested') and tx.record.get('switch_verified') and tx.record.get('status') == 'APPLIED')
+        prep_diag = {}
         if audio_prep is not None:
             try:
-                audio_prep(settle_timeout=1.5 if switched else 0.0)
+                value = audio_prep(settle_timeout=1.5 if switched else 0.0)
+                if isinstance(value, dict): prep_diag = value
             except TypeError:
-                try: audio_prep()
+                try:
+                    value = audio_prep()
+                    if isinstance(value, dict): prep_diag = value
                 except Exception: pass
             except Exception:
                 pass
@@ -641,7 +698,8 @@ def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_i
             try:
                 policy_mod = load("openhtpc-playback-policy.py")
                 if hasattr(policy_mod, "prepare_audio_target_bitstream"):
-                    policy_mod.prepare_audio_target_bitstream(decision, runner=runner, settle_timeout=1.5 if switched else 0.0)
+                    value = policy_mod.prepare_audio_target_bitstream(decision, runner=runner, settle_timeout=1.5 if switched else 0.0)
+                    if isinstance(value, dict): prep_diag = value
             except Exception:
                 pass
         owner = tx.record['owner'] if tx else uuid.uuid4().hex
@@ -651,6 +709,16 @@ def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_i
             except OSError: pass
 
         mpv_cmd = list(command) if isinstance(command, (list, tuple)) else str(command)
+        mpv_cmd = _pin_resolved_bitstream_sink(mpv_cmd, decision, prep_diag)
+        if tx and isinstance(mpv_cmd, list):
+            pinned = next((arg.split('=', 1)[1] for arg in mpv_cmd if isinstance(arg, str) and arg.startswith('--audio-device=')), None)
+            if pinned:
+                effective_mode = ((decision or {}).get('audio_output') or {}).get('effective_resolved')
+                effective_reason = ((decision or {}).get('audio_output') or {}).get('effective_reason')
+                try: tx.note(tx.record['status'], effective_audio_device=pinned,
+                             effective_audio_mode=effective_mode,
+                             effective_audio_reason=effective_reason)
+                except OSError: pass
         ipc_arg = f"--input-ipc-server={sock_path}"
         if isinstance(mpv_cmd, list):
             if not any(isinstance(a, str) and a.startswith("--input-ipc-server=") for a in mpv_cmd):
@@ -696,14 +764,25 @@ def run_playback(home, command, *, media=None, runner=subprocess.run, dispatch_i
                 'timestamp': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
                 **telemetry,
             })
+        # Preserve the exact command that reached the runner after refresh/audio
+        # resolution (including fail-safe PCM, sink pinning and IPC injection).
+        # Higher-level diagnostics may inspect this without changing the return API.
+        try:
+            setattr(result, 'openhtpc_effective_command', list(mpv_cmd) if isinstance(mpv_cmd, list) else mpv_cmd)
+        except Exception:
+            pass
         return result
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--recover', action='store_true')
+    parser.add_argument('--rate', type=float, default=None, help='Trusted source cadence supplied by the caller')
+    parser.add_argument('--decision-json', default=None, help='Resolved playback policy JSON; audio preparation occurs after display settle and before mpv')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.rate is not None and (not math.isfinite(args.rate) or not 1 <= args.rate <= 240):
+        parser.error('--rate must be a finite cadence between 1 and 240 fps')
     home = pathlib.Path(os.environ.get('OPENHTPC_HOME', pathlib.Path.home()))
     if args.recover:
         tx = Transaction(home)
@@ -713,8 +792,16 @@ def main():
             print(f'OPENHTPC refresh recovery: {type(error).__name__}', flush=True)
         finally: tx.release()
         return 0
+    decision = None
+    if args.decision_json is not None:
+        try:
+            decision = json.loads(args.decision_json)
+        except (TypeError, ValueError):
+            parser.error('--decision-json must be valid JSON')
+        if not isinstance(decision, dict):
+            parser.error('--decision-json must decode to an object')
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
-    return run_playback(home, command, check=False).returncode
+    return run_playback(home, command, rate=args.rate, decision=decision, check=False).returncode
 
 
 if __name__ == '__main__':

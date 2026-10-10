@@ -60,6 +60,12 @@ session, remains external: Autopilot neither reads nor modifies credentials or
 global settings. Runtime artifacts use `antigravity-planner.*` and
 `antigravity-reviewer.*`; older ignored runs need no migration.
 
+## External contradictory audit lane — Hermes
+
+Hermes/DeepSeek is deliberately outside the Autopilot commit path. It may audit an isolated, technically read-only snapshot of the exact current worktree and return evidence-backed findings, but it cannot authorize or perform an Autopilot action. AGY remains the bounded planner/reviewer, Codex remains the bounded executor, and the Python orchestrator remains the only Autopilot component allowed to accept a local commit.
+
+Hermes reports are stored outside the snapshot and must be compared against code/tests and the current diagnosis before any implementation work is delegated. See `docs/OPENHTPC_HERMES_AUDITOR.md`.
+
 ## Runtime and inspection
 
 Ignored runtime data lives under `.openhtpc-autopilot/`. `state.json` contains

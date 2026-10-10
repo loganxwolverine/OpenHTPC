@@ -70,7 +70,7 @@ class Integration(unittest.TestCase):
  def test_23_dev7_picker_retained(self):
   source=(PAYLOAD/"openhtpc-session-engine.py").read_text();self.assertIn("openhtpc-bind-disc",source);self.assertIn('cached_meta.get("candidates", [])[:3]',source)
  def test_24_startup_contract_retained(self):
-  source=(PAYLOAD/"openhtpc-session-start").read_text();self.assertIn("write_flex_config",source);self.assertNotIn("openhtpc-tmdb-management",source)
+  source=(PAYLOAD/"openhtpc-session-start").read_text();self.assertIn("publish_flex_config",source);self.assertNotIn("openhtpc-tmdb-management",source)
  @staticmethod
  def lower_dock_geometry(width,height,buttons):
   gap=width*15//1000;max_width=width*(36 if buttons<=2 else 28 if buttons<=3 else 22)//100

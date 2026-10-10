@@ -309,5 +309,76 @@ class AudioDisplayLifecycleTests(unittest.TestCase):
         self.assertEqual(order, ["audio_prep", "runner"], "Fallback play_mpv must execute audio_prep before runner")
 
 
+    # 7. DVD dispatcher must delegate bitstream preparation to refresh matcher after modeset settle
+    def test_07_dvd_dispatcher_does_not_prepare_bitstream_before_refresh_matcher(self):
+        source = (PAYLOAD / "openhtpc-play-dvd").read_text(encoding="utf-8")
+        refresh_idx = source.index('if [[ -f $INSTALL/openhtpc-refresh-match.py ]]')
+        first_prepare_idx = source.index('prepare-bitstream')
+        launch_idx = source.index('"${refresh_runner[@]}" "$mpv_bin"')
+        self.assertLess(refresh_idx, first_prepare_idx,
+                        "DVD must never prepare PipeWire bitstream before the refresh matcher owns display settling")
+        self.assertLess(first_prepare_idx, launch_idx,
+                        "Fallback audio preparation, when used, must remain immediately before mpv launch")
+        self.assertIn('--decision-json "$policy_json"', source,
+                      "Resolved audio policy must be delegated to refresh matcher for post-modeset preparation")
+
+
+
+    # 8. Post-modeset BITSTREAM fallback pins mpv to the resolved digital SYSTEM sink
+    def test_08_bitstream_fallback_pins_resolved_spdif_sink_before_mpv(self):
+        timeline = []
+        snap = make_snapshot(rates=(60, 50), current="0")
+        runtime = FakeLifecycleRuntime(snap, timeline=timeline)
+        decision = {
+            "audio_output": {"requested": "BITSTREAM", "resolved": "BITSTREAM"},
+            "audio_target": {"configured": "DEVICE", "available": False, "effective": "SYSTEM", "fallback": True},
+        }
+        def prep(settle_timeout: float = 0.0):
+            timeline.append(("audio_prep", settle_timeout))
+            return {
+                "audio_sink_name": "alsa_output.pci-0000_00_1f.3.iec958-stereo",
+                "audio_sink_profile": "iec958-stereo",
+                "audio_sink_is_hdmi": False,
+                "iec958_prepare_status": "SKIPPED",
+                "iec958_prepare_reason": "SINK_NOT_HDMI",
+            }
+        seen = {}
+        def runner(cmd, **kwargs):
+            seen["cmd"] = list(cmd)
+            timeline.append(("mpv_launch", list(cmd)))
+            return mock.Mock(returncode=0)
+        with mock.patch.object(REFRESH, "Runtime", return_value=runtime):
+            result = REFRESH.run_playback(self.home, ["mpv", "--", "dvd://longest"], rate=25, runner=runner, audio_prep=prep, decision=decision)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--audio-device=pipewire/alsa_output.pci-0000_00_1f.3.iec958-stereo", seen["cmd"])
+        self.assertIn("--audio-spdif=", seen["cmd"], "Unproven IEC958 passthrough must fall back to PCM for this launch")
+        self.assertEqual(decision["audio_output"].get("effective_resolved"), "PCM")
+        self.assertLess([x[0] for x in timeline].index("audio_prep"), [x[0] for x in timeline].index("mpv_launch"))
+
+    def test_09_pcm_does_not_pin_post_modeset_sink(self):
+        decision = {"audio_output": {"requested": "PCM"}}
+        cmd = REFRESH._pin_resolved_bitstream_sink(["mpv", "--", "x"], decision, {"audio_sink_name": "alsa_output.foo.iec958-stereo", "audio_sink_profile": "iec958-stereo"})
+        self.assertFalse(any(x.startswith("--audio-device=") for x in cmd))
+
+    def test_10_existing_explicit_audio_device_is_not_overridden(self):
+        decision = {"audio_output": {"requested": "BITSTREAM"}}
+        cmd = REFRESH._pin_resolved_bitstream_sink(["mpv", "--audio-device=pipewire/user_choice", "--", "x"], decision, {"audio_sink_name": "alsa_output.foo.iec958-stereo", "audio_sink_profile": "iec958-stereo"})
+        self.assertEqual([x for x in cmd if x.startswith("--audio-device=")], ["--audio-device=pipewire/user_choice"])
+
+    def test_11_confirmed_hdmi_passthrough_keeps_bitstream(self):
+        decision = {"audio_output": {"requested": "BITSTREAM"}}
+        cmd = REFRESH._pin_resolved_bitstream_sink(
+            ["mpv", "--audio-spdif=ac3,dts", "--", "x"],
+            decision,
+            {"audio_sink_name": "alsa_output.hdmi", "audio_sink_profile": "hdmi-stereo", "audio_sink_is_hdmi": True,
+             "iec958_prepare_status": "SUCCESS", "iec958_prepare_reason": "CODECS_APPLIED"},
+        )
+        self.assertIn("--audio-device=pipewire/alsa_output.hdmi", cmd)
+        self.assertIn("--audio-spdif=ac3,dts", cmd)
+        self.assertNotIn("--audio-spdif=", cmd)
+        self.assertEqual(decision["audio_output"].get("effective_resolved"), "BITSTREAM")
+
+
+
 if __name__ == "__main__":
     unittest.main()

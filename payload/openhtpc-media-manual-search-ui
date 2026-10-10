@@ -372,13 +372,16 @@ def invoke_text_entry(
     elif effective_env.get("QT_QPA_PLATFORM"):
         cmd.extend(["-platform", effective_env["QT_QPA_PLATFORM"]])
 
-    proc = subprocess.run(
-        cmd,
-        env=effective_env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=effective_env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "cancelled": True, "text": initial, "reason": "TEXT_ENTRY_TIMEOUT"}
 
     if proc.returncode != 0:
         return {"ok": False, "cancelled": True, "text": initial}
@@ -648,7 +651,7 @@ def show_confirmation_window(
     platform_arg: str | None = None,
 ) -> str:
     """Display explicit search confirmation window and return 'SEARCH', 'MODIFY', or 'CANCEL'."""
-    from PySide6 import QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
     app = QtWidgets.QApplication.instance()
     created_app = False
@@ -678,7 +681,10 @@ def show_confirmation_window(
     win_cls = create_confirmation_window_class()
     window = win_cls(title, year)
     window.resize(800, 480)
+    window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     if created_app:
         app.exec()
@@ -692,7 +698,7 @@ def show_error_window(
     platform_arg: str | None = None,
 ) -> None:
     """Display provider error window."""
-    from PySide6 import QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
     app = QtWidgets.QApplication.instance()
     created_app = False
@@ -708,7 +714,10 @@ def show_error_window(
     win_cls = create_error_window_class()
     window = win_cls(message)
     window.resize(700, 380)
+    window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     if created_app:
         app.exec()

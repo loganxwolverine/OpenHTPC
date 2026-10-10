@@ -372,7 +372,7 @@ def run_text_entry(
     platform_arg: str | None = None,
 ) -> dict[str, Any]:
     """Execute text entry dialog and return structured result."""
-    from PySide6 import QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
     app = QtWidgets.QApplication.instance()
     created_app = False
@@ -408,7 +408,13 @@ def run_text_entry(
     window_cls = create_text_entry_window_class()
     window = window_cls(model, output_path=output_path)
     window.resize(1000, 680)
+    # Flex is a fullscreen couch UI. The text-entry dialog must explicitly
+    # surface above it under Wayland/KWin instead of relying on normal-window
+    # stacking/focus heuristics.
+    window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     if created_app:
         app.exec()

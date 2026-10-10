@@ -975,8 +975,8 @@ def test_42_no_provider_call_on_media_browsing(sandbox):
 # TESTS 43 - 45: PLAYBACK & SYSTEM NON-REGRESSION
 # ==============================================================================
 
-def test_43_primary_play_command_unchanged(sandbox):
-    """43. Primary Play command preserved on movie detail page."""
+def test_43_primary_play_command_is_tracked(sandbox):
+    """43. Movie-detail playback uses exact tracked lifecycle ownership."""
     _ingest_movie(sandbox, "PlayCmd.mkv")
     _, content = session_engine.media_menu_sections(
         sandbox["home"], [sandbox["sources_dir"]], sandbox["media_icon"], "gen43"
@@ -984,7 +984,7 @@ def test_43_primary_play_command_unchanged(sandbox):
     play_lines = [line for line in content.splitlines() if "LIRE LE FILM" in line]
     assert len(play_lines) == 1
     parts = play_lines[0].split(";")
-    assert parts[2].startswith("$HOME/.local/lib/openhtpc/openhtpc-play mact_")
+    assert parts[2].startswith(":tracked $HOME/.local/lib/openhtpc/openhtpc-play mact_")
 
 
 def test_44_media_dispatcher_unchanged(sandbox):
@@ -1124,8 +1124,10 @@ def test_53_existing_media_remove_regression(sandbox):
     root_name, content = session_engine.media_menu_sections(
         sandbox["home"], [sandbox["sources_dir"]], sandbox["media_icon"], "gen53"
     )
-    assert "RETIRER CETTE SOURCE D'OPENHTPC" in content
-    assert "openhtpc-media-remove" in content
+    remove_lines = [line for line in content.splitlines() if "openhtpc-media-remove" in line]
+    assert len(remove_lines) == 1
+    label = remove_lines[0].split("=", 1)[1].split(";", 1)[0]
+    assert label.startswith("RETIRER")
 
 
 def test_54_xdg_isolation(sandbox):

@@ -174,7 +174,7 @@ class DisplayRuntime(unittest.TestCase):
                 with mock.patch.object(ImageDraw.ImageDraw, 'text', autospec=True) as draw:
                     ui.system_page_png(m, self.home/'refresh-proof.png', PAYLOAD/'flex/assets/fonts/OpenSans-Regular.ttf', 'display')
                 texts = [(c.args[1], c.args[2]) for c in draw.call_args_list]
-                label = next(pos for pos, text in texts if text == 'Mode de rafraîchissement')
+                label = next(pos for pos, text in texts if text == 'Adaptation de fréquence')
                 values = [text for pos, text in texts if pos[0] > label[0] and abs(pos[1] - label[1]) <= 2]
                 self.assertEqual(values, ['Non déterminé'])
 

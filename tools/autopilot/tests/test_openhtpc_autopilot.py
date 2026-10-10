@@ -113,20 +113,23 @@ class ProcessAndPreflight(unittest.TestCase):
  def test_26_missing_antigravity_executable(self):
   with tempfile.TemporaryDirectory() as raw:
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root)
-   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="agy" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
+   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="agy" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),mock.patch.object(A,"run_command",return_value=mock.Mock(returncode=0,stdout="fixture-cli 1.0",stderr="")) as version_probe,contextlib.redirect_stdout(io.StringIO()):
     self.assertEqual(pilot.doctor(False),1)
+   self.assertEqual([call.args[0] for call in version_probe.call_args_list],[["codex","--version"]])
  def test_27_missing_codex_executable(self):
   with tempfile.TemporaryDirectory() as raw:
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root)
-   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="codex" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):
+   with mock.patch.object(A.shutil,"which",side_effect=lambda name:None if name=="codex" else "/bin/true"),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),mock.patch.object(A,"run_command",return_value=mock.Mock(returncode=0,stdout="fixture-cli 1.0",stderr="")) as version_probe,contextlib.redirect_stdout(io.StringIO()):
     self.assertEqual(pilot.doctor(False),1)
+   self.assertEqual([call.args[0] for call in version_probe.call_args_list],[["agy","--version"]])
  def test_28_gemini_executable_is_not_required(self):
   with tempfile.TemporaryDirectory() as raw:
    root=pathlib.Path(raw);(root/".git").mkdir();pilot=A.Autopilot(root);calls=[]
    def lookup(name):
     calls.append(name);return "/bin/true"
-   with mock.patch.object(A.shutil,"which",side_effect=lookup),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),contextlib.redirect_stdout(io.StringIO()):pilot.doctor(False)
+   with mock.patch.object(A.shutil,"which",side_effect=lookup),mock.patch.object(A,"git_context",return_value={"status":"","branch":"x"}),mock.patch.object(A,"run_command",return_value=mock.Mock(returncode=0,stdout="fixture-cli 1.0",stderr="")) as version_probe,contextlib.redirect_stdout(io.StringIO()):pilot.doctor(False)
    self.assertNotIn("gemini",calls);self.assertIn("agy",calls)
+   self.assertEqual([call.args[0] for call in version_probe.call_args_list],[["agy","--version"],["codex","--version"]])
 
 class LocalRuntimeIsolation(unittest.TestCase):
  def setUp(self):self.home=pathlib.Path("/home/tester")
@@ -157,9 +160,10 @@ class LocalRuntimeIsolation(unittest.TestCase):
   self.assertNotIn("local_openhtpc_runtime_processes",inspect.getsource(A.Autopilot.plan))
  def test_35_doctor_reports_runtime_without_making_it_failure(self):
   pilot=A.Autopilot(MODULE_PATH.parents[2])
-  with mock.patch.object(A,"local_openhtpc_runtime_processes",return_value=[{"pid":1,"name":"openhtpc-home.py"}]),mock.patch.object(A.shutil,"which",return_value="/bin/true"),contextlib.redirect_stdout(io.StringIO()) as output:
+  with mock.patch.object(A,"local_openhtpc_runtime_processes",return_value=[{"pid":1,"name":"openhtpc-home.py"}]),mock.patch.object(A,"git_context",return_value={"status":"","branch":"fixture"}),mock.patch.object(A,"ensure_canonical_state_applicable",return_value=None),mock.patch.object(A.shutil,"which",return_value="/bin/true"),mock.patch.object(A,"run_command",return_value=mock.Mock(returncode=0,stdout="fixture-cli 1.0",stderr="")) as version_probe,contextlib.redirect_stdout(io.StringIO()) as output:
    result=pilot.doctor(False)
   self.assertEqual(result,0);self.assertIn("local_openhtpc_runtime_active=True",output.getvalue())
+  self.assertEqual([call.args[0] for call in version_probe.call_args_list],[["agy","--version"],["codex","--version"]])
  def test_36_detection_has_no_process_control(self):
   import inspect
   source=inspect.getsource(A.local_openhtpc_runtime_processes)+inspect.getsource(A.print_local_runtime_stop)
@@ -253,9 +257,13 @@ class CanonicalProjectState(unittest.TestCase):
  def test_53_unknown_state_schema_rejected(self):
   value=dict(self.state);value["schema_version"]=2
   with self.assertRaises(A.AutopilotError):A.validate_document(self.root,value,"project-state.schema.json")
- def test_54_planner_context_receives_canonical_state(self):
-  with mock.patch.object(A,"git_context",return_value={"root":str(self.root),"branch":"x","head":"a"*40,"status":"","log":""}):
-   self.assertEqual(A.Autopilot(self.root).context()["canonical_project_state"],self.state)
+ def test_54_current_release_rejects_stale_p2_state(self):
+  with self.assertRaisesRegex(A.AutopilotError,"CANONICAL_STATE_STALE"):
+   A.ensure_canonical_state_applicable(self.root,self.state)
+ def test_54b_p2_state_remains_applicable_to_1_2_line(self):
+  with tempfile.TemporaryDirectory() as raw:
+   root=pathlib.Path(raw);(root/"VERSION").write_text("1.2.0-rc7\n",encoding="utf-8")
+   A.ensure_canonical_state_applicable(root,self.state)
  def test_55_architecture_freeze_is_not_development_stop(self):
   prompt=(self.root/"tools/autopilot/prompts/planner.md").read_text(encoding="utf-8")
   self.assertIn("does not mean all protected-optical development is finished",prompt)

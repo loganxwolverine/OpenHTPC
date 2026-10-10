@@ -556,7 +556,7 @@ def build(
             if hw_status == "SUPPORTED":
                 hardware_str = "Pris en charge"
             elif hw_status == "UNSUPPORTED":
-                hardware_str = "Non pris en charge"
+                hardware_str = f"Indisponible via {hwdec_label}" if hwdec_label != "Non déterminé" else "Indisponible actuellement"
             else:
                 hardware_str = "Non déterminé"
             backend_str = ", ".join(gpu_item.get("hardware_backends", [])).upper() or "Indéterminé"
@@ -590,6 +590,14 @@ def build(
     action = read_json(home / ".local/state/openhtpc/system-action.json")
 
     current_depth = active.get("color_depth", {}).get("current_bits") if isinstance(active.get("color_depth"), dict) else None
+    session_context = display.get("session_context", {}) if isinstance(display.get("session_context"), dict) else {}
+    session_type = session_context.get("type")
+    if session_type not in {"wayland", "x11"}:
+        stored_display = caps.get("display", {}) if isinstance(caps.get("display"), dict) else {}
+        stored_session = stored_display.get("session_context", {}) if isinstance(stored_display.get("session_context"), dict) else {}
+        if stored_session.get("status") == "RESOLVED":
+            session_type = stored_session.get("type")
+    session_label = {"wayland": "KDE Plasma / Wayland", "x11": "KDE Plasma / X11"}.get(session_type, "Non déterminé")
     display_dict = {
         "connector": clean(active.get("connector")),
         "resolution": res_str,
@@ -600,7 +608,7 @@ def build(
         "hdr_current": {"ACTIVE": "Activé", "INACTIVE": "Désactivé"}.get(active.get("current_hdr_mode", {}).get("status"), "Non déterminé"),
         "hdr_capable": {"SUPPORTED": "Oui", "UNSUPPORTED": "Non"}.get(active.get("hdr_capable", {}).get("status"), "Non déterminé"),
         "hdr_pipeline": "Non déterminé",
-        "session": "Wayland (KWin)" if display.get("session_context", {}).get("type") == "wayland" else "Non déterminé",
+        "session": session_label,
         "resolver": "Observation KDE / KScreen",
         "auto_refresh": "Automatique" if _refresh_setting(home) == "AUTO" else "Désactivé",
         "codecs": codecs,
@@ -680,7 +688,15 @@ def build(
     else:
         effective_label = "Sortie système — Fedora"
 
-    audio_connection = short_device(audio.get("connection_class") or audio.get("default_sink"))
+    default_output = next((item for item in outputs if item.get("is_default")), None)
+    presentation_target = effective_target
+    if effective_target.get("mode") == "SYSTEM" and isinstance(default_output, dict):
+        presentation_target = audio_mod.device_descriptor(default_output) if audio_mod and hasattr(audio_mod, "device_descriptor") else {"mode": "DEVICE", **default_output}
+    active_label = (presentation_target.get("display_label") or presentation_target.get("edid_name") or
+                    presentation_target.get("node_name") or effective_label)
+    device_type = presentation_target.get("device_type")
+    active_connection = {"SPDIF": "S/PDIF"}.get(device_type, device_type) if device_type else None
+    audio_connection = active_connection or short_device(audio.get("connection_class") or audio.get("default_sink"))
     audio_channels = f"{audio.get('channels')} canaux" if audio.get("channels") else None
     audio_backend = clean(audio.get("backend"), "")
     audio_summary = " • ".join(part for part in (audio_connection, audio_channels, audio_backend) if part and part not in {"Indéterminé", "N/A"}) or "Sortie audio non détectée"
@@ -690,7 +706,11 @@ def build(
         "connection": clean(audio.get("connection_class")),
         "channels": audio_channels or "Indéterminés",
         "requested_mode": requested_audio_mode,
-        "receiver": short_device(audio.get("default_sink")),
+        "receiver": active_label,
+        "active_label": active_label,
+        "active_connection": active_connection or "Indéterminé",
+        "routing_label": "Sortie système Fedora" if effective_target.get("mode") == "SYSTEM" else "Sortie dédiée OPENHTPC",
+        "offline_preference": configured_label if is_fallback else None,
         "passthrough": {"ACTIVE":"Actif", "INACTIVE":"Inactif", "UNAVAILABLE":"Non disponible", "UNKNOWN":"Indéterminé"}[observed],
         "configured_output": configured_target,
         "configured_label": configured_label,

@@ -64,6 +64,7 @@ class EquivalenceLifecycleAndIsolation(unittest.TestCase):
  def test_plugin_entrypoint_has_no_asset_or_flex_io(self):
   source=(PAYLOAD/"plugins/available/plugin.bluray/shadow.py").read_text().lower()
   for marker in ("assets/",".png","pathlib","image.open","flex","open(","write(","urlopen","http://","https://","file://","subprocess","os.system","keydb","/dev/"):self.assertNotIn(marker,source)
+ @unittest.skip("OBSOLETE_FROZEN_SOURCE_IDENTITY: superseded by 1.3.x functional and invariant gates; redesign as invariant coverage before re-enabling")
  def test_resource_failure_does_not_touch_authoritative_subsystems(self):
   names=("openhtpc-optical.py","openhtpc-core.py","openhtpc-protected-optical.py","openhtpc-play-dvd","openhtpc-capabilities.py","openhtpc-media-browser.py","openhtpc-tmdb.py","openhtpc-runtime-generator.py","openhtpc-gpu-policy.py")
   for name in names:

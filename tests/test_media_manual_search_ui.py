@@ -1249,3 +1249,61 @@ def test_45_case5_candidate_accepted_persists_identity_and_enables_movie_detail(
     assert "LIRE LE FILM" in content
     # 4. Movie detail section contains CHANGER L’IDENTIFICATION routing to resolver
     assert "MEDIA_R" in content
+
+
+def test_46_confirmation_and_error_windows_surface_above_flex_offscreen(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["openhtpc-test", "-platform", "offscreen"])
+    events = []
+
+    class FakeConfirmation:
+        def __init__(self, title, year):
+            self.decision = "CANCEL"
+            events.append(("confirmation_init", title, year))
+        def resize(self, w, h): events.append(("confirmation_resize", w, h))
+        def setWindowFlag(self, flag, enabled=True): events.append(("confirmation_flag", flag, enabled))
+        def show(self): events.append(("confirmation_show",))
+        def raise_(self): events.append(("confirmation_raise",))
+        def activateWindow(self): events.append(("confirmation_activate",))
+
+    class FakeError:
+        def __init__(self, message): events.append(("error_init", message))
+        def resize(self, w, h): events.append(("error_resize", w, h))
+        def setWindowFlag(self, flag, enabled=True): events.append(("error_flag", flag, enabled))
+        def show(self): events.append(("error_show",))
+        def raise_(self): events.append(("error_raise",))
+        def activateWindow(self): events.append(("error_activate",))
+
+    monkeypatch.setattr(manual_search_ui, "create_confirmation_window_class", lambda: FakeConfirmation)
+    monkeypatch.setattr(manual_search_ui, "create_error_window_class", lambda: FakeError)
+
+    assert manual_search_ui.show_confirmation_window("Film", "2026", platform_arg="offscreen") == "CANCEL"
+    manual_search_ui.show_error_window("Erreur", platform_arg="offscreen")
+
+    stay_on_top = QtCore.Qt.WindowType.WindowStaysOnTopHint
+    assert any(e[0] == "confirmation_flag" and e[1] == stay_on_top for e in events)
+    assert ("confirmation_show",) in events
+    assert ("confirmation_raise",) in events
+    assert ("confirmation_activate",) in events
+    assert any(e[0] == "error_flag" and e[1] == stay_on_top for e in events)
+    assert ("error_show",) in events
+    assert ("error_raise",) in events
+    assert ("error_activate",) in events
+    assert app is not None
+
+
+def test_47_text_entry_timeout_returns_cancelled_without_exception(monkeypatch, sandbox):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["openhtpc-text-entry.py"], timeout=300)
+    monkeypatch.setattr(manual_search_ui.subprocess, "run", timeout)
+    result = manual_search_ui.invoke_text_entry(
+        title="OPENHTPC — Titre du film",
+        initial="Film",
+        install=sandbox["install"],
+        env={"QT_QPA_PLATFORM": "offscreen"},
+    )
+    assert result["ok"] is False
+    assert result["cancelled"] is True
+    assert result["text"] == "Film"
+    assert result["reason"] == "TEXT_ENTRY_TIMEOUT"

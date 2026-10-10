@@ -476,6 +476,7 @@ def test_rx5700xt_4k_resolves_high_chain():
         chain = shader_args[0]
         for shader in ("FSRCNN_x2_r2_32-0-2.glsl", "KrigBilateral.glsl", "SSimSuperRes.glsl", "OpenHTPC_Vibrance_Mild.glsl"):
             assert shader in chain
+        assert "--hwdec=vaapi-copy" in decision["mpv_args"]
         assert "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]" in decision["mpv_args"]
         assert "--fbo-format=rgba16hf" in decision["mpv_args"]
     finally:

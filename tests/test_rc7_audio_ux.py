@@ -311,6 +311,22 @@ class Rc7AudioUxTest(unittest.TestCase):
             self.assertEqual(decision["audio_target"]["effective"], "SYSTEM")
             self.assertTrue(decision["audio_target"]["fallback"])
 
+    def test_13b_offline_device_presents_actual_system_default(self):
+        self._init_config(AUDIO.device_descriptor(DENON_HDMI_SINK))
+        system_default = dict(DENON_HDMI_SINK, node_name='alsa_output.pci-0000_00_1f.3.iec958-stereo',
+                              display_label='ALC1150 Digital', edid_name=None, device_type='SPDIF',
+                              bus_path='pci-0000:00:1f.3', is_default=True)
+        health = {"overall": "READY", "checks": []}
+        version = {"version": "test", "build_id": "test"}
+        with mock.patch.object(AUDIO, "discover_outputs", return_value=[system_default]):
+            built = MODEL.build(self.home, PAYLOAD, health, version)
+        audio = built["audio_section"]
+        self.assertTrue(audio["is_fallback"])
+        self.assertEqual(audio["active_label"], "ALC1150 Digital")
+        self.assertEqual(audio["active_connection"], "S/PDIF")
+        self.assertEqual(audio["offline_preference"], DENON_HDMI_SINK["display_label"])
+        self.assertEqual(audio["receiver"], "ALC1150 Digital")
+
     # 14. DEVICE revient -> Disponible sans modification config
     def test_14_device_returns_available_without_modifying_config(self):
         self._init_config(AUDIO.device_descriptor(DENON_HDMI_SINK))
@@ -608,7 +624,8 @@ class Rc7AudioUxTest(unittest.TestCase):
                 UI.system_page_png(model, out_img, font_path, "audio")
 
             self.assertNotIn("Informations système temporairement indisponibles", rendered_texts)
-            self.assertIn("Indisponible", rendered_texts)
+            self.assertIn("Préférence hors ligne", rendered_texts)
+            self.assertIn(DENON_HDMI_SINK["display_label"], rendered_texts)
             self.assertIn("SORTIE AUDIO", rendered_texts)
 
     # 32. Blocage 3 / 6: test_device_absence_and_return_does_not_rewrite_config
