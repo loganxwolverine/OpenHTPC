@@ -5,8 +5,8 @@
 Hermes Agent with DeepSeek through OpenRouter has two distinct OPENHTPC roles:
 
 1. external contradictory reviewer in the technically read-only audit lane;
-2. second operational engineer in a dedicated writable clone with no authority
-   over the canonical repository.
+2. second operational engineer, either in a dedicated writable clone or through
+   the separately authorized `hermes-eng` canonical engineering account.
 
 Its findings and changes remain evidence for review, not project authority.
 
@@ -77,6 +77,37 @@ relative to the dirty canonical HEAD), the exact Git status and a NUL-safe
 untracked-path manifest. Codex or Steve reviews these artifacts before any
 canonical application. No automatic import path exists.
 
+## Direct canonical engineering lane — 2026-10-13
+
+Steve explicitly replaced the clone-only engineering restriction for this
+separate lane. The persistent Hermes gateway holds a dedicated private key and
+connects through SSH alias `canonical-eng` to `.79` as Unix account
+`hermes-eng`. The account can read/write the
+canonical worktree and `.git`, run the host Python/pytest/build toolchain and
+create Git work on Hermes-owned branches/worktrees.
+
+Measured installation properties:
+
+- Unix identity `uid=1001(hermes-eng)`, login shell `/bin/bash`;
+- dedicated ED25519 public-key fingerprint
+  `SHA256:X0NnmzkZwbUnkbpEXnjfmQ1Poooy1TkUMNOD+d4pS1g`;
+- repository ACL `rwX` plus inherited defaults; only `--x` traversal on the two
+  otherwise private parent directories;
+- effective Git author and committer `Hermes Agent <hermes@openhtpc.local>`;
+- no `docker` group, no passwordless sudo and no §6 sudoers rule;
+- SSH write probes in the worktree and `.git` passed and were removed;
+- `tests/test_hermes_engineer_handoff.py`: 5 PASS;
+- `tools/openhtpc-devctl --help`: PASS;
+- clean temporary CMake/Ninja Flex build: PASS, with the pre-existing ignored
+  `write` return-value warning.
+
+This is an engineering capability, not standing authority to push, tag,
+publish, rewrite shared history, deploy, decide product behavior, operate
+physical validators or touch protected stashes. Hermes uses its own
+branch/worktree and records provenance before work. Codex or Steve must review
+Hermes changes before qualification. The technically immutable audit lane is
+unchanged and must never receive this private key or use this account.
+
 ## Read-only audit contract
 
 Every initial audit uses a new identifiable snapshot of the current canonical worktree. The snapshot must record the verified branch, HEAD, `git status --short`, protected stash names, and a diff of local changes. `.git` is excluded so the snapshot cannot become Git authority.
@@ -111,8 +142,9 @@ it was created to remove.
   `artifacts` streamed the 1.3.1 packages, whose SHA-256 for
   `OpenHTPC-1.3.1-Patina-PalScope.tar.gz` matched the build report independently
   (`80edb1552f664f28db83e4a741d80cbe75f873ec0c6eed94ab2ba83ee77c1481`).
-- Authority: this extends Hermes **reading** only. The responsibility matrix in
-  `OPENHTPC_ACTORS.md` is unchanged for writing, Git, deployment and product authority.
+- Authority: this channel itself extends Hermes **reading** only. Direct
+  engineering writes use the separate `hermes-eng` identity documented above;
+  deployment and product authority remain unchanged.
   Revocation is a single line: remove the `authorized_keys` entry on `.79`.
 
 ## Invocation pattern
@@ -201,10 +233,11 @@ Direct Hermes -> CodeGraph MCP remains `NOT_ESTABLISHED`. The preferred design i
 
 ## Promotion decision for Hermes
 
-Steve explicitly authorized the second-engineer role on 2026-10-11. Promotion
-is limited to the isolated engineering clone described above. The immutable
-audit lane remains read-only, and the promotion grants no deployment, push,
-merge, publication, physical-operation or canonical-stash authority.
+Steve authorized the second-engineer role on 2026-10-11 and the distinct direct
+canonical `hermes-eng` lane on 2026-10-13. The immutable audit lane remains
+read-only. Neither promotion grants deployment, push, tag, publication,
+physical-operation, product-decision or protected-stash authority; direct work
+requires review by Codex or Steve before qualification.
 
 ## R3 review and snapshot-local CodeGraph — 2026-10-09
 

@@ -62,7 +62,13 @@ global settings. Runtime artifacts use `antigravity-planner.*` and
 
 ## External contradictory audit lane — Hermes
 
-Hermes/DeepSeek is deliberately outside the Autopilot commit path. It may audit an isolated, technically read-only snapshot of the exact current worktree and return evidence-backed findings, but it cannot authorize or perform an Autopilot action. AGY remains the bounded planner/reviewer, Codex remains the bounded executor, and the Python orchestrator remains the only Autopilot component allowed to accept a local commit.
+Hermes/DeepSeek is deliberately outside the Autopilot commit path. Its audit lane
+may inspect an isolated, technically read-only snapshot; its separate engineering
+lane may modify only a standalone clone without remote and return an export for
+review. Neither lane can authorize or perform an Autopilot action. AGY remains the
+bounded planner/reviewer, Codex remains the bounded Autopilot executor, and the
+Python orchestrator remains the only Autopilot component allowed to accept a local
+commit.
 
 Hermes reports are stored outside the snapshot and must be compared against code/tests and the current diagnosis before any implementation work is delegated. See `docs/OPENHTPC_HERMES_AUDITOR.md`.
 

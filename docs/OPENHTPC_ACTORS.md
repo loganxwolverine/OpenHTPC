@@ -1,6 +1,6 @@
 # OPENHTPC — Acteurs, outils et autorités
 
-Dernière mise à jour : 2026-10-11, Europe/Brussels.
+Dernière mise à jour : 2026-10-13, Europe/Brussels.
 
 ## Objet et portée
 
@@ -17,9 +17,9 @@ L'ordre d'autorité technique reste celui de `AGENTS.md` : code/tests/artifacts,
 - **AGY** désigne dans le dépôt le CLI Google Antigravity utilisé par Autopilot comme planner/reviewer borné. **Autopilot** est l'orchestrateur Python local, pas un modèle.
 - Une recommandation d'agent est un avis. Une preuve logicielle n'est pas une qualification physique.
 
-## Hôte de contrôle et Hermes — vérifié le 2026-10-11
+## Hôte de contrôle et Hermes — vérifié le 2026-10-13
 
-Codex, AGY et CodeGraph sont disponibles sur .79. Hermes Agent 0.21.6 y fonctionne désormais dans Docker avec ses historiques et rapports ; DeepSeek reste distant via OpenRouter. Le conteneur Unraid .10 est arrêté/secours. Les audits OPENHTPC passent par un conteneur one-shot UID10000, snapshot read-only et SSH masqué. Depuis le 2026-10-13, le gateway de Hermes dispose en outre d'un **canal de lecture seule vers le dépôt canonique** (identité SSH dédiée, commande forcée, opérations `status|digest|export|bundle|artifacts`, plus le dépôt de documents `.md` neufs : aucune écriture dans l'arbre existant, aucun `.git` mutable, ni push ni fetch) ; il sert à *vérifier* et à tirer une base fraîche, jamais à travailler. La voie ingénierie utilise une image dérivée locale, un HOME propre et un clone autonome sans remote ni autorité `.git` canonique. Voir docs/continuity/2026-10-11-hermes-migration-79.md et le checkpoint de handoff opérationnel.
+Codex, AGY et CodeGraph sont disponibles sur .79. Hermes Agent 0.21.6 y fonctionne désormais dans Docker avec ses historiques et rapports ; DeepSeek reste distant via OpenRouter. Le conteneur Unraid .10 est arrêté/secours. Les audits OPENHTPC passent par un conteneur one-shot UID10000, snapshot read-only et SSH masqué. Le gateway conserve son canal de lecture seule à commande forcée pour les contrôles de fraîcheur. Depuis le 2026-10-13, Steve a aussi autorisé une voie ingénierie directe distincte : compte Unix/SSH `hermes-eng`, écriture canonique et Git complet, sans sudo, groupe Docker, déploiement ou publication. La voie par clone autonome reste disponible. Voir le checkpoint `docs/continuity/2026-10-13-hermes-direct-engineering-access.md`.
 
 ## Matrice des responsabilités et permissions
 
@@ -32,7 +32,7 @@ Codex, AGY et CodeGraph sont disponibles sur .79. Hermes Agent 0.21.6 y fonction
 | Codex CLI | Agent d'exécution principal | Analyse, CodeGraph, implémentation, tests, diagnostic et opérations Git bornées | Oui | Oui, dans le périmètre mandaté | Oui | Inspection ; commit/push/merge seulement si explicitement autorisés | Seulement sur autorisation explicite et après prévol | Technique déléguée, pas produit | Service OpenAI, `AGENTS.md`, outils locaux/MCP, CodeGraph |
 | AGY / Google Antigravity CLI | Agent planner/reviewer | Planifier et relire les tâches Autopilot en mode headless borné | Oui, en lecture seule | Non dans le contrat Autopilot | Analyse des preuves, pas exécution libre | Non | Non | Avis borné soumis à la politique | Exécutable `agy`, authentification Google externe, schémas Autopilot |
 | CodeGraph | Outil d'analyse structurelle | Callers/callees, dépendances, chemins d'appel, blast radius, tests associés | Index structurel | Non | Identifie les tests ; ne les exécute pas comme autorité | Non | Non | Aucune | Index local/MCP ; snapshot dédié lorsqu'utilisé par Hermes |
-| Hermes Agent | Second ingénieur + auditeur externe | Reprendre un chantier borné dans un clone isolé ; contre-audit adversarial séparé | Snapshot audit, clone ingénierie, ou canal lecture seule vers le canonique (opérations bornées, sans écriture dans l'arbre) | Oui dans le clone isolé ; **jamais directement sur le canonique** | Oui dans l'image ingénierie | Branche/commit local isolé ; aucun remote ni `.git` canonique | **Non** sans mandat séparé | Technique déléguée, jamais finale | Conteneurs isolés, skills projet, CodeGraph local au clone, modèle DeepSeek via OpenRouter |
+| Hermes Agent | Second ingénieur + auditeur externe | Reprendre un chantier borné ; contre-audit adversarial séparé | Snapshot audit, clone ingénierie, canal lecture seule, ou compte direct `hermes-eng` | Oui dans le clone ou, depuis le 2026-10-13, directement via `hermes-eng` | Oui | Branches/commits locaux ; aucun push/tag/publication implicite | **Non** sans mandat séparé | Technique déléguée, jamais finale ; ses changements sont relus par Codex ou Steve | Conteneurs isolés ou compte SSH dédié, skills projet, CodeGraph, modèle DeepSeek via OpenRouter |
 | DeepSeek | Modèle | Moteur d'analyse actuellement sélectionné pour Hermes | Via le contexte Hermes | Non par lui-même | Non par lui-même | Non | Non | Aucune | Hermes Agent et fournisseur OpenRouter |
 | OpenRouter | Fournisseur / routeur de modèles | Acheminer l'accès au modèle DeepSeek pour Hermes | Non | Non | Non | Non | Non | Aucune | Configuration/identifiants externes au dépôt |
 | OPENHTPC Autopilot | Orchestrateur Python local | Enchaîner plan AGY, politique déterministe, exécution Codex, review et gates | Oui | État de run borné ; modifications via Codex | Valide les preuves déclarées | Peut accepter un **commit local** uniquement selon politique ; jamais push | Jamais automatique | Politique/gate, pas autorité produit | `agy`, `codex`, schémas/prompts, état canonique applicable |
@@ -54,8 +54,9 @@ Steve → Codex CLI → CodeGraph/outils → modification bornée → tests → 
 ChatGPT n'est pas un relais obligatoire. Codex doit toutefois remonter tout conflit avec une règle gelée ou toute décision produit manquante.
 
 Lorsque Codex n'est pas disponible, le même chantier peut être remis à Hermes
-par `openhtpc-hermes-engineer prepare`. Hermes travaille alors dans le clone
-isolé, puis rend patch, état Git, tests et rapport à Codex ou à Steve.
+dans le clone isolé ou via `hermes-eng`. Dans la voie directe, Hermes travaille
+sur sa propre branche/worktree, consigne ses tests et soumet ses changements à
+Codex ou Steve avant qualification.
 
 ### Handoff standard bidirectionnel
 
@@ -87,7 +88,7 @@ Steve et/ou ChatGPT → cadrage
                               validation humaine → intégration autorisée
 ```
 
-AGY et Hermes ne sont pas exigés pour chaque petite modification. Hermes reste hors du chemin de commit Autopilot. Sa voie audit reçoit un snapshot techniquement immuable ; sa voie ingénierie reçoit un clone autonome sans remote. Depuis le 2026-10-13, elle lit aussi le canonique par un canal SSH de lecture seule (opérations bornées, sans écriture dans l'arbre existant, sans push ni commit) : cela étend sa **lecture**, jamais son autorité.
+AGY et Hermes ne sont pas exigés pour chaque petite modification. Hermes reste hors du chemin de commit Autopilot. Sa voie audit reçoit toujours un snapshot techniquement immuable. Sa voie ingénierie peut utiliser le clone autonome sans remote ou le compte direct `hermes-eng`; ce dernier n'est jamais utilisé pour l'audit contradictoire.
 
 ### Décision produit ou UX
 
@@ -104,7 +105,7 @@ Les validations visuelles et sonores reviennent à Steve. Les mesures automatiqu
 - Une implémentation validée logiciellement n'autorise pas un déploiement.
 - Un déploiement nécessite un mandat explicite, un prévol de l'hôte et la préservation de l'état utilisateur.
 - Autopilot ne déploie jamais automatiquement et ne pousse jamais.
-- Hermes peut modifier et committer localement dans son clone isolé. Il ne pousse, ne fusionne vers le canonique, ne déploie et ne publie jamais sans mandat séparé de Steve.
+- Hermes peut modifier et committer dans son clone isolé ou sur ses propres branches/worktrees via `hermes-eng`. Il ne pousse, ne tague, ne publie, ne réécrit une branche partagée, ne déploie et ne manipule les stashes protégés sans mandat séparé de Steve. Codex ou Steve relit son travail avant qualification.
 - CodeGraph produit des faits structurels, pas une permission d'agir.
 
 ## Provenance et points à clarifier
