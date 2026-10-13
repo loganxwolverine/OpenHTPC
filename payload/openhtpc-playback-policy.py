@@ -80,7 +80,13 @@ def _magnificence_source_scope(kind: str, probe: dict | None) -> str | None:
         height = int(video.get("height") or 0)
     except (TypeError, ValueError):
         return None
-    if width and height and width <= 720 and height <= 576:
+    # SD scope is the PAL-film DVD class.  The consuming profiles declare
+    # source_scope.resolution == "720x576" @ 25 fps, so only the 625-line PAL
+    # geometry (576 active lines) may claim it.  Sub-576-line SD such as NTSC
+    # 720x480/29.97 must fail closed to PURE instead of selecting a PAL-declared
+    # profile.  (The `kind == "dvd"` branch above keeps its documented PAL
+    # assumption because no ffprobe is available at that call site.)
+    if width and height and width <= 720 and height == 576:
         return "DVD_PAL_FILM"
 
     # First HD scope: progressive film-rate material only.  Do not fold
