@@ -1,3 +1,25 @@
+> **CORRECTION DU 2026-10-13, MÊME JOUR — CETTE PROPOSITION EST FAUSSE.**
+>
+> La migration vers un « schéma 2 » n'est pas l'action correcte, et le diagnostic qui la motivait
+> était erroné. Mesures qui l'établissent :
+>
+> - `tools/autopilot/schemas/project-state.schema.json` impose `schema_version: {"const": 1}` **et**
+>   `workstream: {"const": "PROTECTED_OPTICAL_PLUGIN_FRAMEWORK_P2"}` : le contrat est **gelé par
+>   conception**, pas périmé par négligence ;
+> - `tools/autopilot/openhtpc_autopilot.py:93-96` le dit explicitement — « the frozen 1.2.0/P2
+>   contract. Do not let a valid historical document authorize work on a newer release line » — et
+>   lève `CANONICAL_STATE_STALE` quand `VERSION` ne commence pas par `1.2.0` ;
+> - `test_53` **exige** que `schema_version = 2` soit rejeté ; `test_54` **exige** que le projet
+>   1.3.1 rejette cet état. Suite complète : **85 tests sur 85 passent**.
+>
+> Conséquence : `OPENHTPC_CURRENT_STATE.json` n'est pas un fichier à moderniser. C'est un document
+> historique gelé, et le garde-fou qui le rejette est le comportement **voulu et testé**. Rouvrir
+> Autopilot sur la ligne 1.3.x exige un **nouveau contrat d'état** — nouveau schéma, nouveau
+> workstream, tests associés — c'est-à-dire une décision d'architecture, pas une mise à jour de
+> valeurs.
+>
+> Le texte ci-dessous est conservé tel quel, pour mémoire de l'erreur.
+
 # OPENHTPC — Brouillon prêt à l'emploi : `OPENHTPC_CURRENT_STATE.json` schéma 2
 
 Préparé par Hermes, 2026-10-13. Suite de `2026-10-13-current-state-schema-proposal.md`.

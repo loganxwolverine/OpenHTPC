@@ -63,8 +63,13 @@ Tout est vérifiable : `git log --author`, et le diff de chaque commit.
 
 ## 6. Reste ouvert
 
-1. **Fichiers d'état en schéma 2** — Autopilot est fermé depuis le 2026-10-11 à cause de l'état
-   périmé (`OPENHTPC_CURRENT_STATE.json` porte encore P2/RC5/RC7).
+1. **Fichiers d'état — diagnostic corrigé le jour même.** Le fichier canonique n'est pas
+   « périmé par négligence » mais **gelé par conception** : le schéma impose `schema_version = 1` et
+   `workstream = P2` (`const`), et deux tests exigent que le schéma 2 comme l'état P2 sous 1.3.1
+   soient **rejetés** (85/85 verts). Autopilot n'est donc pas « fermé par accident » : aucun contrat
+   d'état n'existe pour la ligne 1.3.x. En créer un est une **décision d'architecture** (Codex ou
+   Steve), pas une tâche de mise à jour de valeurs. Voir la correction en tête de
+   `2026-10-13-current-state-schema-proposal.md`.
 2. **Tranche produit suivante** — contrat générique d'action média bornée ; l'entrée d'analyse est
    déjà déposée.
 3. **Alignement de la gouvernance** — `docs/OPENHTPC_ACTORS.md` affirme encore « jamais directement
