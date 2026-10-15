@@ -43,6 +43,7 @@ class Authority(unittest.TestCase):
   (self.install/"VERSION").write_text("1.2.0-dev5\n");shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py")
   shutil.copytree(PAYLOAD/"assets",self.install/"assets")
   self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
+  capabilities=self.home/".config/openhtpc/runtime/capabilities.json";capabilities.parent.mkdir(parents=True);capabilities.write_text(json.dumps({"optical":{"protected_media":{"status":"AVAILABLE"}}}))
  def registry(self):return REGISTRY.registry(self.home,self.install)
  def test_disabled_is_plugin_unavailable(self):self.assertEqual(CORE.optical_presentation_descriptor(self.home,self.install,self.registry(),state("UHD_BLURAY_VIDEO"))[0],"PLUGIN_UNAVAILABLE")
  def test_enabled_uses_plugin(self):

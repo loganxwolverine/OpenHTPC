@@ -151,7 +151,7 @@ class Rc7AboutUxTest(unittest.TestCase):
 
         content = config_path.read_text(encoding="utf-8")
         self.assertIn("[SYSTEME]", content)
-        self.assertIn("Entry9=À PROPOS;", content)
+        self.assertIn("Entry10=À PROPOS;", content)
         self.assertIn(":submenu SYSTEM_ABOUT", content)
 
         self.assertIn("[SYSTEM_ABOUT]", content)

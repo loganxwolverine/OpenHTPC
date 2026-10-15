@@ -1617,7 +1617,7 @@ def flex_cjk_fallback_font() -> pathlib.Path | None:
 
 
 SYSTEM_PAGE_KEYS = (
-    "overview", "codecs", "display", "audio", "media_optical", "metadata",
+    "overview", "codecs", "display", "audio", "media_optical", "extensions", "metadata",
     "tmdb", "processing", "playback", "diagnostics", "technical", "about",
 )
 
@@ -1932,15 +1932,16 @@ ButtonDPadDown=:right
 [SYSTEME]
 BackgroundImage={dashboard}
 Entry1=VUE D'ENSEMBLE;{icon_overview};:submenu SYSTEM_OVERVIEW
-Entry2=COMPATIBILITÉ VIDÉO;{icon_codecs};:submenu SYSTEM_CODECS
+Entry2=VIDÉO;{icon_codecs};:submenu SYSTEM_CODECS
 Entry3=AFFICHAGE;{icon_display};:submenu SYSTEM_DISPLAY
 Entry4=LECTURE;{icon_processing};:submenu SYSTEM_PLAYBACK
 Entry5=AUDIO;{icon_audio};:submenu SYSTEM_AUDIO
-Entry6=MÉDIAS & OPTIQUE;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
+Entry6=MÉDIAS & DISQUES;{icon_optical};:submenu SYSTEM_MEDIA_OPTICAL
 Entry7=MÉTADONNÉES;{icon_metadata};:submenu SYSTEM_METADATA
-Entry8=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
-Entry9=À PROPOS;{logo};:submenu SYSTEM_ABOUT
-Entry10=RETOUR;{icon_back};:back
+Entry8=EXTENSIONS;{logo};:submenu SYSTEM_EXTENSIONS
+Entry9=DIAGNOSTIC;{icon_diagnostic};:submenu SYSTEM_DIAGNOSTICS
+Entry10=À PROPOS;{logo};:submenu SYSTEM_ABOUT
+Entry11=RETOUR;{icon_back};:back
 
 [SYSTEM_OVERVIEW]
 BackgroundImage={system_pages['overview']}
@@ -1979,6 +1980,10 @@ Entry3=RETOUR;{icon_back};:back
 
 [SYSTEM_MEDIA_OPTICAL]
 BackgroundImage={system_pages['media_optical']}
+Entry1=RETOUR;{icon_back};:back
+
+[SYSTEM_EXTENSIONS]
+BackgroundImage={system_pages['extensions']}
 Entry1=RETOUR;{icon_back};:back
 
 [SYSTEM_METADATA]

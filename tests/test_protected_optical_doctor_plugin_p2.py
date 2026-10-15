@@ -79,7 +79,7 @@ class Authority(unittest.TestCase):
     return CORE.health_report(self.home,self.install)
   enabled=report();self.assertEqual((enabled["overall"],enabled["protected_optical_doctor_authority"]),("READY","PLUGIN_P2"))
   (self.plugin/"shadow.py").write_text("raise SystemExit(3)\n");broken=report();self.assertEqual((broken["overall"],broken["protected_optical_doctor_authority"]),("READY","PLUGIN_UNAVAILABLE"))
-  self.assertEqual({item["label"]:item["status"] for item in broken["optional"]}["Blu-ray/UHD"],"BROKEN")
+  self.assertEqual({item["label"]:item["status"] for item in broken["optional"]}["Support optique avancé"],"BROKEN")
 
 class Boundaries(unittest.TestCase):
  def test_plugin_has_no_probe_keydb_network_playback_ui_or_dispatcher(self):

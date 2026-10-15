@@ -21,6 +21,7 @@ SYSTEM_PAGES = (
     "display",
     "audio",
     "media_optical",
+    "extensions",
     "processing",
     "playback",
     "diagnostics",
@@ -249,6 +250,7 @@ PAGE_TITLES = {
     "display": "AFFICHAGE",
     "audio": "AUDIO",
     "media_optical": "MÉDIAS & OPTIQUE",
+    "extensions": "EXTENSIONS",
     "processing": "TRAITEMENT VIDÉO",
     "playback": "LECTURE",
     "diagnostics": "DIAGNOSTIC",
@@ -532,6 +534,48 @@ def system_page_png(
                 ("Extension UHD Blu-ray", m.get("uhd"), None),
             ],
         )
+    elif page == "extensions":
+        extensions = model.get("extensions", {})
+        summary = (
+            f"{extensions.get('provided', 0)} fournie(s) par OPENHTPC • "
+            f"{extensions.get('local', 0)} ajoutée(s) localement • "
+            f"{extensions.get('ready', 0)} prête(s) à tenter"
+        )
+        card(
+            (70, 170, 1780, 150),
+            "REGISTRE DES EXTENSIONS",
+            [
+                ("État", extensions.get("registry", "Indisponible"), "#78d9ae" if extensions.get("registry") == "Disponible" else "#ffad42"),
+                ("Inventaire", summary, None),
+            ],
+            label_ratio=0.18,
+            step=38,
+        )
+        entries = extensions.get("entries", []) if isinstance(extensions.get("entries"), list) else []
+        draw.rounded_rectangle(
+            (xy(70), xy(340), xy(1850), xy(850)),
+            radius=xy(24), fill="#071426", outline="#168fbd", width=max(2, xy(2)),
+        )
+        txt((98, 362), "EXTENSIONS CONNUES", 24, "#22c7ff", True)
+        if not entries:
+            txt((98, 430), "Aucune extension détectée.", 22, "#93a9c2")
+        for index, item in enumerate(entries[:4]):
+            yy = 414 + index * 104
+            txt((98, yy), f"{item.get('name', item.get('id', 'Extension'))}  ·  {item.get('version', 'N/A')}", 21, "#f7fbff", True, 780)
+            txt((920, yy), item.get("activation_label", "Indéterminée"), 20, "#78d9ae" if item.get("activation_label") == "Activée" else "#a9bdd1", True, 300)
+            txt((1240, yy + 2), item.get("provenance_label", "Provenance indéterminée"), 17, "#829bb5", False, 500)
+            if item.get("prerequisite_label"):
+                prerequisite_color = "#78d9ae" if item.get("external_prerequisite") == "DETECTED" else "#ffad42"
+                txt((118, yy + 38), item["prerequisite_label"], 17, prerequisite_color, True, 760)
+                txt((920, yy + 38), f"Capacité système : {item.get('readiness_label', 'Indéterminée')}", 17, prerequisite_color, False, 800)
+            else:
+                txt((118, yy + 38), f"Fonctions : {item.get('hooks', 'Aucune')}", 16, "#93a9c2", False, 760)
+                txt((920, yy + 38), f"Prérequis : {item.get('dependencies', 'Aucun')}", 16, "#93a9c2", False, 800)
+            if item.get("diagnostic") not in {"PASS", "CAPABILITY_DEPENDENCY_MISSING"}:
+                txt((118, yy + 66), f"Diagnostic : {item.get('diagnostic')}", 15, "#ffad42", False, 1600)
+        if len(entries) > 4:
+            txt((98, 812), f"+ {len(entries) - 4} extension(s) supplémentaire(s)", 16, "#93a9c2")
+        txt((90, 900), "État issu du dernier relevé de capacités. « Prêt à tenter » ne garantit pas la lecture de chaque support.", 18, "#93a9c2", False, 1720)
     elif page == "processing":
         p = model.get("playback_policy", {})
         mag = model.get("magnificence", {})

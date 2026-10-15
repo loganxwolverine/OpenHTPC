@@ -38,8 +38,15 @@ STATUS_FR = {
     "BLOCKED": "Bloqué",
     "ENABLED": "Activé",
     "DISABLED": "Désactivé",
+    "INCOMPATIBLE": "Incompatible",
+    "BROKEN": "En erreur",
+    "INSTALLED": "Installé",
     "NOT_INSTALLED": "Non installé",
     "NOT_GENERATED": "Non généré",
+    "DEPENDENCY_MISSING": "Dépendance manquante",
+    "DEPENDENCY_UNKNOWN": "Dépendances inconnues",
+    "DEPENDENCY_INVALID": "Faits de dépendances invalides",
+    "DEPENDENCY_CYCLE": "Cycle de dépendances",
     "SKIPPED_UNSUPPORTED_ENVIRONMENT": "Non applicable",
     "unknown": "Indéterminé",
 }
@@ -73,6 +80,157 @@ def read_json(path: pathlib.Path) -> dict:
         return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _plugin_inventory(registry: object) -> dict:
+    """Project the exact Core registry already consumed by Doctor."""
+    result = {
+        "registry": "Indisponible",
+        "plugin_api": 2,
+        "provided": 0,
+        "local": 0,
+        "active": 0,
+        "ready": 0,
+        "available": 0,
+        "disabled": 0,
+        "incompatible": 0,
+        "broken": 0,
+        "entries": [],
+    }
+    if not isinstance(registry, dict) or type(registry.get("plugin_api")) is not int or registry.get("core_integrity")=="BROKEN":
+        return result
+
+    raw_errors = registry.get("errors", []) if isinstance(registry.get("errors"), list) else []
+    error_by_id = {
+        error["id"]: error.get("reason", "PLUGIN_INVALID")
+        for error in raw_errors
+        if isinstance(error, dict) and isinstance(error.get("id"), str) and isinstance(error.get("reason"), str)
+    }
+    entries = []
+    selected = {
+        plugin_id for plugin_id in registry.get("enabled", [])
+        if isinstance(plugin_id, str)
+    } if isinstance(registry.get("enabled"), list) else set()
+    for item in registry.get("plugins", []) if isinstance(registry.get("plugins"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        plugin_id = item.get("id")
+        name = item.get("name")
+        version = item.get("version")
+        category = item.get("category")
+        origin = item.get("origin")
+        plugin_state = item.get("state")
+        if not all(isinstance(value, str) for value in (plugin_id, name, version, category, origin, plugin_state)):
+            continue
+        capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), list) else []
+        dependencies = item.get("dependencies") if isinstance(item.get("dependencies"), dict) else {}
+        plugin_dependencies = dependencies.get("plugins") if isinstance(dependencies.get("plugins"), list) else []
+        capability_dependencies = dependencies.get("capabilities") if isinstance(dependencies.get("capabilities"), list) else []
+        system_dependencies = item.get("system_dependencies") if isinstance(item.get("system_dependencies"), list) else []
+        resolution = item.get("dependency_resolution") if isinstance(item.get("dependency_resolution"), dict) else {}
+        activated = plugin_id in selected or item.get("enabled_by_default") is True
+        provenance_label = "Fournie par OPENHTPC" if origin == "project" else "Ajoutée localement"
+        prerequisite_status = None
+        prerequisite_label = None
+        readiness_label = None
+        if plugin_id == "plugin.bluray":
+            prerequisite = next((
+                row for row in resolution.get("dependencies", [])
+                if isinstance(row, dict)
+                and row.get("kind") == "capability"
+                and row.get("id") == "protected-optical-state"
+            ), None) if isinstance(resolution.get("dependencies"), list) else None
+            dependency_status = prerequisite.get("status") if isinstance(prerequisite, dict) else "UNKNOWN"
+            prerequisite_status = {
+                "SATISFIED": "DETECTED",
+                "MISSING": "ABSENT",
+                "UNKNOWN": "UNKNOWN",
+                "INVALID": "INVALID",
+                "CYCLE": "INVALID",
+            }.get(dependency_status, "UNKNOWN")
+            prerequisite_label = {
+                "DETECTED": "Prérequis externe détecté",
+                "ABSENT": "Prérequis externe absent",
+                "UNKNOWN": "Prérequis externe indéterminé",
+                "INVALID": "État du prérequis invalide",
+            }[prerequisite_status]
+            readiness_label = {
+                "DETECTED": "Prêt à tenter la lecture",
+                "ABSENT": "Non disponible",
+                "UNKNOWN": "Indéterminé",
+                "INVALID": "Indisponible",
+            }[prerequisite_status]
+        declared = [
+            *(f"plugin:{value}" for value in plugin_dependencies if isinstance(value, str)),
+            *(f"capacité:{value}" for value in capability_dependencies if isinstance(value, str)),
+            *(f"système:{value}" for value in system_dependencies if isinstance(value, str)),
+        ]
+        entries.append({
+            "id": plugin_id,
+            "name": name,
+            "version": version,
+            "category": category,
+            "origin": "OPENHTPC" if origin == "project" else "Utilisateur",
+            "provenance_label": provenance_label,
+            "activation_label": "Détection automatique" if plugin_id == "plugin.bluray" else "Activée" if activated else "Non activée",
+            "state": plugin_state,
+            "state_label": STATUS_FR.get(plugin_state, plugin_state),
+            "hooks": ", ".join(value for value in capabilities if isinstance(value, str)) or "Aucun",
+            "dependencies": ", ".join(declared) or "Aucune",
+            "dependency_status": resolution.get("status", "UNKNOWN"),
+            "dependency_details": resolution.get("dependencies", []) if isinstance(resolution.get("dependencies"), list) else [],
+            "diagnostic": error_by_id.get(plugin_id, resolution.get("reason", "DEPENDENCY_RESOLUTION_UNKNOWN")),
+            "external_prerequisite": prerequisite_status,
+            "prerequisite_label": prerequisite_label,
+            "readiness_label": readiness_label,
+        })
+
+    represented = {entry["id"] for entry in entries}
+    for error in raw_errors:
+        if not isinstance(error, dict):
+            continue
+        plugin_id = error.get("id") if isinstance(error.get("id"), str) else "plugin.inconnu"
+        if plugin_id in represented:
+            continue
+        reason = error.get("reason") if isinstance(error.get("reason"), str) else "PLUGIN_INVALID"
+        entries.append({
+            "id": plugin_id,
+            "name": plugin_id,
+            "version": "Indéterminée",
+            "category": "inconnue",
+            "origin": "OPENHTPC" if error.get("origin") == "project" else "Utilisateur",
+            "provenance_label": "Fournie par OPENHTPC" if error.get("origin") == "project" else "Ajoutée localement",
+            "activation_label": "Indéterminée",
+            "state": "BROKEN",
+            "state_label": STATUS_FR["BROKEN"],
+            "hooks": "Aucun",
+            "dependencies": "Indéterminées",
+            "diagnostic": reason,
+            "external_prerequisite": None,
+            "prerequisite_label": None,
+            "readiness_label": None,
+        })
+
+    entries.sort(key=lambda value: (value["id"], value["diagnostic"]))
+    states = [entry["state"] for entry in entries]
+    result.update({
+        "registry": "Disponible",
+        "plugin_api": registry["plugin_api"],
+        "provided": len([entry for entry in entries if entry["origin"] == "OPENHTPC"]),
+        "local": len([entry for entry in entries if entry["origin"] == "Utilisateur"]),
+        "active": len([entry for entry in entries if entry["activation_label"] == "Activée"]),
+        "ready": len([entry for entry in entries if entry["readiness_label"] == "Prêt à tenter la lecture"]),
+        "available": states.count("AVAILABLE"),
+        "disabled": states.count("DISABLED"),
+        "incompatible": states.count("INCOMPATIBLE"),
+        "broken": states.count("BROKEN"),
+        "dependency_missing": states.count("DEPENDENCY_MISSING"),
+        "dependency_unknown": states.count("DEPENDENCY_UNKNOWN"),
+        "dependency_invalid": states.count("DEPENDENCY_INVALID"),
+        "dependency_cycle": states.count("DEPENDENCY_CYCLE"),
+        "entries": entries,
+    })
+    return result
 
 
 def clean(value, default="Indéterminé"):
@@ -781,6 +939,7 @@ def build(
         "audio": clean(audio.get("default_sink") or ((detected.get("audio_devices") or [None])[0]), "N/A"),
         "audio_section": audio_dict,
         "media_optical": media_optical_dict,
+        "extensions": _plugin_inventory(health.get("capabilities", {}).get("PLUGIN_REGISTRY") if isinstance(health.get("capabilities"), dict) else None),
         "audio_media": audio_media_dict,
         "processing": {
             "profile": clean(processing.get("active_profile")),

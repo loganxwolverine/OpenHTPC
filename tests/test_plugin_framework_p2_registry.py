@@ -28,6 +28,7 @@ class ManifestAndDiscovery(RegistryFixture):
  def test_duplicate_plugin_id_is_rejected(self):
   self.add(manifest());self.add(manifest(),user=True);value=REGISTRY.registry(self.home,self.install);self.assertEqual(value["plugins"][0]["state"],"BROKEN");self.assertEqual(value["errors"][0]["reason"],"PLUGIN_DUPLICATE")
  def test_unsupported_plugin_api(self):self.add(manifest(api=1));self.assertEqual(REGISTRY.registry(self.home,self.install)["errors"][0]["reason"],"PLUGIN_API_UNSUPPORTED")
+ def test_plugin_api_requires_exact_integer(self):self.add(manifest(api=2.0));self.assertEqual(REGISTRY.registry(self.home,self.install)["errors"][0]["reason"],"PLUGIN_API_UNSUPPORTED")
  def test_openhtpc_version_incompatible(self):self.add(manifest(minimum="2.0.0"));self.assertEqual(REGISTRY.registry(self.home,self.install)["plugins"][0]["state"],"INCOMPATIBLE")
  def test_disabled_and_enabled_compatible_plugin(self):
   self.add(manifest());self.assertEqual(REGISTRY.registry(self.home,self.install)["plugins"][0]["state"],"DISABLED")
@@ -47,6 +48,17 @@ class ManifestAndDiscovery(RegistryFixture):
  def test_discovery_performs_no_network_access(self):
   self.add(manifest());
   with mock.patch("socket.socket",side_effect=AssertionError("network attempted")):self.assertEqual(len(REGISTRY.registry(self.home,self.install)["plugins"]),1)
+ def test_unhashable_capability_fails_closed(self):
+  value=manifest();value["capabilities"]=[{"bad":"type"}];self.add(value)
+  self.assertEqual(REGISTRY.registry(self.home,self.install)["errors"][0]["reason"],"PLUGIN_CAPABILITIES_INVALID")
+ def test_unhashable_dependency_fails_closed(self):
+  value=manifest();value["dependencies"]["capabilities"]=[["bad"]];self.add(value)
+  self.assertEqual(REGISTRY.registry(self.home,self.install)["errors"][0]["reason"],"PLUGIN_DEPENDENCIES_INVALID")
+ def test_unicode_display_name_is_valid_but_path_punctuation_is_not(self):
+  value=manifest();value["name"]="Support optique avancé";self.add(value)
+  self.assertEqual(REGISTRY.registry(self.home,self.install)["plugins"][0]["name"],"Support optique avancé")
+  other=manifest("plugin.other");other["name"]="Support/optique";self.add(other,"plugin.other")
+  self.assertEqual(next(item for item in REGISTRY.registry(self.home,self.install)["errors"] if item["id"]=="plugin.other")["reason"],"PLUGIN_NAME_INVALID")
  def test_snapshot_is_deterministic(self):
   self.add(manifest());REGISTRY.publish(self.home,self.install);path=REGISTRY.paths(self.home,self.install)["snapshot"];first=path.read_bytes();REGISTRY.publish(self.home,self.install);self.assertEqual(path.read_bytes(),first)
 

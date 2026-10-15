@@ -24,11 +24,11 @@ if command == ["plugins"]:
     print(json.dumps(core.plugin_status(home,install),ensure_ascii=False,indent=2,sort_keys=True))
     raise SystemExit(0)
 if command == ["plugins","--refresh"]:
-    print(json.dumps(core.plugin_registry(install).publish(home,install),ensure_ascii=False,indent=2,sort_keys=True))
+    print(json.dumps(core.plugin_registry(install).publish(home,install,core.plugin_dependency_facts(home)),ensure_ascii=False,indent=2,sort_keys=True))
     raise SystemExit(0)
 if len(command)==3 and command[:2] in (["plugin","enable"],["plugin","disable"]):
     registry=core.plugin_registry(install)
-    try:value=registry.set_enabled(home,install,command[2],command[1]=="enable")
+    try:value=registry.set_enabled(home,install,command[2],command[1]=="enable",core.plugin_dependency_facts(home))
     except registry.PluginError as error:print(str(error),file=sys.stderr);raise SystemExit(2)
     print(json.dumps(value,ensure_ascii=False,indent=2,sort_keys=True));raise SystemExit(0)
 if command == ["version"]:

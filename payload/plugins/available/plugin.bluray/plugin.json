@@ -1,7 +1,7 @@
 {
   "schema": "openhtpc-plugin-v2",
   "id": "plugin.bluray",
-  "name": "Blu-ray UHD",
+  "name": "Support optique avancé",
   "version": "0.10.0",
   "plugin_api": 2,
   "openhtpc": {"minimum": "1.2.0-rc1", "maximum": null},
@@ -15,5 +15,5 @@
     "BLURAY": "assets/bluray-media-badge.png",
     "UHD_BLURAY": "assets/uhd-bluray-media-badge.png"
   },
-  "doctor": {"label": "Blu-ray UHD", "capability": "protected-optical-doctor"}
+  "doctor": {"label": "Support optique avancé", "capability": "protected-optical-doctor"}
 }

@@ -39,7 +39,7 @@ class ManifestAndRuntime(ShadowFixture):
  def test_duplicate_id_is_rejected(self):
   user=self.home/".local/share/openhtpc/plugins/available/plugin.bluray";shutil.copytree(self.plugin,user);self.assertEqual(self.registry()["plugins"][0]["state"],"BROKEN")
  def test_doctor_truthfully_reports_combined_plugin_disabled(self):
-  states={item["label"]:item["status"] for item in CORE.optional_plugin_states(self.registry())};self.assertEqual(states["Blu-ray/UHD"],"DISABLED");self.assertNotIn("UHD",states)
+  states={item["label"]:item["status"] for item in CORE.optional_plugin_states(self.registry())};self.assertEqual(states["Support optique avancé"],"DISABLED");self.assertNotIn("UHD",states)
 
 class Equivalence(ShadowFixture):
  @staticmethod

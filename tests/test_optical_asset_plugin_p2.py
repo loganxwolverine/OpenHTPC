@@ -14,6 +14,7 @@ class ResourceContract(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=pathlib.Path(self.temp.name);self.home=root/"home";self.install=root/"install";self.install.mkdir();(self.install/"VERSION").write_text("1.2.0-dev12\n")
   shutil.copy2(PAYLOAD/"openhtpc-plugin-registry.py",self.install/"openhtpc-plugin-registry.py");shutil.copy2(PAYLOAD/"openhtpc-core.py",self.install/"openhtpc-core.py");shutil.copytree(PAYLOAD/"assets",self.install/"assets")
   self.plugin=self.install/"plugins/available/plugin.bluray";shutil.copytree(PAYLOAD/"plugins/available/plugin.bluray",self.plugin)
+  capabilities=self.home/".config/openhtpc/runtime/capabilities.json";capabilities.parent.mkdir(parents=True);capabilities.write_text(json.dumps({"optical":{"protected_media":{"status":"AVAILABLE"}}}))
  def enable(self):REGISTRY.set_enabled(self.home,self.install,"plugin.bluray",True)
  def manifest(self):return json.loads((self.plugin/"plugin.json").read_text())
  def write_manifest(self,value):(self.plugin/"plugin.json").write_text(json.dumps(value))

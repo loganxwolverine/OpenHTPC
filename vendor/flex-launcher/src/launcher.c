@@ -62,6 +62,7 @@ static void cleanup(void);
 static bool is_media_sidebar(void);
 static bool is_movie_detail(const Menu *menu);
 static bool is_media_list(void);
+static unsigned int menu_page_size(const Menu *menu);
 
 // Initialize default settings
 Config config = {
@@ -494,6 +495,7 @@ static bool is_menu_system_subpage(const Menu *menu)
             strcmp(name, "AUDIO_OUTPUT_TARGET") == 0 ||
             strcmp(name, "AUDIO_OUTPUT_MODE") == 0 ||
             strcmp(name, "SYSTEM_MEDIA_OPTICAL") == 0 ||
+            strcmp(name, "SYSTEM_EXTENSIONS") == 0 ||
             strcmp(name, "SYSTEM_METADATA") == 0 ||
             strcmp(name, "SYSTEM_TMDB") == 0 ||
             strcmp(name, "SYSTEM_PROCESSING") == 0 ||
@@ -503,7 +505,8 @@ static bool is_menu_system_subpage(const Menu *menu)
             strcmp(name, "PLAYBACK_SUBTITLES") == 0 ||
             strcmp(name, "DVD_VIDEO_MODE") == 0 ||
             strcmp(name, "SYSTEM_DIAGNOSTICS") == 0 ||
-            strcmp(name, "SYSTEM_TECHNICAL") == 0);
+            strcmp(name, "SYSTEM_TECHNICAL") == 0 ||
+            strcmp(name, "SYSTEM_ABOUT") == 0);
 }
 
 static bool is_system_subpage(void)
@@ -518,6 +521,16 @@ static bool is_system_root(void)
         current_menu->name != NULL &&
         strcmp(current_menu->name, "SYSTEME") == 0
     );
+}
+
+static unsigned int menu_page_size(const Menu *menu)
+{
+    /* SYSTEME is a trusted Core-generated vertical rail.  Its compact
+     * geometry is designed to keep every category, including RETOUR, on one
+     * page without changing the density of MEDIA or any other menu. */
+    if (menu != NULL && menu->name != NULL && strcmp(menu->name, "SYSTEME") == 0)
+        return menu->num_entries;
+    return config.max_buttons;
 }
 
 static bool is_menu_disc_sheet(const Menu *menu)
@@ -943,9 +956,10 @@ static int load_menu(Menu *menu, bool set_back_menu, bool reset_position)
         }
     }
 
-    buttons = current_menu->num_entries - (current_menu->page)*config.max_buttons;
-    if (buttons > config.max_buttons)
-        buttons = config.max_buttons;
+    unsigned int page_size = menu_page_size(current_menu);
+    buttons = current_menu->num_entries - (current_menu->page)*page_size;
+    if (buttons > page_size)
+        buttons = page_size;
     
     // Recalculate the screen geometry
     calculate_button_geometry(current_menu->root_entry, (int) buttons);
@@ -1101,18 +1115,23 @@ static void calculate_button_geometry(Entry *entry, int buttons)
     }
 
     if (is_system_root()) {
-        int row_height = (geo.screen_height * 90) / 1000;
-        int gap = (geo.screen_height * 10) / 1000;
-        int icon_size = (geo.screen_height * 68) / 1000;
-        int start_y = (geo.screen_height * 14) / 100;
+        int row_height = (geo.screen_height * 64) / 1000;
+        int gap = (geo.screen_height * 7) / 1000;
+        int icon_size = (geo.screen_height * 46) / 1000;
+        int text_height = (geo.screen_height * 32) / 1000;
+        int start_y = (geo.screen_height * 10) / 100;
         geo.x_margin = (geo.screen_width * 6) / 100;
         geo.x_advance = 0;
         for (int i = 0; i < buttons && entry != NULL; i++) {
-            entry->icon_rect.x = geo.x_margin + (geo.screen_width * 15) / 1000;
+            entry->icon_rect.x = geo.x_margin + (geo.screen_width * 12) / 1000;
             entry->icon_rect.y = start_y + i * (row_height + gap) + (row_height - icon_size) / 2;
             entry->icon_rect.w = icon_size;
             entry->icon_rect.h = icon_size;
-            entry->text_rect.x = entry->icon_rect.x + icon_size + (geo.screen_width * 18) / 1000;
+            if (entry->text_rect.h > text_height && entry->text_rect.h > 0) {
+                entry->text_rect.w = entry->text_rect.w * text_height / entry->text_rect.h;
+                entry->text_rect.h = text_height;
+            }
+            entry->text_rect.x = entry->icon_rect.x + icon_size + (geo.screen_width * 14) / 1000;
             entry->text_rect.y = start_y + i * (row_height + gap) + (row_height - entry->text_rect.h) / 2;
             entry = entry->next;
         }
@@ -2197,11 +2216,12 @@ static void move_left()
     // If we are in leftmost position...
     else if (current_menu->highlight_position == 0 && (current_menu->page > 0 || config.wrap_entries)) {
         unsigned int buttons;
+        unsigned int page_size = menu_page_size(current_menu);
         current_entry = current_entry->previous;
 
         // Load the previous page if there is a valid previous entry
         if (current_entry) {
-            buttons = config.max_buttons;
+            buttons = page_size;
             Entry *root = advance_entries(current_menu->root_entry, (int) buttons, DIRECTION_LEFT);
             if (root == NULL) {
                 current_entry = current_menu->first_entry; current_menu->root_entry = current_entry;
@@ -2214,13 +2234,13 @@ static void move_left()
         // If the user has the wrap entries setting, select the last entry in the menu
         else {
             current_entry = advance_entries(current_menu->first_entry, (int) current_menu->num_entries - 1, DIRECTION_RIGHT);
-            unsigned int num_pages = DIV_ROUND_UP(current_menu->num_entries, config.max_buttons);
+            unsigned int num_pages = DIV_ROUND_UP(current_menu->num_entries, page_size);
             current_menu->root_entry = advance_entries(current_menu->root_entry,
-                (int) ((num_pages - 1 - current_menu->page) * config.max_buttons),
+                (int) ((num_pages - 1 - current_menu->page) * page_size),
                 DIRECTION_RIGHT
             );
             current_menu->page = num_pages - 1;
-            buttons = current_menu->num_entries - current_menu->page * config.max_buttons;
+            buttons = current_menu->num_entries - current_menu->page * page_size;
         }
 
         if (current_entry == NULL || current_menu->root_entry == NULL || buttons == 0) return;
@@ -2236,6 +2256,7 @@ static void move_right()
 {
     if (current_menu == NULL || current_menu->num_entries == 0 || current_entry == NULL)
         return;
+    unsigned int page_size = menu_page_size(current_menu);
     // If we are not in the rightmost position, move highlight right
     if ((int) current_menu->highlight_position < (geo.num_buttons - 1)) {
         if (config.highlight)
@@ -2245,11 +2266,11 @@ static void move_right()
     }
 
     // If we are in the rightmost postion, but there are more entries in the menu, load next page
-    else if (current_menu->highlight_position + current_menu->page*config.max_buttons <
+    else if (current_menu->highlight_position + current_menu->page*page_size <
     (current_menu->num_entries - 1)) {
-        unsigned int buttons = current_menu->num_entries - (current_menu->page + 1)*config.max_buttons;
-        if (buttons > config.max_buttons)
-            buttons = config.max_buttons;
+        unsigned int buttons = current_menu->num_entries - (current_menu->page + 1)*page_size;
+        if (buttons > page_size)
+            buttons = page_size;
         current_entry = current_entry->next;
         current_menu->root_entry = current_entry;
         calculate_button_geometry(current_menu->root_entry, (int) buttons);
@@ -2267,7 +2288,7 @@ static void move_right()
         current_menu->page = 0;
         if (config.highlight)
             highlight->rect.x = current_entry->icon_rect.x - config.highlight_hpadding;
-        calculate_button_geometry(current_menu->root_entry, (int) MIN(current_menu->num_entries, config.max_buttons));
+        calculate_button_geometry(current_menu->root_entry, (int) MIN(current_menu->num_entries, page_size));
     }
 }
 
@@ -2309,7 +2330,7 @@ static void draw_screen()
 
         // Draw scroll indicators
         if (config.scroll_indicators &&
-        (current_menu->page*config.max_buttons + (unsigned int) geo.num_buttons) <= (current_menu->num_entries - 1))
+        (current_menu->page*menu_page_size(current_menu) + (unsigned int) geo.num_buttons) <= (current_menu->num_entries - 1))
             SDL_RenderCopy(renderer, scroll->texture, NULL, &scroll->rect_right);
 
         if (config.scroll_indicators && current_menu->page > 0)
@@ -2382,10 +2403,10 @@ static void draw_screen()
             }
         }
         if (is_system_root()) {
-            int rail_width = (geo.screen_width * 42) / 100;
-            int row_height = (geo.screen_height * 90) / 1000;
-            int gap = (geo.screen_height * 10) / 1000;
-            int start_y = (geo.screen_height * 14) / 100;
+            int rail_width = (geo.screen_width * 38) / 100;
+            int row_height = (geo.screen_height * 64) / 1000;
+            int gap = (geo.screen_height * 7) / 1000;
+            int start_y = (geo.screen_height * 10) / 100;
             Entry *card_entry = current_menu->root_entry;
             for (int i = 0; i < geo.num_buttons && card_entry != NULL; i++) {
                 SDL_Rect card_rect = {

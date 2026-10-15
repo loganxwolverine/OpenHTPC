@@ -15,7 +15,7 @@ def read_json(path: pathlib.Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeError):
         return None
 
 
@@ -46,8 +46,32 @@ def plugin_registry(install: pathlib.Path):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 
 
+def plugin_dependency_facts(home:pathlib.Path)->dict[str,Any]:
+    """Adapt already-published Core facts; never probe hardware or execute plugins."""
+    result={"schema":"openhtpc-plugin-dependency-facts-v1","capabilities":{},"system":{}}
+    snapshot=read_json(home/".config/openhtpc/runtime/capabilities.json")
+    if not isinstance(snapshot,dict):return result
+    explicit=snapshot.get("plugin_dependency_facts")
+    if explicit is not None:return explicit
+    optical=snapshot.get("optical")
+    protected=optical.get("protected_media") if isinstance(optical,dict) else None
+    known={"AVAILABLE","NOT_AVAILABLE","NOT_CONFIGURED","BLOCKED","DETECTED","UNAVAILABLE","UNKNOWN"}
+    if isinstance(protected,dict) and type(protected.get("status")) is str and protected["status"] in known:
+        fact_status={
+            "AVAILABLE":"AVAILABLE",
+            "DETECTED":"AVAILABLE",
+            "NOT_AVAILABLE":"NOT_AVAILABLE",
+            "NOT_CONFIGURED":"NOT_AVAILABLE",
+            "UNAVAILABLE":"NOT_AVAILABLE",
+            "BLOCKED":"UNKNOWN",
+            "UNKNOWN":"UNKNOWN",
+        }[protected["status"]]
+        result["capabilities"]["protected-optical-state"]={"status":fact_status,"source":"capabilities.optical.protected_media"}
+    return result
+
+
 def plugin_status(home:pathlib.Path,install:pathlib.Path)->dict[str,Any]:
-    try:return plugin_registry(install).registry(home,install)
+    try:return plugin_registry(install).registry(home,install,plugin_dependency_facts(home))
     except (OSError,ImportError,AttributeError,TypeError,ValueError):
         return {"schema":2,"plugin_api":2,"plugins":[],"errors":[{"id":"core.registry","state":"BROKEN","reason":"PLUGIN_REGISTRY_UNAVAILABLE"}],"providers":{},"core_integrity":"BROKEN"}
 
@@ -65,13 +89,20 @@ def optional_plugin_states(registry:dict[str,Any])->list[dict[str,str]]:
     plugins={item["id"]:item for item in registry.get("plugins",[]) if isinstance(item,dict) and isinstance(item.get("id"),str)}
     result=[];known=set()
     if "plugin.bluray" in plugins:
-        item=plugins["plugin.bluray"];result.append({"label":"Blu-ray/UHD","status":item["state"]});known.update({"plugin.bluray","plugin.uhd"})
+        item=plugins["plugin.bluray"];result.append(_optional_plugin_state("Support optique avancé",item));known.update({"plugin.bluray","plugin.uhd"})
         optional=(("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming"))
     else:optional=(("bluray","Blu-ray"),("uhd","UHD"),("jellyfin","Jellyfin"),("plex","Plex"),("streaming","Streaming"))
     for name,label in optional:
         plugin_id="plugin."+name;known.add(plugin_id);item=plugins.get(plugin_id)
-        result.append({"label":label,"status":item.get("state","NOT_INSTALLED") if item else "NOT_INSTALLED"})
-    result.extend({"label":item["name"],"status":item["state"]} for item in sorted(plugins.values(),key=lambda value:value["id"]) if item["id"] not in known)
+        result.append(_optional_plugin_state(label,item) if item else {"label":label,"status":"NOT_INSTALLED"})
+    result.extend(_optional_plugin_state(item["name"],item) for item in sorted(plugins.values(),key=lambda value:value["id"]) if item["id"] not in known)
+    return result
+
+
+def _optional_plugin_state(label:str,item:dict[str,Any])->dict[str,str]:
+    result={"label":label,"status":item.get("state","BROKEN")}
+    resolution=item.get("dependency_resolution")
+    if isinstance(resolution,dict) and isinstance(resolution.get("reason"),str) and resolution["reason"]!="PASS":result["reason"]=resolution["reason"]
     return result
 
 
@@ -134,7 +165,9 @@ def doctor(home: pathlib.Path, install: pathlib.Path) -> tuple[str, list[str]]:
     report = health_report(home, install); checks = report["checks"]
     lines = [f"{item['label']:<25} {item['status']}" for item in checks]
     lines.extend(["", "Optional plugins:"])
-    for item in report["optional"]: lines.append(f"{item['label']:<25} {item['status']}")
+    for item in report["optional"]:
+        suffix=f" ({item['reason']})" if item.get("reason") else ""
+        lines.append(f"{item['label']:<25} {item['status']}{suffix}")
     lines.extend(["", f"Overall: {report['overall']}"])
     return report["overall"], lines
 
