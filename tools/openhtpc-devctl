@@ -292,13 +292,40 @@ def _export_commit(commit: str, staging: pathlib.Path, scratch: pathlib.Path) ->
                 target.chmod(member.mode & 0o777)
 
 
+# Definition canonique de la SOURCE Flex : ce qui est versionne et compile — les trois
+# repertoires source et les quatre fichiers de racine qui les decrivent. L'arbre de
+# compilation (`build/`, produit par CMake et ignore par Git) n'en fait pas partie :
+# l'inclure rendait l'empreinte dependante du poste (100 fichiers dans un arbre compile,
+# 31 dans un clone vierge), donc non reproductible depuis l'historique versionne.
+FLEX_SOURCE_ROOTS = ("src", "config", "assets")
+FLEX_SOURCE_ROOT_FILES = ("CMakeLists.txt", "UPSTREAM_COMMIT", "UNLICENSE", "OPENHTPC_BASELINE.md")
+
+
+def _flex_source_files(source: pathlib.Path) -> list[pathlib.Path]:
+    """Fichiers qui constituent la source Flex, tels qu'ils sont versionnes."""
+    selected: list[pathlib.Path] = []
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        if relative.parts[0] in FLEX_SOURCE_ROOTS or relative.as_posix() in FLEX_SOURCE_ROOT_FILES:
+            selected.append(path)
+    return selected
+
+
 def _source_fingerprint(source: pathlib.Path) -> str:
     if not source.is_dir():
         raise ValueError("Flex source directory missing")
-    files = sorted(p for p in source.rglob("*") if p.is_file())
+    files = _flex_source_files(source)
     if not files:
         raise ValueError("Flex source directory empty")
-    hashes = {path.relative_to(source).as_posix(): _sha256(path) for path in files}
+    names = {path.relative_to(source).as_posix() for path in files}
+    # Garde de completude : une definition qui se reduirait en silence laisserait passer un
+    # binaire perime (l'empreinte ne bougerait plus quand la source change).
+    manquants = [name for name in (*FLEX_SOURCE_ROOT_FILES, "src/launcher.c") if name not in names]
+    if manquants:
+        raise ValueError("Flex source definition incomplete: " + ", ".join(manquants))
+    hashes = {name: _sha256(source / name) for name in sorted(names)}
     return _source_fingerprint_hashes(hashes)
 
 

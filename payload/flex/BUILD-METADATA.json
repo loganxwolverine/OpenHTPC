@@ -5,7 +5,7 @@
   "compile_sdl_image": "2.8.12",
   "compile_sdl_ttf": "2.24.0",
   "compiler": "cc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2)",
-  "flex_source_fingerprint": "c6505ad23641e29e9cbbcff292be56ab4d0e392f03cf2cc789c93faacba03726",
+  "flex_source_fingerprint": "2cc0ac016d649b57b10156f6923546643351d24264f138ef8ebe62325f4ce879",
   "product_version": "1.3.1",
   "schema": 1,
   "source_revision": "upstream-94a7a273fe8124df51e63058816526b66bbc9538+openhtpc-worktree-system-root-compact-20261011",
