@@ -1,5 +1,7 @@
 # OPENHTPC Magnificence — GPU evidence register
 
+Last updated: 2026-10-11 (Europe/Brussels).
+
 ## Purpose
 
 This document is the human-readable companion to `payload/assets/magnificence_gpu_knowledge.json`.
@@ -18,6 +20,13 @@ The goal is not to discover new shaders. The Magnificence shader scope is frozen
 
 RAVU, ArtCNN, CfL and other shaders are outside this classifier.
 
+The common collection and promotion method is defined in
+`docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md`; the platform inventory,
+including the installed but unqualified GEEKOM IT13 Max and the planned NiPoGi
+E3B/Vega 7 comparator, is in `docs/OPENHTPC_REFERENCE_PLATFORMS.md`. Installation
+and enumerated capabilities are not Magnificence performance evidence and do not
+enter this runtime knowledge base before measured qualification.
+
 ## Evidence hierarchy
 
 1. **OPENHTPC physical qualification** — highest authority. Exact GPU/output profiles always win.
@@ -29,6 +38,30 @@ RAVU, ArtCNN, CfL and other shaders are outside this classifier.
 7. **Missing required capabilities** — PURE.
 
 Runtime benchmarking is not used to select a recipe.
+
+## GEEKOM IT13 Max / Meteor Lake evidence — 2026-10-11
+
+Fresh host evidence identifies the processing/display device as the integrated
+Meteor Lake Arc GPU at PCI `0000:00:02.0`, vendor/device `8086:7d55`, with
+Vulkan name `Intel(R) Arc(tm) Graphics (MTL)`.  The NPU at `0000:00:0b.0` /
+`8086:7d1d` is a separate device and has no established OPENHTPC/MPV shader
+role.  The IT13 must not inherit assumptions from the discrete Arc A310
+`8086:56a6` or older HD/UHD/Iris Xe names.
+
+The selector initially had no exact `7d55` profile and therefore selected the
+conservative LIGHT/KrigBilateral baseline. After a bounded physical resource
+run and Steve's validation, OPENHTPC added an exact DVD PAL→4K60 profile using
+`vaapi-copy + BWDIF + FSRCNNX-16 + KrigBilateral + Vibrance Mild`. The exact
+profile is installed on `.59`; no IT13/Meteor Lake family rule was promoted.
+
+The retained exact chain excludes SSimSuperRes and source cleanup because they
+were not part of the operator-qualified result. Its measured evidence is 634
+post-warmup samples, VO p95 21.20 ms against a 40 ms budget and zero observed
+frame/decoder/delayed drops. Vulkan render GPU is PROVEN, VAAPI-copy is
+OBSERVED and physical decode-GPU ownership remains NOT_PROVEN. The audit and
+operational evidence are in `docs/audits/2026-10-11-it13-magnificence-hermes.md`,
+`docs/continuity/2026-10-11-it13-strong-dvd-resource-test.md` and the deployment
+checkpoint.
 
 ## Frozen inferred recipes
 

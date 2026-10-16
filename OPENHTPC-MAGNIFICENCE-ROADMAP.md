@@ -1,5 +1,7 @@
 # OPENHTPC Magnificence roadmap
 
+Last updated: 2026-10-11 (Europe/Brussels).
+
 ## RC scope
 
 Status: `RC PRIORITY — CURRENT FEDORA GRAPHICS STACK`
@@ -7,6 +9,11 @@ Status: `RC PRIORITY — CURRENT FEDORA GRAPHICS STACK`
 The first Magnificence RC targets hardware that works with the current Fedora graphics stack without requiring OPENHTPC to install, pin or replace a legacy vendor driver branch. The RC must remain installable, predictable and reversible, with PURE as the safe fallback when no qualified profile matches the active GPU, source class and display target.
 
 The physically qualified matrix is intentionally finite, but it is no longer the complete hardware-coverage mechanism. Exact OPENHTPC qualifications remain the highest-priority authority. An evolving GPU knowledge database preserves external family evidence, but community-derived tiers are reference-only until OPENHTPC explicitly promotes them from reproducible physical tests and/or sufficiently consistent OPENHTPC user reports. Runtime benchmarking is not a recipe-selection mechanism.
+
+The reproducible qualification method and hardware inventory are maintained in
+`docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md` and
+`docs/OPENHTPC_REFERENCE_PLATFORMS.md`. Measurements are evidence for a later
+human-reviewed promotion; they are not an automatic runtime selector.
 
 ## RC qualified matrix
 
@@ -33,6 +40,37 @@ The generalized classifier is deliberately restricted to the frozen Magnificence
 Every generalized decision requires an actual Vulkan device match and MPEG-2 hardware-decode support. Community reports/configurations are evidence, not recipe authority: they may suggest a future promotion, but they cannot activate one by themselves. An exact OPENHTPC profile always wins. The database records evidence identifiers and selection status so mappings can evolve transparently as additional OPENHTPC hardware is reported and verified.
 
 A completely unknown GPU that satisfies the Vulkan + MPEG-2 capability baseline receives the conservative LIGHT/KrigBilateral recipe rather than falling directly to PURE. Missing required capabilities, unsupported source scope, output above the supported limit, or missing approved shaders still falls back to `PURE`.
+
+## GEEKOM IT13 Max / Core Ultra 9 185H reference plan
+
+Status: `EXACT STRONG PROFILE INSTALLED FOR QUALIFIED PAL DVD→4K60 SCOPE — POST-INSTALL PHYSICAL PLAYBACK OPEN`.
+
+Steve has designated a GEEKOM IT13 Max with Core Ultra 9 185H, integrated Intel Arc Xe-LPG (8 Xe-Cores) and 24 GB LPDDR5 as an OPENHTPC reference platform. A fresh read-only inventory on 2026-10-11 confirms Fedora 44 KDE/Wayland, hostname `IT13Max`, PCI `0000:00:02.0` / `8086:7d55`, kernel 7.2.9, Mesa 26.2.4, Vulkan, VAAPI, MPV 0.41 and HDMI 3840x2160@60. The NPU `8086:7d1d` is distinct and has no established role in the MPV shader path. These facts establish readiness to test, not shader performance, physical decode-GPU ownership, visual quality or a Magnificence class.
+
+Gates 1–5 are established for the installed environment: the persistent PCI/DRM identity and Vulkan UUID agree, effective configs request `gpu-next`/Vulkan/VAAPI, and completed runs prove the bound Vulkan render GPU while observing VAAPI without claiming its physical PCI owner. Since the operator qualification, an exact `8086:7d55` profile has been added for DVD PAL→3840×2160 only and installed on `.59`; `CINEMA_AUTO` now resolves this exact profile. No ACTIVE family rule was created.
+
+On 2026-10-11 Steve authorized a real, muted DVD resource run of the proposed STRONG-without-SSim candidate. The first direct-VAAPI endurance reproduced the known software-filter incompatibility and MPV disabled BWDIF. A second isolated run used `--hwdec=vaapi-copy`: BWDIF then remained active with FSRCNNX-16, Krig and Vibrance. Across 634 post-warmup samples it reported zero frame/decoder/delayed drops, shader/VO p95 21.20 ms against a 40 ms PAL frame budget, DRM render-context average 51.64%, and CPU package average 55.96 °C / p95 57 °C. Steve explicitly validated the result. The exact profile was subsequently implemented and installed on `.59`; Doctor, selection and arguments are software-verified. Acoustics, other source classes, full-film endurance and a new physical playback after installation remain unqualified. The family STRONG recipe was not changed. Details: `docs/continuity/2026-10-11-it13-strong-dvd-resource-test.md` and `docs/continuity/2026-10-11-it13-system-magnificence-deployment.md`.
+
+Qualification sequence:
+
+1. install Fedora and record the exact environment;
+2. characterize hardware with persistent PCI identity;
+3. validate Vulkan device association;
+4. validate VAAPI codec facts without inferring physical decode-GPU ownership;
+5. validate MPV `gpu-next` and effective runtime configuration;
+6. measure and visually review Pure;
+7. test individual frozen shaders;
+8. test the current applicable Magnificence chain unchanged;
+9. compare with the physically qualified Arc A310 under aligned conditions;
+10. compare with the NiPoGi E3B / Ryzen 5 7530U / Vega 7 reference when measured;
+11. determine p95/max frame-time and sustained operating margin, using about 25% reserve as a design reference where applicable;
+12. decide whether any internal Magnificence class is justified, without preselecting its name;
+13. perform a long-duration real-film test;
+14. promote only the tested exact profile; consider a family promotion solely after separate evidence.
+
+`Alerte.mkv` remains the preferred common comparison medium when locally available and legally usable. Its hash, scenes and timestamps must be recorded per campaign. No current A310 profile was replaced. The IT13 runtime entry is intentionally exact and narrower than a family rule.
+
+The comparison covered the path to STRONG without SSim (FSRCNNX-16, Krig, Vibrance). Steve physically accepted the complete temporary `vaapi-copy + BWDIF` result on one PAL DVD, which now backs the exact installed profile. This does not generalize the result to other masters, outputs or Meteor Lake devices. Hermes/DeepSeek's bounded review and the independent dispositions are recorded in `docs/audits/2026-10-11-it13-magnificence-hermes.md`; the HIGH chain was not retained. No `Alerte.mkv` was found on `.59`, so it and a dark scene remain useful coverage before broader promotion.
 
 ## RC validation gate
 

@@ -763,6 +763,158 @@
         "shader_catalog": "assets/shaders/catalog.json"
       }
     },
+    "intel_meteor_lake_8086_7d55_sd_2160p": {
+      "gpu": {
+        "vendor": "Intel",
+        "model": "Intel Arc Graphics (Meteor Lake-P)",
+        "pci_id": "8086:7d55",
+        "architecture": "Meteor Lake",
+        "hardware_class": "STRONG"
+      },
+      "reference_platform": "GEEKOM IT13 Max / Core Ultra 9 185H / Intel Arc Graphics",
+      "software": {
+        "os": "Fedora 44",
+        "kernel": "7.2.9-200.fc44.x86_64",
+        "mesa": "26.2.4",
+        "mpv": "0.41.0",
+        "libplacebo": "7.360.1",
+        "session": "KDE/Wayland",
+        "video_backend": "vaapi-copy",
+        "render_backend": "vulkan"
+      },
+      "source_scope": {
+        "class": "DVD_PAL_FILM",
+        "codec": "MPEG-2",
+        "resolution": "720x576",
+        "fps": 25.0,
+        "pix_fmt": "yuv420p"
+      },
+      "display_scope": {
+        "resolution": "3840x2160",
+        "refresh_hz": 60.0,
+        "bit_depth_observed": 10
+      },
+      "classification": {
+        "date": "2026-10-11",
+        "method": "EXACT_PLATFORM_PHYSICAL_QUALIFICATION",
+        "gpu_tier": "STRONG",
+        "runtime_benchmark_required": false,
+        "rationale": "Exact 8086:7d55 IT13 profile promoted only after a real DVD PAL-to-4K60 resource run and Steve's physical validation. This does not establish a family rule for other Meteor Lake devices or source/output scopes."
+      },
+      "measurement": {
+        "date": "2026-10-11",
+        "method": "REAL_DVD_RESOURCE_RUN_AFTER_WARMUP",
+        "samples": 634,
+        "frame_budget_ms": 40.0,
+        "vo_render_ms": {
+          "average": 19.61,
+          "p95": 21.2,
+          "p99": 22.55,
+          "maximum": 23.76
+        },
+        "render_utilization_percent": {
+          "average": 51.64
+        },
+        "package_temperature_c": {
+          "average": 55.96,
+          "p95": 57.0
+        },
+        "vo_drops": 0,
+        "decoder_drops": 0,
+        "delayed_frames": 0
+      },
+      "magnificence": {
+        "selected_recipe": "RECIPE_MAG_SD_IT13_FSRCNNX16_KRIG_VIBRANCE_MILD",
+        "fallback_recipe": "RECIPE_0_PURE",
+        "status": "TECHNICALLY_QUALIFIED_OPERATOR_PHYSICALLY_VALIDATED_IT13_SD_2160P",
+        "selected_label": "FSRCNNX-16 + KrigBilateral + Vibrance légère",
+        "selected_shaders": [
+          "FSRCNNX_x2_16-0-4-1.glsl",
+          "KrigBilateral.glsl",
+          "OpenHTPC_Vibrance_Mild.glsl"
+        ],
+        "mpv_args": [
+          "--hwdec=vaapi-copy",
+          "--fbo-format=rgba16hf",
+          "--vf=lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]",
+          "--scale=ewa_lanczossharp",
+          "--dscale=mitchell",
+          "--sigmoid-upscaling=yes"
+        ],
+        "reason": "The exact IT13 Max 8086:7d55 platform sustained the selected DVD PAL-to-4K60 chain with zero observed frame, decoder or delayed drops and practical render reserve. vaapi-copy is required so BWDIF can process the decoded frames; direct VAAPI disabled the filter in the observed run.",
+        "visual_basis": "Steve physically validated the real-playback result on the IT13 Max. The qualified chain deliberately excludes SSimSuperRes and source cleanup because neither was part of this validated recipe.",
+        "ui_reason_fr": "Recette IT13 validée pour DVD PAL vers 4K : BWDIF, FSRCNNX-16, KrigBilateral et Vibrance légère, avec une réserve GPU mesurée.",
+        "scope_limit": "Qualified only for the exact 8086:7d55 platform, DVD PAL film scope and 3840x2160 output. Other sources, outputs and devices remain unqualified."
+      },
+      "validation": {
+        "date": "2026-10-11",
+        "method": "OPERATOR_PHYSICAL_REVIEW_AND_REAL_PLAYBACK_RESOURCE_OBSERVATION",
+        "output": "3840x2160@60",
+        "runtime": "vaapi-copy + BWDIF send_frame + FSRCNNX-16 + KrigBilateral + OpenHTPC Vibrance Mild",
+        "render_gpu": {
+          "status": "PROVEN",
+          "pci": "0000:00:02.0",
+          "vulkan_device_uuid": "8680557d-0800-0000-0002-000000000000"
+        },
+        "decode": {
+          "backend": "OBSERVED_VAAPI_COPY",
+          "physical_gpu_binding": "NOT_PROVEN"
+        },
+        "operator_result": "PHYSICALLY_QUALIFIED_FOR_RECORDED_SCOPE",
+        "open_limits": [
+          "Full-film endurance was not established by this run.",
+          "Acoustic behavior was not quantified.",
+          "Other source classes and output modes remain unqualified."
+        ]
+      },
+      "physical_qualification": {
+        "status": "PHYSICALLY_QUALIFIED",
+        "date": "2026-10-16",
+        "method": "POST_INSTALLATION_PHYSICAL_PLAYBACK_ON_THE_INSTALLED_PROFILE",
+        "scope": {
+          "source": "DVD PAL MPEG-2, 720x576, 25 i/s",
+          "output": "3840x2160@60",
+          "gpu": "Intel 8086:7d55",
+          "recipe": "RECIPE_MAG_SD_IT13_FSRCNNX16_KRIG_VIBRANCE_MILD"
+        },
+        "qualified_duration": {
+          "observed": "21 min 37 s",
+          "observed_seconds": 1297,
+          "instrumented_seconds": 1200
+        },
+        "proven": {
+          "vaapi_copy": "mpv's own decoder log: 'Trying hardware decoding via mpeg2video-vaapi-copy', then '[i][vd] Using hardware decoding (vaapi-copy)'; decoder format nv12.",
+          "bwdif": "Proven by filter-graph construction, not by the argument alone: the mpv log shows 'mpv_src_in0 ... nv12 | auto_scale_0 | Parsed_bwdif_0 (bwdif) | mpv_sink_out0'.",
+          "fsrcnnx16_krigbilateral_vibrance": "Proven by execution: the product's own vo_passes list carries feature map 1..4, mapping 1_1..4_4, sub-band residuals 1..4, sub-pixel convolution 1, aggregation, three KrigBilateral passes and OPENHTPC Vibrance Mild.",
+          "frame_drops": "frame_drop_count = 0, maximum 0, over 2579 product samples.",
+          "decoder_drops": "decoder_frame_drop_count = 0, maximum 0, over the same window.",
+          "delayed_frames": "vo_delayed_frame_count = 0, maximum 0, max_mistimed_frame_count = 0.",
+          "resource_stability": "20 minutes measured continuously, read in five 4-minute slices: render 52.2/52.3/52.1/52.2/52.4 %, mpv CPU 19.6/19.6/19.6/19.8/19.9 % of one core, GPU frequency 2248-2257 MHz, package mean 55.8-56.9 C. No drift.",
+          "clean_exit": "mpv exit code 0; PLAYBACK_PROCESS_EXITED then PLAYBACK_END; playback_teardown_forced false; no residual mpv process.",
+          "flex_return": "No FLEX_STARTED between PLAYBACK_END and the deliberate power-off that followed: the running Flex instance stayed up underneath the playback and was the live interface afterwards.",
+          "operator_observation": "Operator reports no visible anomaly, including on a deliberately dense and fast-moving sequence."
+        },
+        "not_qualified": [
+          "Full-film endurance: 21 min 37 s observed against a 2 h 48 min 29 s disc.",
+          "Other source classes and other output modes.",
+          "Fan acoustics: no sensor available, not quantified.",
+          "Exact physical GPU binding of the decode path: physical_gpu_binding remains NOT_PROVEN.",
+          "Isolated thermal spikes: 13 of 1178 samples between 72 and 95 C (14 at or above 70 C), single-sample, to be investigated by a dedicated bounded measurement.",
+          "Specific validation of a 10-bit source: the 8-bit dithering versus bit_depth_observed 10 finding stays OPEN and does not block this qualification."
+        ],
+        "evidence": {
+          "campaign": "2026-10-16, IT13 Max (.59), installed OPENHTPC 1.3.1",
+          "probe_run": "~/.local/state/openhtpc-it13-qualification/20261016T102110Z-installed-profile",
+          "preserved_copy": "NAS 192.168.1.10 share Tools, folder htpc project/hermes-it13-20261016b (34 files, 4.7 MiB, sha256 re-read from the destination)",
+          "product_playback_log": "playback.log 2026-10-16 13:08:58 -> 13:30:35, exit_code=0, optical_generation=4",
+          "dithering_finding": "8-bit dithering versus bit_depth_observed 10: OPEN, separate finding, does not block this qualification"
+        }
+      },
+      "reference_sources": {
+        "qualification_checkpoint": "docs/continuity/2026-10-11-it13-strong-dvd-resource-test.md",
+        "shader_catalog": "assets/shaders/catalog.json"
+      }
+    },
     "amd_rx5700xt_1002_731f_sd_2160p": {
       "gpu": {
         "vendor": "AMD",
