@@ -16,6 +16,19 @@ Prefer the smallest coherent implementation.
 Do not broaden scope.
 
 
+## Canonical project memory
+
+Project actors, permissions and recommended workflows are documented in
+`docs/OPENHTPC_ACTORS.md`.
+
+Reference hardware and the reproducible GPU/MPV/Magnificence qualification
+method are documented in `docs/OPENHTPC_REFERENCE_PLATFORMS.md` and
+`docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md`.
+
+These documents describe roles and evidence. They do not grant commit, merge,
+push, deployment, release or physical-operation authority.
+
+
 ## Authority precedence
 
 Authority precedence is:
@@ -58,9 +71,15 @@ When invoked by OPENHTPC Autopilot:
 - stop on any safety or policy ambiguity
 
 
-## External read-only reviewer — Hermes / DeepSeek
+## Hermes / DeepSeek — dual role
 
-Hermes is an external contradictory reviewer, not an implementation authority.
+Hermes is both:
+- an external contradictory reviewer through the immutable audit lane; and
+- a second operational OPENHTPC engineer, either inside a dedicated isolated
+  clone or through the separately authorized `hermes-eng` account.
+
+DeepSeek is the model used by Hermes through the OpenRouter provider. Neither
+the model nor the provider is an independent project actor or authority.
 
 For OPENHTPC audits Hermes MUST:
 - receive an isolated snapshot whose provenance records the verified branch, HEAD and dirty worktree;
@@ -71,7 +90,37 @@ For OPENHTPC audits Hermes MUST:
 - never commit, merge, deploy, restart OPENHTPC, operate physical validators, or alter the canonical worktree;
 - return a report for human/agent comparison before any development task is delegated.
 
-Hermes does not replace AGY planning/review, Codex execution, CodeGraph architecture mapping, Autopilot policy, tests, or physical qualification. Its detailed operating procedure is documented in `docs/OPENHTPC_HERMES_AUDITOR.md`.
+For OPENHTPC engineering Hermes MUST:
+- preserve the same architecture, evidence, testing and continuity rules as
+  Codex;
+- record verified branch, HEAD, VERSION, dirty worktree, objective, tests and
+  protected stash names before a chantier;
+- use its own branch/worktree for Git changes and never switch or rewrite the
+  shared checked-out branch underneath another operator;
+- run relevant tests again after corrections and report exact commands/results;
+- submit its work to Codex or Steve for review before it is treated as
+  qualified.
+
+The isolated-clone lane remains available and keeps its original protections:
+no remote, no canonical `.git` authority, no Docker socket, no host SSH material
+and no deployment credentials; only the clone and its report directory are
+writable, and integration returns through a patch/report.
+
+On 2026-10-13 Steve explicitly authorized a separate direct engineering lane:
+the dedicated Unix/SSH identity `hermes-eng` may read and write the canonical
+repository, use Git, compile and run tests. That account has no sudo authority,
+no Docker-group membership and no deployment credentials. It does not weaken
+the immutable audit lane. Hermes MUST NOT push, tag, publish, rewrite shared
+history, deploy, make product decisions, operate physical validators, or
+apply/drop/modify protected stashes without Steve's explicit separate approval.
+Code written by Hermes requires review by Codex or Steve; Hermes does not
+qualify its own implementation.
+
+The audit and engineering lanes are separate. Engineering promotion does not
+weaken the technically read-only audit contract. Hermes does not replace AGY
+planning/review, Codex as principal engineer when available, CodeGraph as an
+analysis tool, Autopilot policy, tests, or Steve's physical qualification. The
+detailed procedures are documented in `docs/OPENHTPC_HERMES_AUDITOR.md`.
 
 ## Evidence vocabulary
 
@@ -888,7 +937,10 @@ and published. Do not invent dates or promote evidence.
 Keep specialized roadmaps aligned when relevant. Report divergence with
 `OPENHTPC_CURRENT_STATE.json`; do not silently rewrite its gates or approved
 actions. Roadmap entries never authorize implementation, commit, deployment
-or publication. Hermes remains read-only and supplies findings to the operator.
+or publication. Read-only Hermes audits supply findings to the operator.
+Engineering work is either returned from the isolated clone or created on a
+dedicated Hermes branch/worktree; both paths require canonical review by Codex
+or Steve.
 
 
 ## Mandatory cross-conversation continuity

@@ -151,5 +151,14 @@ See [1.3.1 release notes](RELEASE-NOTES-OPENHTPC-1.3.1-FR-EN.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).
 
+Project contributors and future work sessions should begin with the
+[agent contract](AGENTS.md), the
+[continuity checkpoint](docs/OPENHTPC_CONTINUITY.md), the
+[global roadmap](OPENHTPC-ROADMAP.md), the
+[actors and authority matrix](docs/OPENHTPC_ACTORS.md), and the
+[reference-platform register](docs/OPENHTPC_REFERENCE_PLATFORMS.md).
+GPU qualification follows the
+[MPV/Magnificence protocol](docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md).
+
 OPENHTPC was created as an original project by Steve Dehanne and is licensed
 under Apache-2.0. Third-party components retain their respective licenses.

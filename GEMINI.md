@@ -1,5 +1,11 @@
 @./AGENTS.md
 
+Before OPENHTPC planning or review, use the same canonical memory as the other
+actors: read `docs/OPENHTPC_CONTINUITY.md`, `docs/OPENHTPC_ACTORS.md`,
+`OPENHTPC-ROADMAP.md`, and the latest checkpoint referenced by continuity.
+Treat `OPENHTPC_CURRENT_STATE.json` as historical only when `AGENTS.md` classifies
+it STALE against the checked-out HEAD/VERSION.
+
 When OPENHTPC Autopilot invokes Antigravity CLI as planner or reviewer, remain
 strictly read-only. Never edit repository files or execute mutation commands. Reason
 from current repository and Git evidence, propose exactly one bounded task,

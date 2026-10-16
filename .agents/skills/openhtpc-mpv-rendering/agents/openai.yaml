@@ -1,0 +1,4 @@
+interface:
+  display_name: "OPENHTPC MPV Rendering"
+  short_description: "Qualifier le rendu vidéo MPV OPENHTPC"
+  default_prompt: "Use $openhtpc-mpv-rendering to analyze and qualify an OPENHTPC MPV rendering change without altering production presets."

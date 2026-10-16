@@ -7,8 +7,15 @@ core.*
 *.tar.gz
 *.tar.gz.sha256
 *.report.json
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/openhtpc-mpv-rendering/
+!.agents/skills/openhtpc-mpv-rendering/**
 .codex/
+# hors produit : etat d'execution des agents (decision operateur, 2026-10-16)
+.hermes/
+skills-lock.json
 .openhtpc-autopilot/
 .backups/
 artifacts/
