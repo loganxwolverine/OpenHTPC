@@ -46,3 +46,18 @@ du ressort de Steve. Push, tag et publication réclament un GO distinct.
 Les SHA-256 et le rapport de build sont des artefacts générés : les reporter
 dans le journal de release externe APRÈS build, et ne pas les insérer dans
 ce même commit (évite une dépendance circulaire d'identité).
+
+## Qualification opérateur RC1 — 2026-10-18
+
+Après purge complète de la 1.3.1 sur IT13 Max .59 et installation propre de
+l'archive 1.3.2-rc1, Steve a confirmé : affichage et navigation dans Flex,
+lecture DVD, image, son et retour à Flex OK. Le diagnostic en direct
+indiquait Overall READY, une unique instance HOME/Flex et une provenance
+binaire conforme à l'archive. Le prevol update.sh --check en session active a
+réussi sans modifier le Hardware Passport ni interrompre la session.
+
+Cette qualification est une preuve matérielle réelle de la RC1 (pas une
+qualification implicite de futures archives). Le désinstallateur RC1 contient
+encore une lacune prouvée : les versions 1.3.x gardent le répertoire programme.
+Le correctif est traité dans une tranche séparée et exige une nouvelle
+identité de candidat. Aucune publication n'est autorisée à ce stade.
