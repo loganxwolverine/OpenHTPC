@@ -334,6 +334,11 @@ def _make_provenance_artifact(monkeypatch, tmp_path, *, build_override=None,
         files = {
             "VERSION": b"1.2.0-rc8\n",
             "vendor/flex-launcher/UPSTREAM_COMMIT": (TEST_UPSTREAM + "\n").encode(),
+            # Keep the synthetic source compatible with the release fingerprint
+            # completeness contract: all four root metadata files are required.
+            "vendor/flex-launcher/CMakeLists.txt": b"cmake_minimum_required(VERSION 3.22)\n",
+            "vendor/flex-launcher/UNLICENSE": b"synthetic test license\n",
+            "vendor/flex-launcher/OPENHTPC_BASELINE.md": b"synthetic baseline\n",
             "vendor/flex-launcher/src/launcher.c": b"NEW_FROM_EXPORTED_SOURCE",
             "payload/flex/bin/flex-launcher": b"OLD_TRACKED_BINARY",
             "payload/flex/BUILD-METADATA.json": b'{"schema": 1, "binary_sha256": "stale"}',
