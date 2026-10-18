@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.3.1"
+readonly OPENHTPC_VERSION="1.3.2-rc1"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -347,7 +347,7 @@ install_multimedia_extension() {
 [[ -r /etc/os-release ]] || die "/etc/os-release est introuvable."
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC 1.3.1 prend uniquement en charge Fedora 44 KDE."
+[[ ${ID:-} == "fedora" && ${VERSION_ID:-} == "44" ]] || die "OPENHTPC ${OPENHTPC_VERSION} prend uniquement en charge Fedora 44 KDE."
 command -v rpm >/dev/null 2>&1 || die "La commande rpm est requise."
 
 if ! rpm -q plasma-workspace >/dev/null 2>&1 &&

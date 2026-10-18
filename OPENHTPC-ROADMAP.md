@@ -1,6 +1,6 @@
 # OPENHTPC — Roadmap globale
 
-Dernière mise à jour : 2026-10-15 (Europe/Brussels).
+Dernière mise à jour : 2026-10-18 (Europe/Brussels).
 Responsable des décisions et validations physiques : Steve Dehanne.
 
 ## Rôle et autorité
@@ -10,6 +10,24 @@ Ce document donne une vue globale de l'évolution du projet. Il relie les roadma
 Ordre d'autorité : code/tests/artifacts, état de travail validé, documents de qualification/architecture, roadmap, conversations historiques.
 Une entrée « prévu » n'autorise pas une implémentation, un commit, un déploiement ou une publication.
 Un changement présent dans le dépôt n'établit pas son installation ni sa qualification physique.
+
+## Point de situation pré-RC — 2026-10-18
+
+- Priorité décidée par Steve : base saine, stable et reproductible pour une
+  Release Candidate publique ; développement de nouveautés et recalibration
+  optique repoussés à des décisions ultérieures.
+- V11 DVD intégré et commité dans la base de préparation ; lecture complète
+  The Perfect Storm physiquement confirmée sur .229. La publication du DVD
+  et le menu Flex sont alignés ; cela ne vaut pas qualification publique.
+- La branche de préparation reçoit une identité candidate 1.3.2-rc1.
+  Aucun push, tag, publication ou déploiement 1.3.2-rc1 autorisé.
+- Logiciel : 2 406 tests réussis, 12 échecs historiques strictement identiques
+  (tests du lanceur KDE sur .79 sans Plasma), 23 ignorés en suite native.
+  Gate d'installation propre Fedora 44 KDE/Wayland à fermer avant GO public.
+- Graphiphy : importance organisationnelle confirmée ; rôles et permissions
+  techniques à attester avant délégation. À distinguer de CodeGraph.
+- Source vérifiée et limites : docs/continuity/2026-10-18-132-rc1-preparation.md.
+  Les jalons 1.3.1 historiques ci-dessous sont conservés sans les réécrire.
 
 ## Point de situation vérifié
 

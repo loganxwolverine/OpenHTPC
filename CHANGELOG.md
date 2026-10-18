@@ -1,5 +1,16 @@
 # Changelog
 
+# OPENHTPC 1.3.2 Release Candidate 1 — Patina (candidate, not published)
+
+- Stabilization-only candidate based on the integrated 1.3.1 development line. No new media features, GPU recipes or driver management.
+- Fixes the DVD optical-generation publication and Flex menu-regeneration lifecycle to prevent stale disc menus and unsafe watcher retries.
+- Preserves exact HOME/session lock authority and conservative pacing/recovery semantics.
+- Aligns the synthetic Devctl release fixture with the existing Flex source-fingerprint contract; does not weaken production verification.
+- Records Graphiphy as an important project actor; actual integration/permissions are subject to separate technical proof.
+- Software evidence: 131 targeted optical tests and 77 Devctl tests PASS; full native Fedora 44 test run on the V11 + fixture candidate reports 2406 PASS, 12 FAIL, 23 SKIP. Those 12 integration tests require a compliant Fedora KDE/Wayland environment; their absence of qualification is not a PASS.
+- Physical evidence: a complete DVD movie session on .229 after the V11 fix was confirmed by the operator. Clean installation, upgrade and public release gates remain PENDING.
+- The legacy optical-drive recalibration issue and DVD interactive-menu plugin are deferred.
+
 # OPENHTPC 1.3.1 — Patina
 
 - Stabilizes the physically qualified Magnificence 1.3 line on Radeon RX 5700 XT and Intel Arc A310 validators.

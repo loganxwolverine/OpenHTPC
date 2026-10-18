@@ -6,25 +6,25 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.3.1 — Patina
+# OPENHTPC 1.3.2 RC1 — Patina
 
-Version: `1.3.1`
-Build: `public-release-1.3.1`
-Status: **Release artifact — RX 5700 XT and Arc A310 physical validation PASS**
+Version: `1.3.2-rc1`
+Build: `public-release-1.3.2-rc1`
+Status: **Release Candidate — public installation/physical qualification pending (not published)**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
 Flex Launcher provides the ten-foot interface and MPV provides playback. The
 Hardware Passport, capabilities, media configuration and playback history stay
 on the local machine; normal operation does not require a cloud service.
 
-OPENHTPC 1.3.1 **Patina** is the stabilization update for the Magnificence
-release. It preserves the qualified image recipes while correcting multi-GPU
-capability publication, DVD refresh/audio ordering, temporary PCM fallback when
-passthrough is not proven after a modeset, exact tracked playback ownership,
-Unicode CJK/Hangul disc-sheet rendering, manual TMDb window behavior and update
-recovery.
+OPENHTPC 1.3.2 RC1 **Patina** is a stabilization-only candidate. It carries
+forward the 1.3.1 Magnificence and media qualifications without changing image
+recipes. This candidate adds the V11 DVD optical-generation publication and
+menu-regeneration correction, plus a repaired synthetic test fixture for the
+release tooling. A complete movie was watched successfully after the optical
+fix on the .229 validator; that does not prove a clean public installation.
 
-The release candidate completed physical gates on both Radeon RX 5700 XT and
+The preceding 1.3.1 version completed its physical gates on both Radeon RX 5700 XT and
 Intel Arc A310 systems. The A310 retained its CLEAN + FSRCNNX-16 +
 KrigBilateral + Vibrance Mild recipe and HDMI AC3 passthrough; the RX validator
 confirmed the exact per-PCI codec view, PAL 50 Hz switching with restoration to
@@ -51,12 +51,12 @@ and contextual first-use guidance from source selection through first analysis.
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.3.1.tar.gz.sha256
+sha256sum -c OpenHTPC-1.3.2-RC1.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.3.1.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.3.2-RC1.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -80,7 +80,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted OPENHTPC 1.3.1 directory:
+From the extracted OPENHTPC 1.3.2 RC1 directory:
 
 ```bash
 ./update.sh
@@ -146,7 +146,8 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [1.3.1 release notes](RELEASE-NOTES-OPENHTPC-1.3.1-FR-EN.md),
+See [1.3.2 RC1 release notes](RELEASE-NOTES-OPENHTPC-1.3.2-RC1-FR-EN.md),
+[preceding 1.3.1 release notes](RELEASE-NOTES-OPENHTPC-1.3.1-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and
 [asset provenance](assets/ASSET_PROVENANCE.md).
