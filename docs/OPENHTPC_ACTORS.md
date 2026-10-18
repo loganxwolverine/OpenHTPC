@@ -1,6 +1,6 @@
 # OPENHTPC — Acteurs, outils et autorités
 
-Dernière mise à jour : 2026-10-13, Europe/Brussels.
+Dernière mise à jour : 2026-10-18, Europe/Brussels.
 
 ## Objet et portée
 
@@ -16,6 +16,7 @@ L'ordre d'autorité technique reste celui de `AGENTS.md` : code/tests/artifacts,
 - **Hermes Agent** est le second ingénieur opérationnel et l'auditeur contradictoire ; **DeepSeek** est le modèle actuellement utilisé derrière lui ; **OpenRouter** est la couche de fourniture/routage. Ces trois noms ne sont pas interchangeables.
 - **AGY** désigne dans le dépôt le CLI Google Antigravity utilisé par Autopilot comme planner/reviewer borné. **Autopilot** est l'orchestrateur Python local, pas un modèle.
 - Une recommandation d'agent est un avis. Une preuve logicielle n'est pas une qualification physique.
+- **Graphiphy** est identifié par Steve comme acteur important de la combinaison d’agents (2026-10-18). Son rôle technique n’étant pas prouvé localement, cette reconnaissance organisationnelle **n’autorise aucun accès ni attribution fonctionnelle présumée**, en particulier celle de CodeGraph.
 
 ## Hôte de contrôle et Hermes — vérifié le 2026-10-13
 
@@ -37,7 +38,7 @@ Codex, AGY et CodeGraph sont disponibles sur .79. Hermes Agent 0.21.6 y fonction
 | OpenRouter | Fournisseur / routeur de modèles | Acheminer l'accès au modèle DeepSeek pour Hermes | Non | Non | Non | Non | Non | Aucune | Configuration/identifiants externes au dépôt |
 | OPENHTPC Autopilot | Orchestrateur Python local | Enchaîner plan AGY, politique déterministe, exécution Codex, review et gates | Oui | État de run borné ; modifications via Codex | Valide les preuves déclarées | Peut accepter un **commit local** uniquement selon politique ; jamais push | Jamais automatique | Politique/gate, pas autorité produit | `agy`, `codex`, schémas/prompts, état canonique applicable |
 | OpenAI | Fournisseur | Fournir ChatGPT et Codex selon l'environnement utilisé | Non | Non | Non | Non | Non | Aucune | Comptes et services externes au dépôt |
-| Graphiphy | **ROLE À CLARIFIER** | Aucune occurrence probante trouvée dans le dépôt au 2026-10-11 | À clarifier | À clarifier | À clarifier | À clarifier | À clarifier | Aucune établie | **ROLE À CLARIFIER — ne pas confondre avec CodeGraph** |
+| Graphiphy | **ACTEUR IMPORTANT (DÉCISION OPÉRATEUR) / CAPACITÉS À QUALIFIER** | Inclure dans la combinaison d’agents OPENHTPC ; contrat opérationnel non attesté localement | Non établie | Non autorisée implicitement | À qualifier | Aucun accès implicite | Non autorisé implicitement | Avis à établir ; Steve arbitre | **Distinct de CodeGraph** ; identifier installation, interface et rôle avant délégation |
 | Desktop Commander | **ROLE À CLARIFIER** | Aucune occurrence probante trouvée dans le dépôt au 2026-10-11 ; usage actuel non établi | À clarifier | À clarifier | À clarifier | À clarifier | À clarifier | Aucune établie | **ROLE À CLARIFIER** |
 | Gemini CLI | Outil historique/non requis actuellement | Le runtime Autopilot vérifié appelle `agy`, pas `gemini` ; `GEMINI.md` reste un fichier d'instructions | Lecture potentielle | Non établie | Non établie | Non | Non | Aucune | Statut opérationnel courant non établi |
 
@@ -112,4 +113,4 @@ Les validations visuelles et sonores reviennent à Steve. Les mesures automatiqu
 
 Rôles démontrés par le dépôt : `AGENTS.md`, `docs/OPENHTPC_AUTOPILOT.md`, `docs/OPENHTPC_AUTOPILOT_POLICY.md`, `docs/OPENHTPC_HERMES_AUDITOR.md`, les sources/tests Autopilot et les checkpoints de continuité.
 
-Les rôles de ChatGPT demandés ici sont une décision opérateur du 2026-10-11 et non une capacité technique déduite du dépôt. Aucune preuve locale n'a été trouvée pour Graphiphy ou Desktop Commander ; ils restent explicitement `ROLE À CLARIFIER` jusqu'à l'apport d'une source vérifiable. CodeGraph est configuré par tâche dans le HOME isolé de la voie ingénierie ; cela ne crée aucun connecteur vers l'index canonique Codex.
+Les rôles de ChatGPT demandés ici sont une décision opérateur du 2026-10-11 et non une capacité technique déduite du dépôt. La présence technique, les permissions et les fonctionnalités de Graphiphy demeurent non établies localement ; son importance organisationnelle a été confirmée par Steve le 2026-10-18. Le rôle technique de Desktop Commander reste à actualiser dans ce registre. Aucun rôle Graphiphy ne peut être déduit de CodeGraph. CodeGraph est configuré par tâche dans le HOME isolé de la voie ingénierie ; cela ne crée aucun connecteur vers l'index canonique Codex.
