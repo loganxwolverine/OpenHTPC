@@ -1,5 +1,12 @@
 # Changelog
 
+# OPENHTPC 1.3.2 Release Candidate 2 — Patina (candidate, not published)
+
+- Same physically validated DVD playback code as RC1.
+- Fixes incomplete 1.3.x removal using a validated managed-file manifest.
+- Preserves unknown user files and checks unsafe paths before deleting anything.
+- Not yet released or physically qualified as RC2.
+
 # OPENHTPC 1.3.2 Release Candidate 1 — Patina (candidate, not published)
 
 - Stabilization-only candidate based on the integrated 1.3.1 development line. No new media features, GPU recipes or driver management.
