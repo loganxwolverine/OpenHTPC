@@ -33,9 +33,21 @@ class PickerClose(unittest.TestCase):
   self.assertEqual(json.loads(self.cache.read_text())["title"],"Hancock")
 
  def test_home_watches_generation_scoped_bluray_metadata_transition(self):
+  # 2026-10-17 (tranche 1.3.2 v2) — CHANGEMENT D'ARCHITECTURE, DECLARE : le corps de la
+  # signature de métadonnées a quitté le controller pour le moteur
+  # (session.enrichment_presentation_signature), afin que le déclencheur du controller et
+  # le test comportemental d'interlock exécutent UNE implémentation au lieu d'une copie.
+  # Le corps est déplacé VERBATIM (mêmes noms locaux, mêmes littéraux). L'invariant protégé
+  # ici est inchange : le controller HOME surveille toujours une transition de metadonnees
+  # scope-génération, distingue AMBIGUOUS de PASS, et ne doit pas abandonner quand disc_id
+  # est absent.
   source=(PAYLOAD/"openhtpc-home.py").read_text(encoding="utf-8")
-  self.assertIn("tmdb.cache_path(home, st, str(title))",source);self.assertIn("AMBIGUOUS:{c_ids}",source);self.assertIn(":PASS:{data.get('tmdb_id')}",source)
-  self.assertNotIn('if not disc_id:\n        return ""',source)
+  self.assertIn("engine.enrichment_presentation_signature(home, optical_state(), tmdb)",source)
+  self.assertIn("enrichment_presentation_key()",source)
+  self.assertIn("engine.regeneration_trigger(optical_changed, enrichment_changed",source)
+  engine_source=(PAYLOAD/"openhtpc-session-engine.py").read_text(encoding="utf-8")
+  self.assertIn("tmdb.cache_path(home, st, str(title))",engine_source);self.assertIn("AMBIGUOUS:{c_ids}",engine_source);self.assertIn(":PASS:{data.get('tmdb_id')}",engine_source)
+  self.assertNotIn('if not disc_id:\n        return ""',engine_source)
 
  def test_single_result_contract_unchanged(self):
   self.cache.write_text(json.dumps({"status":"PASS","confidence":"AUTOMATIC_CONFIDENT_MATCH","tmdb_id":7,"title":"Colombiana"}))

@@ -14,13 +14,719 @@ import fcntl
 import importlib.util
 import importlib.machinery
 import re
+import select
 import shlex
+import signal
 import sys
 import time
+import threading
 from contextlib import contextmanager
 
 _optical_spec = importlib.util.spec_from_file_location("openhtpc_optical_presentation", pathlib.Path(__file__).with_name("openhtpc-optical.py"))
 _optical_model = importlib.util.module_from_spec(_optical_spec); _optical_spec.loader.exec_module(_optical_model)
+
+# ── Regeneration worker budgets (single source of truth) ─────────────────────
+# One regeneration worker performs, in one synchronous pass and before it
+# publishes flex-v1.ini as its very last act: the System page renders, the
+# disc-sheet render (bounded below) and the media-graph rebuild.  The home
+# controller's watchdog MUST outlast every one of those steps, otherwise a
+# healthy regeneration is killed before it can publish and the menu — including
+# the DVD section derived from the canonical optical state — stays on the
+# previous optical generation.  Never reintroduce an independent literal in the
+# controller: derive its watchdog from these values.
+DISC_VIEW_TIMEOUT_S = 12
+REGENERATION_WORKER_RESERVE_S = 30
+REGENERATION_WORKER_BUDGET_S = DISC_VIEW_TIMEOUT_S + REGENERATION_WORKER_RESERVE_S
+REGENERATION_MAX_ATTEMPTS = 3
+# REGENERATION_MAX_ATTEMPTS counts EXECUTIONS, not retries: one initial attempt
+# plus REGENERATION_MAX_RETRIES retries.  3 therefore means three worker
+# processes at most — a fourth execution is a defect, not a margin.
+REGENERATION_MAX_RETRIES = REGENERATION_MAX_ATTEMPTS - 1
+
+
+def regeneration_watchdog_expired(elapsed_s: float, budget_s: float = REGENERATION_WORKER_BUDGET_S) -> bool:
+    """True when a live regeneration worker consumed its whole budget."""
+    return elapsed_s > budget_s
+
+
+def regeneration_recovery(outcome: str, executions: int, max_attempts: int = REGENERATION_MAX_ATTEMPTS) -> str:
+    """Bounded recovery policy for one failed regeneration attempt.
+
+    ``outcome`` is ``STALLED`` (the watchdog expired) or ``FAILED`` (the worker
+    ended without publishing).  ``executions`` is the number of worker processes
+    ALREADY started for the current generation, INCLUDING the one that just
+    failed: the initial attempt is an execution, not a retry.  ``RETRY`` is
+    returned while one more execution still fits in ``max_attempts`` (3 means at
+    most 1 initial attempt + 2 retries = 3 workers), then ``FALLBACK`` so the UI
+    is handed truthful, generation-matching provenance instead of a silently
+    stale menu.  A pending navigation request is never dropped here: the
+    successful attempt publishes it.
+    """
+    if outcome not in {"STALLED", "FAILED"}:
+        raise ValueError(f"unknown regeneration outcome: {outcome!r}")
+    if int(executions) < 0:
+        raise ValueError(f"executions cannot be negative: {executions!r}")
+    return "RETRY" if int(executions) < int(max_attempts) else "FALLBACK"
+
+
+def regeneration_failure_is_stale(failed_generation: int, current_generation: int) -> bool:
+    """True when a newer optical generation superseded the failed one.
+
+    An error belonging to generation G must never publish a fallback for a newer
+    generation: the newer generation owns the presentation and already has its
+    own regeneration request.  A stale failure is dropped — logged, neither
+    retried nor published.  Retrying it would ask the engine to publish a
+    generation it would refuse anyway, and publishing it would stamp the
+    fallback with a generation it does not describe.
+    """
+    return int(failed_generation or 0) != int(current_generation or 0)
+
+
+def regeneration_trigger(optical_changed: bool, enrichment_changed: bool, enrichment_running: bool) -> str:
+    """Decide what a state change means for the menu regeneration.
+
+    ``OPTICAL``                a real optical transition: always regenerate.
+    ``ENRICHMENT``             the metadata signature settled: regenerate once.
+    ``SUPPRESSED_ENRICHMENT``  the metadata signature changed WHILE the enricher
+                               is still running.  Those are intermediate writes
+                               — the TMDb cache is rewritten as the lookup
+                               progresses — not a new presentation.  Regenerating
+                               now spawns a worker the next write kills a second
+                               later; the enricher's completion is the one event
+                               that triggers the authoritative regeneration.
+    ``NONE``                   nothing that affects the menu changed.
+    """
+    if optical_changed:
+        return "OPTICAL"
+    if not enrichment_changed:
+        return "NONE"
+    return "SUPPRESSED_ENRICHMENT" if enrichment_running else "ENRICHMENT"
+
+
+PROC_ROOT = pathlib.Path("/proc")
+
+# ── Group liveness: three answers, never two ─────────────────────────────────
+# A helper that can only answer "alive" or "gone" has to invent an answer when
+# /proc cannot be read, and both inventions are lies: "gone" hides a surviving
+# descendant, and "alive" reports a group that holds nothing but unreaped
+# zombies as if it were running — which is exactly how v3 produced a false
+# GROUP_STILL_PRESENT.  The probes answer in three states for that reason, and
+# the termination helper decides, explicitly, what an unproven state means.
+LIVENESS_GONE = "GONE"
+LIVENESS_LIVE = "LIVE"
+LIVENESS_UNKNOWN = "UNKNOWN"
+
+# What the kernel said when it was asked to signal a group.
+SIGNAL_OK = "OK"
+SIGNAL_GONE = "GONE"            # ESRCH: no such group
+SIGNAL_NOT_OURS = "NOT_OURS"    # EPERM: the group exists and is not ours to signal
+SIGNAL_FAILED = "FAILED"        # anything else: reported, never masked.  (The
+#                                 OUTCOME for that case is the separate
+#                                 string "SIGNAL_ERROR" returned by the helper.)
+
+# How long the supervisor waits for an exited worker to be collected once its
+# group has been released.  A leader the probes saw as exited is collected at
+# once; the bound is only there so a probe that was read at the wrong instant
+# cannot stall the controller.
+EXIT_REAP_TIMEOUT_S = 1.0
+
+# Outcomes of a group release that leave the previous worker's group unproven.
+# A retry renders the SAME generation, so it is not started on one of these: two
+# writers for one presentation is the failure this whole tranche exists to stop.
+#
+# NO_GROUP, NO_GROUP_UNPROVEN and GROUP_NOT_OURS belong here (finding A of the v6
+# review), not among the releases: none of them proves that every descendant of
+# the worker has stopped writing.  A refusal and a missing group are the ABSENCE
+# of a proof, and the absence of a proof may never be recorded as a release.
+RELEASE_UNPROVEN = ("GROUP_STILL_PRESENT", "GROUP_UNKNOWN", "SIGNAL_ERROR", "UNREAPED",
+                    "NO_GROUP", "NO_GROUP_UNPROVEN", "GROUP_NOT_OURS")
+
+# The complement: outcomes that PROVE the worker's group (and with it every
+# descendant) is gone.  Only these may free the ownership record, and only these
+# let the leader be collected.
+RELEASE_PROVEN = ("NO_WORKER", "ALREADY_EXITED", "TERMINATED", "KILLED")
+
+# v6, finding A.  The outcome a SUPERVISED worker gets when the process group —
+# the only handle that reaches its descendants — is not proven ours.  It is a
+# refusal, never a cleaning: the single-process path is not run, the leader is
+# not polled, not waited on and not reaped, and no signal is aimed at its pid
+# alone.  Left unreaped, its pid (hence its pgid) cannot be recycled, so a later,
+# better-informed attempt stays possible instead of becoming a guess.
+NO_GROUP_UNPROVEN = "NO_GROUP_UNPROVEN"
+
+# v6, finding D.  What a RETAINED generation is waiting for.  ONE slot, explicit
+# and unique — never a queue, because a newer generation owns the presentation.
+PENDING_SUCCESS = "SUCCESS"     # a render that SUCCEEDED while its group was unproven
+PENDING_REQUEST = "REQUEST"     # a newer generation asked for while the slot was unproven
+# A failure or a stall is held under the very outcome name the bounded retry
+# policy already knows ("FAILED" / "STALLED"), so resuming it is one decision,
+# not a second interpretation of the same event.
+
+# v6, finding E.  How many bounded release rounds ``shutdown()`` may spend before
+# it refuses to let the controller leave quietly.  Bounded on purpose: a group
+# that never proves gone must fail closed, never hang a shutdown forever.
+SHUTDOWN_RELEASE_ATTEMPTS = 3
+
+# v7 (finding Codex on v6).  How long the controller WAITS between two bounded
+# drain rounds while it holds a retained group.  A paced retry, never a CPU
+# spin: the controller stays alive and keeps its authority (the retained group's
+# identity and the ``ui-session.lock`` it inherited) instead of exiting and
+# handing the machine to a controller that would race a group nobody remembers.
+GUARDED_RECOVERY_PAUSE_S = 5.0
+
+# v6, finding E.  The exit status HOME returns when it refuses to replace itself
+# (or to exit "normally") while a worker group is retained.  Distinct, so both a
+# service manager and a human read a fail-closed exit instead of a clean one.
+# 75 is EX_TEMPFAIL (sysexits.h): a temporary failure, the operation may be
+# retried — which is the exact shape here, since nothing was published and
+# nothing is broken.
+EXIT_CLEANUP_UNPROVEN = 75
+
+# Ownership of a released worker is a two-state machine, never a boolean:
+#   CLEANUP_PROVEN    the group is proven gone: the slot is free, a retry or a
+#                     new generation may start.
+#   CLEANUP_UNPROVEN  the group could not be proven gone: the identity is
+#                     RETAINED (self.group is kept, the leader is left
+#                     unreaped) and no new worker, retry, next generation or
+#                     success publication may proceed while it holds.
+CLEANUP_PROVEN = "CLEANUP_PROVEN"
+CLEANUP_UNPROVEN = "CLEANUP_UNPROVEN"
+
+# Bounded recovery: how many times an unproven release is re-attempted before
+# the supervisor settles into an observable, truthful fail-closed state.
+# Bounded and deterministic — an unproven group never becomes an infinite loop.
+CLEANUP_MAX_RECOVERY_ATTEMPTS = 3
+
+
+# How a single /proc/<pid>/stat read ended.  The distinction is the whole
+# point of finding C: an entry that CANNOT be read is not an entry that holds
+# nothing.  "the entry vanished" and "the entry is there but invisible" must not
+# be collapsed, or an incomplete scan is mistaken for an empty group.
+STAT_OK = "OK"
+STAT_GONE = "GONE"              # FileNotFoundError: the process exited between
+#                                 the listing and the read — a normal race
+STAT_UNREADABLE = "UNREADABLE"  # any other OSError / a malformed stat: the entry
+#                                 exists and cannot be inspected
+
+
+def _read_proc_stat(pid_entry) -> tuple[str, tuple[str, int, int, int] | None]:
+    """Read one /proc entry and say WHY it failed, not merely THAT it failed."""
+    try:
+        text = (pid_entry / "stat").read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return STAT_GONE, None
+    except OSError:
+        return STAT_UNREADABLE, None
+    try:
+        # comm may contain spaces and parentheses: split on the LAST ')'
+        fields = text.rsplit(")", 1)[1].split()
+        return STAT_OK, (fields[0], int(fields[2]), int(fields[3]), int(fields[19]))
+    except (IndexError, ValueError):
+        return STAT_UNREADABLE, None
+
+
+def _proc_stat(pid_entry: pathlib.Path) -> tuple[str, int, int, int] | None:
+    """Return ``(state, pgrp, session, starttime)`` for one /proc entry, or None.
+
+    ``starttime`` — field 22, in clock ticks since boot — identifies ONE
+    incarnation of ONE pid: two processes that reused a pid number carry
+    different start times.  It is what lets a captured group be re-identified
+    later without ever asking the kernel to resolve a pgid from a pid again.
+
+    Only this pid's state/start time is wanted here, so both failure modes
+    collapse to ``None``; the group scan needs the finer distinction and calls
+    ``_read_proc_stat`` directly.
+    """
+    status, parsed = _read_proc_stat(pid_entry)
+    return parsed if status == STAT_OK else None
+
+
+def worker_process_state(pid: int, proc_root: pathlib.Path = PROC_ROOT) -> str | None:
+    """Process state of ``pid`` (``'Z'`` zombie), or ``None`` when not readable.
+
+    Used to see that a worker has exited WITHOUT reaping it: ``proc.poll()``
+    would collect the leader, free its pid, and with it the pinning that keeps
+    the group's number ours.
+    """
+    parsed = _proc_stat(proc_root / str(int(pid)))
+    return None if parsed is None else parsed[0]
+
+
+def worker_starttime(pid: int, proc_root: pathlib.Path = PROC_ROOT) -> int | None:
+    """Identity of the current incarnation of ``pid``, or None if unreadable."""
+    parsed = _proc_stat(proc_root / str(int(pid)))
+    return None if parsed is None else parsed[3]
+
+
+_CLD_EXITED = getattr(os, "CLD_EXITED", 1)
+
+
+def leader_exited_without_reaping(pid: int) -> bool | None:
+    """True/False/None — has ``pid`` exited, WITHOUT reaping it?
+
+    ``proc.poll()`` (v4's fallback when /proc was unreadable) calls ``waitpid``
+    and COLLECTS the leader: its pid is then free, and the pgid that pinned the
+    group is gone.  ``waitid`` with ``WNOWAIT`` peeks at the child's exit status
+    and leaves it unreaped, so observation never destroys the ownership it is
+    about to be used for.  ``None`` means the question cannot be answered (the
+    pid is not our child, or waitid is unavailable): the caller stays
+    fail-closed instead of guessing.
+    """
+    try:
+        info = os.waitid(os.P_PID, int(pid), os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except (ChildProcessError, OSError):
+        return None
+    return info is not None
+
+
+def leader_exit_success_without_reaping(pid: int) -> bool | None:
+    """True iff ``pid`` exited NORMALLY with status 0, without reaping it.
+
+    Used only when the group could NOT be proven released: whether the render
+    succeeded decides between "publish nothing" (a success) and "publish the
+    truthful fallback" (a failure), and that decision must not require a reap.
+    """
+    try:
+        info = os.waitid(os.P_PID, int(pid), os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except (ChildProcessError, OSError):
+        return None
+    if info is None:
+        return None
+    return getattr(info, "si_code", None) == _CLD_EXITED and getattr(info, "si_status", None) == 0
+
+
+def process_group_members(pgid: int, proc_root: pathlib.Path = PROC_ROOT) -> list[tuple[int, str, int, int]] | None:
+    """Return ``[(pid, state, session, starttime)]`` for the members of ``pgid``.
+
+    ``None`` means the scan cannot be trusted (unreadable /proc, hidepid): the
+    caller must then say it does not know, never guess.
+    """
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return None
+    members = []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        status, parsed = _read_proc_stat(entry)
+        if status == STAT_UNREADABLE:
+            # DECISION RULE.  A pid entry we can SEE but not READ may be a member
+            # of ``pgid``; skipping it silently (v4) could turn an incomplete
+            # scan into "the group is empty", i.e. a false GONE.  So
+            # incompleteness PROVES nothing: the scan declares itself
+            # untrustworthy and returns None, and every caller answers UNKNOWN
+            # rather than GONE.  A VANISHED entry (STAT_GONE) is different: it
+            # raced with the scan because its process exited, has no member left
+            # to hide, and is skipped — so a normal exit does not pin every probe
+            # to UNKNOWN.
+            return None
+        if parsed is None:                       # STAT_GONE: raced away
+            continue
+        state, group, session, starttime = parsed
+        if group == int(pgid):
+            members.append((int(entry.name), state, session, starttime))
+    return members
+
+
+def process_group_live_members(pgid: int, proc_root: pathlib.Path = PROC_ROOT) -> int | None:
+    """Number of LIVE (non-zombie) members of ``pgid``; ``None`` when unreadable."""
+    members = process_group_members(pgid, proc_root)
+    if members is None:
+        return None
+    return sum(1 for _pid, state, _session, _start in members if state != "Z")
+
+
+def process_group_liveness(pgid: int, proc_root: pathlib.Path = PROC_ROOT) -> str:
+    """``LIVENESS_LIVE`` / ``LIVENESS_GONE`` / ``LIVENESS_UNKNOWN`` for ``pgid``.
+
+    The kernel's signal-0 answer is only the first half of the question: a group
+    holding nothing but unreaped zombies answers it exactly like a group holding
+    a live process, so "it answered" is not "it is alive".  The second half is
+    /proc; when /proc cannot be read the answer is ``UNKNOWN`` — deliberately
+    not a boolean, so no caller can turn "cannot tell" into "still running".
+
+    FINDING C (v6).  An EMPTY scan is not a gone group either.  ``killpg(pgid, 0)``
+    succeeding while /proc lists no member is exactly what a partial view produces
+    — hidepid, a mount namespace, an unfinished scan — and v5 answered ``GONE``
+    there, i.e. it declared the group dead on the strength of a blind spot.  The
+    kernel is asked a SECOND time instead: ``GONE`` is returned only when that
+    second probe says ESRCH.  If the kernel still answers, the group exists and
+    nothing proves it empty: the answer is ``UNKNOWN``.  (A scan that DO see
+    members is judged as before: any live member means LIVE, and members that are
+    all zombies — a real, observed group of the dead — mean GONE.)
+    """
+    if pgid is None or int(pgid) <= 0:
+        return LIVENESS_GONE
+    try:
+        os.killpg(int(pgid), 0)
+    except ProcessLookupError:
+        return LIVENESS_GONE
+    except PermissionError:
+        return LIVENESS_UNKNOWN     # it exists, but it is not ours to look into
+    except OSError:
+        return LIVENESS_UNKNOWN
+    members = process_group_members(pgid, proc_root)
+    if members is None:
+        return LIVENESS_UNKNOWN
+    if any(state != "Z" for _pid, state, _session, _start in members):
+        return LIVENESS_LIVE
+    if members:
+        return LIVENESS_GONE       # observed, and only zombies: genuinely gone
+    # EMPTY SCAN.  The kernel has just said the group exists; /proc shows no
+    # member.  Only the kernel can settle that contradiction, and it settles it
+    # in exactly one direction: ESRCH, and only ESRCH, means gone.
+    try:
+        os.killpg(int(pgid), 0)
+    except ProcessLookupError:
+        return LIVENESS_GONE       # second probe: the group really is gone
+    except (PermissionError, OSError):
+        return LIVENESS_UNKNOWN
+    return LIVENESS_UNKNOWN        # the kernel still names a group we cannot see
+
+
+def process_group_survives(pgid: int, proc_root: pathlib.Path = PROC_ROOT) -> bool:
+    """True only when the group is PROVEN to hold a live process.
+
+    Strict on purpose, and NOT the negation of "gone": when /proc is unreadable
+    the answer is False because nothing is proven, while the group's state is
+    really ``UNKNOWN``.  Callers that must act on that ambiguity ask
+    ``process_group_liveness`` — the termination helper does.
+    """
+    return process_group_liveness(pgid, proc_root) == LIVENESS_LIVE
+
+
+def process_group_is_own_session(pgid: int, proc_root: pathlib.Path = PROC_ROOT) -> bool | None:
+    """True when every live member of ``pgid`` sits in the session ``pgid`` opened.
+
+    ``start_new_session=True`` makes the worker both session and group leader,
+    so ``sid == pgid`` for every member that did not call ``setsid()`` itself.
+    ``None`` means "cannot tell": unreadable /proc, or a group with no live
+    member left to judge.  An empty group is not evidence of a stranger — v3
+    read it as one, and a group that died at the end of its grace was then
+    reported ``GROUP_NOT_OURS`` instead of "gone".
+    """
+    members = process_group_members(pgid, proc_root)
+    if members is None:
+        return None
+    live = [session for _pid, state, session, _start in members if state != "Z"]
+    if not live:
+        return None
+    return all(session == int(pgid) for session in live)
+
+
+class WorkerGroup:
+    """The process group a worker opened, OWNED from the instant it was spawned.
+
+    Ownership is captured, never re-derived.  The pgid is read ONCE — while the
+    worker is alive and unreaped — and the leader's start time is kept with it,
+    so the identity can be checked later without calling ``os.getpgid`` again.
+    Re-deriving a pgid from a pid after a reap is what opens the PID-reuse
+    window: the pid may already name an unrelated process, and that process's
+    group would then be the one signalled.  This object exists so the window is
+    never opened.
+
+    ``pgid`` is ``None`` when the worker owns no group we may signal: it is not
+    its own group leader (``start_new_session`` was not used), it shares the
+    controller's group, or the kernel would not name its group.  In those cases
+    only its pid may be signalled, and only while it is unreaped.
+    """
+
+    __slots__ = ("proc", "pid", "pgid", "starttime", "controller_session")
+
+    def __init__(self, proc, pid: int, pgid: int | None, starttime: int | None = None,
+                 controller_session: int | None = None):
+        self.proc = proc
+        self.pid = int(pid)
+        self.pgid = None if pgid is None else int(pgid)
+        self.starttime = starttime
+        self.controller_session = controller_session
+
+    @property
+    def owns_group(self) -> bool:
+        """True only when the group this worker opened is PROVEN ours to signal.
+
+        Strict on purpose (finding A, v6): a pgid that is ``None``, non-positive,
+        different from the leader's own pid, or equal to the controller's session
+        is not an ownership — it is the absence of one.  ``capture_worker_group``
+        only ever records a pgid that satisfies every clause, so this property
+        cannot turn a failed or mismatched capture into a licence to signal.
+        """
+        if self.pgid is None or self.pgid <= 0:
+            return False
+        if self.pgid != self.pid:
+            return False                # not its own group leader
+        if self.controller_session is not None and self.pgid == self.controller_session:
+            return False                # the group is OURS: never signal it
+        return True
+
+    def __repr__(self) -> str:
+        return f"WorkerGroup(pid={self.pid}, pgid={self.pgid}, starttime={self.starttime})"
+
+
+def capture_worker_group(proc, proc_root: pathlib.Path = PROC_ROOT, pgid_of=None) -> WorkerGroup | None:
+    """Take ownership of ``proc``'s group — only while its leader is UNREAPED.
+
+    ``None`` means ownership is impossible and must not be faked: there is no
+    process, or its leader was already reaped, in which case its pid is free
+    again and asking the kernel which group it is in would be a guess about a
+    stranger.  A caller that reaps its own worker before calling this has lost
+    the group; the fix is to capture at spawn, which is what the supervisor
+    does.  ``pgid_of`` is the ONLY place a pgid is ever resolved from a pid.
+    """
+    if proc is None:
+        return None
+    if proc.returncode is not None:
+        return None
+    try:
+        controller_session = int(os.getpgid(0))
+    except OSError:
+        controller_session = None
+    resolve = pgid_of or os.getpgid
+    try:
+        pgid = int(resolve(proc.pid))
+    except (ProcessLookupError, OSError):
+        # Unreaped, yet the kernel will not name its group: own no group, but
+        # keep the worker — it is still our child and still ours to signal.
+        return WorkerGroup(proc, proc.pid, None, None, controller_session)
+    if pgid != int(proc.pid) or pgid == controller_session:
+        return WorkerGroup(proc, proc.pid, None, None, controller_session)
+    return WorkerGroup(proc, proc.pid, pgid, worker_starttime(proc.pid, proc_root), controller_session)
+
+
+def group_identity_holds(group: WorkerGroup, proc_root: pathlib.Path = PROC_ROOT) -> bool | None:
+    """True when ``group.pgid`` still names the leader we captured.
+
+    A pgid is a pid, and a pid number is only released once nothing uses it —
+    but that number IS what names the group, so while any member sits in the
+    group the kernel cannot hand the number to anybody else.  This check is the
+    belt to that brace, and it is only needed once the leader has been reaped:
+    the leader's start time is unique to one incarnation of one pid, so a
+    process carrying our number with a different start time is a recycled
+    number — not ours.  ``None`` means the question cannot be answered: /proc
+    unreadable, no start time recorded, or the leader's own entry already gone.
+    """
+    if group.pgid is None or group.starttime is None:
+        return None
+    members = process_group_members(group.pgid, proc_root)
+    if members is None:
+        return None
+    for pid, _state, _session, starttime in members:
+        if pid == group.pgid:
+            return int(starttime) == int(group.starttime)
+    return None
+
+
+def _signal_worker_group(group: WorkerGroup, sig: int) -> str:
+    """Signal the group and report EXACTLY what the kernel said.
+
+    There is no fallback to the leader's pid here, for two reasons.  CPython's
+    ``Popen.send_signal`` calls ``poll()`` first, and ``poll()`` REAPS a leader
+    that has exited: the pid is then free, and the pinning that made this group
+    safe to address is gone.  And a refused group (EPERM) is not a pid to poke
+    instead — the same right is missing for the pid, so a group that cannot be
+    shown to be ours must never be turned into "signal the pid anyway".  The
+    caller gets a code, and decides.
+    """
+    try:
+        os.killpg(int(group.pgid), int(sig))
+        return SIGNAL_OK
+    except ProcessLookupError:
+        return SIGNAL_GONE
+    except PermissionError:
+        return SIGNAL_NOT_OURS
+    except OSError:
+        return SIGNAL_FAILED
+
+
+def _wait_group_gone(pgid: int, proc_root: pathlib.Path, timeout_s: float, pause_s: float) -> str:
+    """Wait, bounded, for the group to stop holding live processes.
+
+    Returns the liveness observed at the end, so "gone", "still there" and
+    "cannot tell" stay distinguishable to the caller instead of being collapsed
+    into one boolean.
+    """
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    while True:
+        state = process_group_liveness(pgid, proc_root)
+        if state == LIVENESS_GONE:
+            return LIVENESS_GONE
+        if time.monotonic() >= deadline:
+            return state
+        time.sleep(max(0.01, float(pause_s)))
+
+
+def _reap_worker(proc, timeout_s: float) -> None:
+    """Collect the worker if it exited, so it cannot linger as a zombie.
+
+    Only ever called once the group has been dealt with: while the leader is
+    unreaped its pid is pinned, and that is what makes addressing its group
+    safe.  Reaping first would free the pid — and the pgid with it.
+    """
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.wait(timeout=max(0.0, float(timeout_s)))
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _terminate_single_process(proc, grace_s: float, kill_grace_s: float) -> str:
+    """Stop one process without ever signalling a group (it shares ours).
+
+    ``proc.poll()`` is safe HERE: there is no group to keep pinned, and that
+    check is exactly what keeps a signal away from an already-reaped pid.
+    """
+    if proc.poll() is not None:
+        return "ALREADY_EXITED"
+    try:
+        proc.send_signal(signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return "ALREADY_EXITED"
+    try:
+        proc.wait(timeout=max(0.0, float(grace_s)))
+        return "TERMINATED"
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.send_signal(signal.SIGKILL)     # still unreaped: the pid is still pinned
+    except (ProcessLookupError, OSError):
+        return "KILLED"
+    try:
+        proc.wait(timeout=max(0.0, float(kill_grace_s)))
+    except subprocess.TimeoutExpired:
+        return "UNREAPED"
+    return "KILLED"
+
+
+def terminate_worker_group(target, grace_s: float = 1.0, kill_grace_s: float = 1.0,
+                           pause_s: float = 0.05, proc_root: pathlib.Path = PROC_ROOT) -> str:
+    """Stop a regeneration worker AND every descendant it left behind.
+
+    The worker is spawned with ``start_new_session=True``: it is a session and
+    process-group leader, and every step it runs (the disc-sheet render, the
+    media-graph rebuild) is a child in that same group.  Signalling only the
+    parent pid leaves those children alive, still writing into the state of a
+    generation that has already been superseded.
+
+    The GROUP is the unit of observation, never the parent, and it is addressed
+    by its CAPTURED identity (a :class:`WorkerGroup`), never by a pgid resolved
+    from a pid at termination time.  Two rules follow, and both are enforced
+    here rather than asserted in a comment:
+
+    * A pid that has already been reaped is never used to resolve a pgid.  Its
+      number is free again and may name an unrelated process whose group would
+      then be the one killed, so this function refuses to guess: a bare
+      ``Popen`` whose leader was reaped comes back ``ALREADY_EXITED``, with no
+      ``os.getpgid`` and no ``killpg`` at all.
+    * A group that cannot be shown to be the worker's is not signalled
+      (``GROUP_NOT_OURS``, ``GROUP_UNKNOWN``, ``SIGNAL_ERROR``), and the leader
+      is then left UNREAPED on purpose: while it is unreaped its pid — hence its
+      pgid — cannot be recycled, so a later, better-informed attempt stays safe.
+
+    The group's death is established by /proc, not by the leader's exit status:
+    a descendant that ignores SIGTERM outlives its leader, so once the bounded
+    grace expires the SIGKILL goes to the group EVEN THOUGH the leader has
+    already exited, and a group holding only zombies counts as gone.  When /proc
+    cannot be read the outcome is never asserted: a group that still answers the
+    kernel is reported ``GROUP_UNKNOWN`` rather than the false
+    ``GROUP_STILL_PRESENT`` that v3 produced from the very same blind spot.
+
+    Outcome: ``NO_WORKER`` / ``ALREADY_EXITED`` / ``NO_GROUP`` / ``TERMINATED`` /
+    ``KILLED`` / ``GROUP_NOT_OURS`` / ``NO_GROUP_UNPROVEN`` / ``GROUP_STILL_PRESENT``
+    / ``GROUP_UNKNOWN`` / ``SIGNAL_ERROR`` / ``UNREAPED``.
+    """
+    if target is None:
+        return "NO_WORKER"
+    if isinstance(target, WorkerGroup):
+        group = target
+    else:
+        if target.returncode is not None:
+            # The caller has already reaped the leader: its pid is not ours to
+            # resolve any more, and ownership had to be captured at spawn.  The
+            # only honest answer is a refusal — no getpgid, no signal.
+            return "ALREADY_EXITED"
+        group = capture_worker_group(target, proc_root)
+        if group is None:
+            return "ALREADY_EXITED"
+    proc = group.proc
+    if not group.owns_group:
+        if proc is None:
+            return "NO_GROUP"
+        if group.pgid is not None:
+            # A group NUMBER was recorded and this worker is not proven to lead
+            # it: its descendants are reachable through that number and we cannot
+            # prove the number is ours.  Refuse — no single-process fallback (it
+            # would report "cleaned" for a worker whose group was never ours),
+            # and the leader is left unreaped so a later attempt stays possible.
+            return NO_GROUP_UNPROVEN
+        return _terminate_single_process(proc, grace_s, kill_grace_s)
+    pgid = group.pgid
+
+    if process_group_liveness(pgid, proc_root) == LIVENESS_GONE:
+        _reap_worker(proc, kill_grace_s)
+        return "ALREADY_EXITED"
+
+    if proc is not None and proc.returncode is not None:
+        # The leader has been reaped, so the pid-pinning proof is gone: the
+        # identity must be re-proved before a signal is aimed at that number.
+        identity = group_identity_holds(group, proc_root)
+        if identity is False:
+            return "GROUP_NOT_OURS"
+        if identity is None:
+            return "GROUP_UNKNOWN"
+
+    sent = _signal_worker_group(group, signal.SIGTERM)
+    if sent == SIGNAL_GONE:
+        _reap_worker(proc, kill_grace_s)
+        return "TERMINATED"          # the group vanished: nothing was there to stop
+    if sent == SIGNAL_NOT_OURS:
+        return "GROUP_NOT_OURS"
+    if sent == SIGNAL_FAILED:
+        return "SIGNAL_ERROR"
+
+    after = _wait_group_gone(pgid, proc_root, grace_s, pause_s)
+    if after == LIVENESS_GONE:
+        _reap_worker(proc, kill_grace_s)
+        return "TERMINATED"
+
+    if after == LIVENESS_LIVE:
+        if process_group_is_own_session(pgid, proc_root) is False:
+            return "GROUP_NOT_OURS"
+        # The group can die between the end of the grace and this check.  A group
+        # that is gone is GONE — not a stranger, which is what v3 concluded the
+        # moment its probe found no live member left to judge.
+        if process_group_liveness(pgid, proc_root) == LIVENESS_GONE:
+            _reap_worker(proc, kill_grace_s)
+            return "TERMINATED"
+
+    killed = _signal_worker_group(group, signal.SIGKILL)
+    if killed == SIGNAL_GONE:
+        _reap_worker(proc, kill_grace_s)
+        return "TERMINATED"          # vanished before the SIGKILL: not attributed to it
+    if killed == SIGNAL_NOT_OURS:
+        return "GROUP_NOT_OURS"
+    if killed == SIGNAL_FAILED:
+        return "SIGNAL_ERROR"
+
+    final = _wait_group_gone(pgid, proc_root, kill_grace_s, pause_s)
+    if final == LIVENESS_GONE:
+        _reap_worker(proc, kill_grace_s)
+        return "KILLED"
+    if final == LIVENESS_UNKNOWN:
+        # FINDING B (v6).  v5 collected the leader here, "as a bounded last
+        # resort", and that reap is precisely what destroyed the ownership it was
+        # about to report on: with the leader collected its pid is free again and
+        # the pgid that pinned the group is gone with it, so a descendant that is
+        # still alive becomes unreachable — permanently, because no later attempt
+        # can identify the group any more.  The leader is left UNREAPED on
+        # purpose, and the outcome says exactly what is known: the group's
+        # disappearance was NOT proven.  The caller keeps the identity and the
+        # bounded recovery re-attempts against the SAME group.
+        return "GROUP_UNKNOWN"
+    # Proven to still hold a live process after SIGKILL: reported as such, and
+    # the leader is left unreaped so the pinned pid keeps a later attempt safe.
+    return "GROUP_STILL_PRESENT"
 
 
 def load_theme(install: pathlib.Path):
@@ -1498,6 +2204,11 @@ def optical_navigation_event(previous: dict, current: dict) -> tuple[int, int]:
 
 def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Path,
                              auto_open_generation: int = 0, eject_home_generation: int = 0) -> pathlib.Path:
+    # One resolver for every writer: the menu publication resolves the enriched
+    # title from the media cache, and the controller's post-publication refresh
+    # used to rewrite this file from the raw optical state, silently dropping the
+    # title the menu was displaying.
+    optical = enriched_optical(home, optical)
     state = optical.get("state"); canonical = _optical_model.canonical_state(optical)
     labels = {"NO_DRIVE":"LECTEUR · AUCUN LECTEUR", "EMPTY":"LECTEUR · Aucun disque",
               "INITIALIZING":"LECTEUR · Initialisation du disque…", "UNKNOWN_DISC":"LECTEUR · DISQUE INCONNU",
@@ -1521,6 +2232,59 @@ def write_live_optical_state(home: pathlib.Path, optical: dict, icon: pathlib.Pa
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
     return target
+
+
+def enriched_optical(home: pathlib.Path, optical: dict) -> dict:
+    """Return ``optical`` with the TMDb title resolved from the media cache.
+
+    The menu publication reads the cache when the canonical optical state
+    carries no ``tmdb_title``; the live-state writer must resolve it the same
+    way.  Two writers with two resolutions is the defect this replaces: the
+    controller's post-publication refresh rewrote flex-optical-state from the
+    raw optical state and silently dropped the title the menu was displaying.
+    """
+    if not optical or _optical_model.canonical_state(optical) != "DVD_VIDEO" or not optical.get("disc_id") or optical.get("tmdb_title"):
+        return optical
+    cache_target = (home / ".local/share/openhtpc/media-cache/dvd"
+                    / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json")
+    cached_meta = load_optional_object(cache_target)
+    if cached_meta.get("status") == "PASS" and cached_meta.get("title"):
+        enriched = dict(optical)
+        enriched["tmdb_title"] = cached_meta.get("title")
+        return enriched
+    return optical
+
+
+def enrichment_presentation_signature(home: pathlib.Path, st: dict, tmdb=None) -> str:
+    """Identity of the metadata/enrichment presentation for one optical state.
+
+    MOVED VERBATIM out of the home controller (2026-10-17, v2): the body, its
+    local names and its literals are unchanged, only the module that hosts it.
+    The controller calls it through ``disc_presentation_signature()``; keeping one
+    implementation lets the controller's trigger and the behavioural interlock
+    test execute the same code instead of a copy.  The controller passes the TMDb
+    module it has already loaded, so this stays a pure read of one cache file.
+    """
+    if tmdb is None or not st:
+        return ""
+    title = st.get("tmdb_title") or st.get("disc_title") or st.get("volume_label") or ""
+    cache_target = tmdb.cache_path(home, st, str(title))
+    if cache_target is None:
+        return ""
+    identity = str(st.get("disc_id") or f"{int(st.get('generation', 0) or 0)}:{_optical_model.canonical_state(st)}")
+    if not cache_target.is_file():
+        return f"{identity}:NO_CACHE"
+    try:
+        data = json.loads(cache_target.read_text(encoding="utf-8"))
+        status = data.get("status", "")
+        if status == "PASS":
+            return f"{identity}:PASS:{data.get('tmdb_id')}:{data.get('confidence')}"
+        elif status == "AMBIGUOUS":
+            c_ids = ",".join(str(c.get("tmdb_id") or c.get("id")) for c in data.get("candidates", []))
+            return f"{identity}:AMBIGUOUS:{c_ids}"
+        return f"{identity}:{status}"
+    except Exception:
+        return f"{identity}:ERR"
 
 
 def _c4_processing_entries(home: pathlib.Path, install: pathlib.Path, local_icon: pathlib.Path) -> str:
@@ -1692,11 +2456,7 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
     optical = load_optional_object(home / ".local/state/openhtpc/optical-current.json")
     if expected_optical_generation is not None and int(optical.get("generation", 0) or 0) != expected_optical_generation:
         return False
-    if _optical_model.canonical_state(optical) == "DVD_VIDEO" and optical.get("disc_id") and not optical.get("tmdb_title"):
-        cache_target = home / ".local/share/openhtpc/media-cache/dvd" / hashlib.sha256(str(optical["disc_id"]).encode()).hexdigest() / "metadata.json"
-        cached_meta = load_optional_object(cache_target)
-        if cached_meta.get("status") == "PASS" and cached_meta.get("title"):
-            optical["tmdb_title"] = cached_meta.get("title")
+    optical = enriched_optical(home, optical)
     canonical = _optical_model.canonical_state(optical); media = _optical_model.presentation(optical)
     disc_state = optical_home_label(optical) if canonical in {"DVD_VIDEO","BLURAY_VIDEO","UHD_BLURAY_VIDEO","BLURAY_FAMILY","UNKNOWN_OPTICAL_MEDIA"} else {
         "NO_OPTICAL_DRIVE": "AUCUN LECTEUR", "DRIVE_PRESENT_NO_MEDIA": "Aucun disque",
@@ -1847,7 +2607,7 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
             except OSError: pass
         _optical_model.trace_event(home,"PRESENTATION_INVALIDATED",optical_generation=optical_generation,canonical_state=canonical,presentation_state="INVALIDATED",event_reason="GENERATION_PROVENANCE_MISMATCH")
     if disc_view.is_file():
-        subprocess.run([str(disc_view), "--home", str(home), "--generation", str(optical_generation)], timeout=12, check=False,
+        subprocess.run([str(disc_view), "--home", str(home), "--generation", str(optical_generation)], timeout=DISC_VIEW_TIMEOUT_S, check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not disc_sheet_is_current(home,optical): disc_sheet = theme.assets(install)["wallpaper"]
     counter_path = home / ".local/state/openhtpc/menu-generation"
@@ -2148,9 +2908,18 @@ def disc_sheet_is_current(home: pathlib.Path, optical: dict) -> bool:
             provenance.get("ui_state_hash")==optical.get("ui_state_hash") and
             (home/".cache/openhtpc/disc-sheet.png").is_file())
 
-def publish_generation_fallback(home: pathlib.Path, install: pathlib.Path, optical: dict, reason: str) -> None:
-    """Publish a truthful, generation-matching fallback after bounded worker failure."""
+def publish_generation_fallback(home: pathlib.Path, install: pathlib.Path, optical: dict, reason: str,
+                                expected_generation: int | None = None) -> bool:
+    """Publish a truthful, generation-matching fallback after bounded worker failure.
+
+    ``expected_generation`` is the generation whose worker failed.  It must match
+    the generation carried by ``optical``: a failure of G must never publish a
+    fallback for G+1, because the fallback is stamped with the generation it
+    describes.  Returns whether anything was published.
+    """
     generation = int(optical.get("generation", 0) or 0)
+    if expected_generation is not None and int(expected_generation or 0) != generation:
+        return False
     target = home/".cache/openhtpc/disc-sheet.png"; target.parent.mkdir(parents=True,exist_ok=True)
     source = load_theme(install).assets(install)["wallpaper"]
     fd, temporary = tempfile.mkstemp(prefix=target.name+".",dir=target.parent)
@@ -2167,6 +2936,1114 @@ def publish_generation_fallback(home: pathlib.Path, install: pathlib.Path, optic
     _optical_model.trace_event(home,"PRESENTATION_FALLBACK",optical_generation=generation,
                                canonical_state=provenance["canonical_state"],presentation_state="FALLBACK",
                                render_generation=generation,metadata_job_state="FALLBACK",event_reason=reason)
+    return True
+
+
+class RegenerationSupervisor:
+    """Bounded lifecycle of the menu-regeneration worker.
+
+    Owns the worker handle, the process group that worker opened, the execution
+    accounting, the watchdog decision, the stale-failure rejection, the
+    process-group termination and the guarded fallback, so the whole policy is
+    executable without starting the home controller — importing openhtpc-home.py
+    renders the menu and launches Flex, which no hermetic test can do.
+
+    ``spawn(generation)`` must return a ``subprocess.Popen`` started with
+    ``start_new_session=True`` (the group termination depends on it).
+    ``current_optical()`` returns the live optical state dict.  A successful
+    render is published by the CONTROLLER, not here, so the dev11 order
+    (render -> publish -> navigation detection) stays readable in its source.
+
+    LIFECYCLE RULE.  The worker's group is captured at spawn and released before
+    anything else takes that worker's slot: before a retry, before a
+    supersession, before a new generation, and as soon as the leader is seen to
+    have exited.  The release happens BEFORE the leader is reaped, so the group
+    is still addressed while its pid is pinned — which is what makes a
+    descendant reachable even though the worker's leader is already gone.
+    Reaping first frees the pid, and the same ``killpg`` becomes a guess about a
+    number the kernel may already have handed to somebody else.
+
+    V6 (findings A/B/D/E of the AGY + Codex review of v5) tightened four things,
+    and each one is a rule this class enforces rather than documents:
+
+    * A  ownership is a PRECONDITION, checked BEFORE the terminator is called.
+         For a supervised worker whose group is not proven ours, the terminator
+         is never invoked at all: no ``_terminate_single_process``, no ``poll``,
+         no ``wait``, no reap, no signal to the pid alone — only a fail-closed
+         outcome (``NO_GROUP_UNPROVEN`` / ``GROUP_UNKNOWN``).
+    * B  the leader is reaped only AFTER a release is PROVEN.  An unproven
+         release keeps the group and the pinned pid, so its disappearance can
+         still be proved — and acted on — by a later attempt.
+    * D  a retained generation carries an INTENT in one explicit slot, so
+         nothing is lost (a blocked success is resumed, not dropped), a retry or
+         a fallback never races a descendant that may still write, and a stale
+         publication never crosses into a new generation.
+    * E  ``shutdown()`` drains the same way, bounded, on every exit path: the
+         controller is never allowed to replace itself or exit "normally" over a
+         group it failed to release.
+
+    V7 (findings of the AGY + Codex review of v6) refines three of those rules,
+    each one again enforced in code rather than documented:
+
+    * D  a REQUEST for the generation whose render already SUCCEEDED is NOT
+         absorbed: it SUPERSEDES the retained success, because it carries the
+         newer presentation need (the post-enrichment rerender) — the rendered
+         title is never silently left pre-enrichment;
+    * D  ``_fail_closed_output`` NEVER writes: while the release is UNPROVEN no
+         presentation artifact is touched, and the last valid/stale content is
+         KEPT instead of being overwritten from a guess;
+    * E  ``shutdown()`` is driven by ``guarded_release()``, which keeps the
+         controller ALIVE — holding its memory identity and its inherited
+         ``ui-session.lock`` — and paced until the release is proven; it no
+         longer exits over a retained group and hands the machine to a controller
+         that would race one it cannot remember.
+    """
+
+    def __init__(self, spawn, current_optical, home=None, install=None, log=None,
+                 clock=time.monotonic, terminate=terminate_worker_group,
+                 capture=capture_worker_group, proc_root: pathlib.Path = PROC_ROOT,
+                 max_attempts: int = REGENERATION_MAX_ATTEMPTS,
+                 budget_s: float = REGENERATION_WORKER_BUDGET_S,
+                 require_group: bool = True,
+                 max_cleanup_attempts: int = CLEANUP_MAX_RECOVERY_ATTEMPTS):
+        self._spawn = spawn
+        self._current_optical = current_optical
+        self._home = home
+        self._install = install
+        self._log = log or (lambda *args, **kwargs: None)
+        self._clock = clock
+        self._terminate = terminate
+        self._capture = capture
+        self._proc_root = proc_root
+        self.max_attempts = int(max_attempts)
+        self.budget_s = budget_s
+        # The controller spawns its workers with ``start_new_session=True``: each
+        # one MUST be a session/group leader, so a group we failed to capture —
+        # or one that belongs to somebody else — is an UNPROVEN ownership, never
+        # a licence to fall back to signalling the pid alone and call it cleaned
+        # (finding A).
+        self.require_group = bool(require_group)
+        self.max_cleanup_attempts = int(max_cleanup_attempts)
+        self.proc = None
+        self.group = None
+        self.generation = 0
+        self.started_at = None
+        self.executions = 0
+        # Ownership of the previous worker's release, and its recovery (findings
+        # B and D): ONE explicit, unique slot records what a retained generation
+        # is waiting for — ``{"generation": int, "intent": ...}``.  It is never a
+        # queue: a newer generation owns the presentation, so the newest fact
+        # replaces the oldest, and the replacement is logged, never silent.
+        self.cleanup_state = CLEANUP_PROVEN
+        self.recovery_attempts = 0
+        self.fail_closed = False
+        self.pending = None
+        self.publish_pending = None
+        # A worker that was still RUNNING when it was stopped (supersession,
+        # stall) is a termination; a group released after its leader had already
+        # exited is a release.  They are kept apart on purpose: the cap counts
+        # executions, and a release is not an attempt.
+        self.terminations = []
+        self.releases = []
+
+    @property
+    def live(self) -> bool:
+        """True while the worker's leader has not exited.
+
+        Probed WITHOUT reaping: ``proc.poll()`` would collect an exited leader
+        and free its pid before the group has been released — the exact order
+        this lifecycle forbids.  ``/proc`` gives the state; when it cannot, the
+        answer comes from a non-reaping ``waitid``, never from ``poll()``.
+        """
+        return self.proc is not None and self._leader_running(self.proc)
+
+    def _leader_running(self, proc) -> bool:
+        if proc is None or proc.returncode is not None:
+            return False
+        state = worker_process_state(proc.pid, self._proc_root)
+        if state is not None:
+            return state != "Z"
+        # /proc cannot answer (finding D).  ``proc.poll()`` would REAP the leader
+        # here — freeing the pid, and with it the pgid that makes the group safe
+        # to address.  ``waitid(WNOWAIT)`` peeks without collecting; when even
+        # that cannot tell, the answer is "still running": fail-closed, and the
+        # watchdog bounds it.
+        exited = leader_exited_without_reaping(proc.pid)
+        return True if exited is None else not exited
+
+    def current_generation(self) -> int:
+        return int(self._current_optical().get("generation", 0) or 0)
+
+    def _start(self, generation: int):
+        """Spawn one worker and TAKE OWNERSHIP of its group immediately.
+
+        Capturing here is the whole point: the leader is alive and unreaped, so
+        its pid — and the pgid, which IS that pid — cannot be recycled, and the
+        group can be addressed later without ever resolving a pgid from a pid.
+        """
+        proc = self._spawn(generation)
+        self.proc = proc
+        captured = self._capture(proc, self._proc_root) if proc is not None else None
+        if captured is None and proc is not None:
+            # Ownership could not be captured AT SPAWN.  The identity is not
+            # thrown away: the pid (pinned while the leader is unreaped) is kept
+            # so a later attempt still addresses something real — but the group
+            # is unproven and every release treats it as such.
+            captured = WorkerGroup(proc, proc.pid, None, None, None)
+        self.group = captured
+        return proc
+
+    def _ownership_proven(self, group) -> bool:
+        """True only when ``group`` is a CAPTURED group this supervisor may signal.
+
+        Finding A (v6): the check happens BEFORE the terminator is called, never
+        after.  v5 called the terminator first and overwrote its answer
+        afterwards — so the single-process path had already run on the leader
+        (polled it, possibly reaped it, and could have signalled its pid alone)
+        for a worker whose group was never proven ours.  Ownership is a
+        precondition of touching the worker at all.
+        """
+        return isinstance(group, WorkerGroup) and group.owns_group
+
+    def _unproven_ownership_outcome(self, group) -> str:
+        """The fail-closed outcome for a supervised worker whose group is not ours."""
+        if group is None or group.pgid is None:
+            return NO_GROUP_UNPROVEN      # no group was ever captured to address
+        return "GROUP_UNKNOWN"            # a group NUMBER not proven to be ours
+
+    def _reap_released(self) -> None:
+        """Collect the leader — ONLY once its group has been PROVEN released.
+
+        Finding B (v6): the reap frees the pid, and with it the pgid that pins the
+        group.  It may therefore follow the proof, never precede it, and never be
+        used to manufacture one.
+        """
+        holder = self.group
+        proc = holder.proc if holder is not None else None
+        if proc is None:
+            proc = self.proc
+        _reap_worker(proc, EXIT_REAP_TIMEOUT_S)
+
+    def _release(self, reason: str) -> str | None:
+        """Release the group owned for the previous worker.
+
+        Called before every decision that gives the slot to somebody else, and
+        it works on the CAPTURED group, so it still reaches the descendants of a
+        worker whose leader has already exited.
+
+        TWO RULES, enforced here rather than asserted in a comment.
+
+        * Finding A.  For a supervisor whose workers MUST be group leaders
+          (``require_group``), an absent or unproven group is fail-closed: the
+          terminator is NOT called, the leader is not polled, not waited on, not
+          reaped, and no signal is aimed at its pid alone.  A worker whose
+          descendants cannot be reached was not cleaned, and no outcome may say
+          it was.
+        * Findings B and D.  Ownership is cleared ONLY when the release is
+          PROVEN, and the leader is collected ONLY after that proof.  An unproven
+          release KEEPS ``self.group`` — it is the identity proof — sets
+          ``CLEANUP_UNPROVEN``, and invalidates any publication still waiting for
+          the controller, so nothing may take the slot, retry, or publish while
+          it holds.
+        """
+        target = self.group if self.group is not None else self.proc
+        if target is None:
+            self.cleanup_state = CLEANUP_PROVEN
+            return None
+        running = self.live          # before the release: afterwards the leader is gone
+        if self.require_group and not self._ownership_proven(self.group):
+            outcome = self._unproven_ownership_outcome(self.group)
+        else:
+            outcome = self._terminate(target)
+        if running:
+            self.terminations.append((self.generation, outcome))
+        else:
+            self.releases.append((self.generation, outcome, reason))
+        if outcome in RELEASE_PROVEN:
+            self._reap_released()            # the proof came first; only now the reap
+            self.group = None
+            self.cleanup_state = CLEANUP_PROVEN
+            self.recovery_attempts = 0
+        else:
+            self.cleanup_state = CLEANUP_UNPROVEN
+            # (D4) A publication waiting for the controller describes the OLD
+            # slot; it must not survive into an unproven one.
+            self.publish_pending = None
+        return outcome
+
+    @property
+    def pending_request(self):
+        """The generation the retained slot is waiting for, or None.
+
+        Kept as a name because that is what it is from the caller's side; the
+        supervisor stores it in the single ``pending`` slot together with the
+        INTENT, which is what makes "resume exactly once" decidable.
+        """
+        return None if self.pending is None else int(self.pending["generation"])
+
+    def _hold_pending(self, generation: int, intent: str) -> None:
+        """Record, in the ONE slot, what ``generation`` must resume to.
+
+        Finding D (v6).  A retained generation without a recorded intent is a
+        silent loss, so the intent is explicit and any replacement is LOGGED.
+
+        Finding (AGY, v7).  v6 also ABSORBED a ``REQUEST`` for the very
+        generation whose render already SUCCEEDED (``REGENERATION_PENDING_
+        REQUEST_ABSORBED``), on the principle that a render is a fact and a
+        request a wish.  That absorption lost the ONE rerender that matters
+        here: a worker succeeds PRE-enrichment, the cleanup is UNPROVEN, the
+        enricher then finishes and the controller asks for the SAME generation
+        again — carrying the enriched TMDb metadata.  v6 absorbed it, resumed
+        only the pre-enrichment success, and the enriched presentation was never
+        rendered.  A later request is therefore NOT absorbed: it SUPERSEDES the
+        retained success of the SAME generation, because it describes a strictly
+        NEWER presentation need.  Publishing the older render would flash
+        exactly the stale fiche the request exists to replace, and the request
+        itself will re-render and publish — so nothing is lost, and the
+        supersession is journalised rather than silent.  Every other
+        replacement is logged too.
+        """
+        generation = int(generation or 0)
+        current = self.pending
+        if (current is not None and current["intent"] == PENDING_SUCCESS
+                and int(current["generation"]) == generation and intent == PENDING_REQUEST):
+            self._log("REGENERATION_PENDING_SUCCESS_SUPERSEDED_BY_REQUEST",
+                      optical_generation=generation)
+            self.pending = {"generation": generation, "intent": intent}
+            return
+        if current is not None and (current["intent"] != intent
+                                    or int(current["generation"]) != generation):
+            self._log("REGENERATION_PENDING_REPLACED",
+                      previous_generation=int(current["generation"]), previous_intent=current["intent"],
+                      optical_generation=generation, new_intent=intent)
+        self.pending = {"generation": generation, "intent": intent}
+
+    def request(self, generation: int):
+        """Start the single worker for ``generation``, superseding any live one.
+
+        A superseded worker is not a failed attempt: a newer optical generation
+        owns the presentation, so the replaced worker is terminated as such and
+        the execution count restarts at one.  Whatever the previous worker left
+        is released FIRST, including a group whose leader has already exited.
+
+        When the slot is UNPROVEN nothing starts: the request is RETAINED in the
+        pending slot (finding D), so it is neither enacted over a group that may
+        still be writing the same files, nor silently forgotten.
+        """
+        generation = int(generation or 0)
+        # (D4) A publication waiting for the controller describes the PREVIOUS
+        # generation; a new request invalidates it instead of letting it travel
+        # into the new one.
+        self.publish_pending = None
+        if self.cleanup_state == CLEANUP_UNPROVEN:
+            self._hold_pending(generation, PENDING_REQUEST)
+            self.proc = None
+            self._log("REGENERATION_REQUEST_BLOCKED_CLEANUP_UNPROVEN",
+                      optical_generation=generation, cleanup_state=self.cleanup_state)
+            return None
+        self._release("SUPERSEDED")
+        if self.cleanup_state == CLEANUP_UNPROVEN:
+            self._hold_pending(generation, PENDING_REQUEST)
+            self.proc = None
+            self._log("REGENERATION_REQUEST_BLOCKED_CLEANUP_UNPROVEN",
+                      optical_generation=generation, cleanup_state=self.cleanup_state)
+            return None
+        self.generation = generation
+        self.executions = 1
+        self.started_at = self._clock()
+        self._start(self.generation)
+        return self.proc
+
+    def note_published(self):
+        """A render of the current generation was published: the budget is free again."""
+        self.executions = 0
+
+    def tick(self) -> list:
+        """One controller iteration: the watchdog, then the worker's own exit.
+
+        Returns the event names, in order, for the caller and for tests.
+        A successful render is left in ``self.proc`` for the controller to
+        publish (``EXITED_OK``): this method never publishes it.
+
+        Whichever way the worker ends, its group is released here — before the
+        controller reaps the leader and before any retry — so that no descendant
+        outlives the generation it was rendering.
+        """
+        events = []
+        if self.cleanup_state == CLEANUP_UNPROVEN:
+            return self._recover_cleanup()
+        if self.proc is None:
+            return events
+        if self._leader_running(self.proc):
+            if self.started_at is not None and regeneration_watchdog_expired(self._clock() - self.started_at, self.budget_s):
+                released = self._release("STALLED")
+                failed = self.generation
+                self.proc = None
+                self.started_at = None
+                if self.cleanup_state == CLEANUP_UNPROVEN:
+                    # A stalled worker whose group is not proven gone: no retry,
+                    # no new generation, and NO FALLBACK YET — a descendant may
+                    # still be writing exactly the files a fallback would stamp
+                    # (finding D).  The generation and its intent are RETAINED,
+                    # and the bounded recovery decides later.
+                    self._hold_pending(failed, "STALLED")
+                    self._log("REGENERATION_STALLED_BLOCKED_CLEANUP_UNPROVEN",
+                              optical_generation=int(failed or 0), group_release=released)
+                    events.append("STALLED_CLEANUP_UNPROVEN")
+                    return events
+                events.append(self._resolve("STALLED", failed, released))
+            return events
+        # the leader has exited.  Read its status WITHOUT reaping: this is where
+        # v4's reach for ``proc.poll()`` collected the leader before the group
+        # had been released.
+        succeeded = leader_exit_success_without_reaping(self.proc.pid)
+        released = self._release("EXITED")
+        failed = self.generation
+        if self.cleanup_state == CLEANUP_UNPROVEN:
+            self.proc = None
+            self.started_at = None
+            if succeeded is True:
+                # a render that succeeded but whose group could not be proven
+                # released is NOT published — no success may race a descendant —
+                # and is NOT forgotten either: the pending slot records it, so
+                # the recovery can hand it over instead of losing it (finding D,
+                # the v5 silent loss).
+                self._hold_pending(failed, PENDING_SUCCESS)
+                self._log("REGENERATION_SUCCESS_BLOCKED_CLEANUP_UNPROVEN",
+                          optical_generation=int(failed or 0), group_release=released)
+                events.append("SUCCESS_BLOCKED_CLEANUP_UNPROVEN")
+            else:
+                # Same rule for a failure: no fallback while a descendant of the
+                # failed worker may still write.  The bounded recovery (or its
+                # fail-closed exhaustion) owns that decision.
+                self._hold_pending(failed, "FAILED")
+                self._log("REGENERATION_FAILURE_BLOCKED_CLEANUP_UNPROVEN",
+                          optical_generation=int(failed or 0), group_release=released)
+                events.append("FAILED_CLEANUP_UNPROVEN")
+            return events
+        _reap_worker(self.proc, EXIT_REAP_TIMEOUT_S)
+        returncode = self.proc.returncode
+        failed = self.generation
+        if returncode == 0:
+            if regeneration_failure_is_stale(failed, self.current_generation()):
+                self.proc = None
+                self.started_at = None
+                self._log("REGENERATION_RESULT_SUPERSEDED", optical_generation=int(failed or 0),
+                          current_generation=self.current_generation())
+                events.append("SUPERSEDED")
+            else:
+                # A successful render whose group is PROVEN released: handed to
+                # the controller for publication, in the dev11 order.  ``proc``
+                # is cleared so nobody polls a reaped pid.
+                self.publish_pending = (failed, True)
+                self.proc = None
+                self.started_at = None
+                events.append("EXITED_OK")
+            return events
+        self.proc = None
+        self.started_at = None
+        events.append(self._resolve("FAILED", failed, released))
+        return events
+
+    def take_publishable(self):
+        """Hand the controller the render to publish, or None.
+
+        The supervisor — not the controller — owns the decision that a render is
+        both successful AND its process group proven released.  The controller
+        never calls ``poll()``/``wait()`` on ``supervisor.proc``; it asks here
+        (finding E).
+        """
+        pending = self.publish_pending
+        self.publish_pending = None
+        return pending
+
+    def shutdown(self, attempts: int | None = None):
+        """Bounded, ownership-respecting drain before the controller leaves.
+
+        Finding E.  Every exit path of the HOME controller — the stop signal, the
+        normal end of the loop, and the Flex-recovery ``execv`` — funnels here.
+        The rules are exactly the release rules: the CAPTURED group is addressed,
+        the single-process fallback is never used for a supervised worker, the
+        leader is never reaped before the proof, and a group that cannot be
+        proven released within the bounded budget FAILS CLOSED instead of being
+        silently abandoned.  No pending work is resumed: the controller is
+        leaving, and starting a worker here is the opposite of draining.
+
+        Returns ``(may_exit, outcome, events)``.  ``may_exit`` is False when the
+        caller must NOT replace itself (``execv``) or exit "normally" over a
+        retained group: doing so would hand the machine to a new controller that
+        knows nothing about the group it is about to race.
+        """
+        events = []
+        if self.proc is None and self.group is None and self.cleanup_state == CLEANUP_PROVEN:
+            return True, None, ["SHUTDOWN_CLEAN"]
+        budget = SHUTDOWN_RELEASE_ATTEMPTS if attempts is None else max(1, int(attempts))
+        outcome = None
+        for _ in range(budget):
+            outcome = self._release("SHUTDOWN")
+            self.proc = None
+            self.started_at = None
+            if self.cleanup_state == CLEANUP_PROVEN:
+                events.append("SHUTDOWN_RELEASED")
+                return True, outcome, events
+        self.fail_closed = True
+        self._log("REGENERATION_CLEANUP_FAIL_CLOSED", group_release=outcome,
+                  attempts=budget, event_reason="SHUTDOWN")
+        events.append("SHUTDOWN_CLEANUP_UNPROVEN")
+        return False, outcome, events
+
+    def _recover_cleanup(self) -> list:
+        """Bounded, deterministic recovery from an unproven release (finding B).
+
+        Each call re-attempts the release of the RETAINED group.  The first
+        attempt that proves the group gone switches back to ``CLEANUP_PROVEN``
+        and resumes the retained generation EXACTLY ONCE.  After
+        ``max_cleanup_attempts`` unproven attempts the supervisor settles into an
+        observable fail-closed state instead of retrying forever: no silent
+        progression, no unbounded loop.
+        """
+        events = []
+        if self.fail_closed:
+            return events
+        self.recovery_attempts += 1
+        outcome = self._release("RECOVERY")
+        if self.cleanup_state == CLEANUP_PROVEN:
+            events.append("CLEANUP_PROVEN")
+            events.extend(self._resume_pending())
+        elif self.recovery_attempts >= self.max_cleanup_attempts:
+            self.fail_closed = True
+            self._log("REGENERATION_CLEANUP_FAIL_CLOSED", group_release=outcome,
+                      attempts=self.recovery_attempts)
+            events.append("CLEANUP_FAIL_CLOSED")
+            events.extend(self._fail_closed_output())
+        return events
+
+    def _resume_pending(self) -> list:
+        """Resume, EXACTLY ONCE, what the retained generation was waiting for.
+
+        Finding D.  ONE slot, one intent, one resumption:
+          * ``SUCCESS``            a render that DID succeed while its group was
+                                   unproven is handed to the controller — unless
+                                   a newer generation has since taken the
+                                   presentation, in which case it is dropped
+                                   EXPLICITLY, never silently;
+          * ``REQUEST``            a newer generation asked for while the slot was
+                                   unproven starts now, exactly once;
+          * ``FAILED`` / ``STALLED`` the bounded failure policy decides again for
+                                   that same generation: the group is proven gone,
+                                   so the retry — or the truthful fallback — is
+                                   safe again, and the execution count it had
+                                   already spent is the one it is judged on.
+        """
+        pending = self.pending
+        if pending is None:
+            return []
+        self.pending = None
+        generation = int(pending["generation"])
+        intent = pending["intent"]
+        if intent == PENDING_SUCCESS:
+            if regeneration_failure_is_stale(generation, self.current_generation()):
+                self._log("REGENERATION_PENDING_SUCCESS_SUPERSEDED", optical_generation=generation,
+                          current_generation=self.current_generation())
+                return ["PENDING_SUCCESS_SUPERSEDED"]
+            self.publish_pending = (generation, True)
+            self._log("REGENERATION_PENDING_SUCCESS_RESUMED", optical_generation=generation)
+            return ["PENDING_SUCCESS_RESUMED"]
+        if intent == PENDING_REQUEST:
+            self.generation = generation
+            self.executions = 1
+            self.started_at = self._clock()
+            self._start(self.generation)
+            self._log("REGENERATION_PENDING_GENERATION_STARTED", optical_generation=self.generation)
+            return ["PENDING_GENERATION_STARTED"]
+        self.generation = generation
+        return [self._resolve(intent, generation, None)]
+
+    def _safe_to_write_fallback(self, generation: int) -> bool:
+        """True only when a fallback write is PROVEN unable to race a writer.
+
+        Finding D (v6) and finding AGY-2 (v7).  The conditions, ALL required:
+          * the release is PROVEN (``CLEANUP_PROVEN``).  This is the v7 absolute
+            rule: while ``cleanup_state`` is UNPROVEN the release ITSELF was
+            never established, so nothing here may authorise a write — a helper
+            that merely ESTIMATES the group gone is guessing from its own blind
+            angle, and that guess may not overwrite a valid disc sheet;
+          * no process that could touch the same files is left — the retained
+            group is either absent, or proven ours AND proven gone (a group
+            holding only zombies holds no writer: ``process_group_liveness``
+            answers GONE for it);
+          * no CURRENT render would be destroyed: a disc sheet already matching
+            this generation is left untouched;
+          * the generation is still the current one, so the fallback describes
+            the presentation it is stamped with.
+        """
+        if self.cleanup_state != CLEANUP_PROVEN:
+            return False
+        if self.group is not None:
+            if not self._ownership_proven(self.group):
+                return False
+            if process_group_liveness(self.group.pgid, self._proc_root) != LIVENESS_GONE:
+                return False
+        if self._home is not None:
+            try:
+                if disc_sheet_is_current(self._home, self._current_optical()):
+                    return False
+            except OSError:
+                return False
+        return not regeneration_failure_is_stale(generation, self.current_generation())
+
+    def _fail_closed_output(self) -> list:
+        """At exhaustion: NEVER write.  The retained content stays as it is.
+
+        Finding AGY-2 (v7).  v6 could still call ``_publish_fail_closed_fallback``
+        here — a valid disc sheet was then overwritten and a provenance stamped
+        that the release itself had never proved.  The absolute rule now lived in
+        code: this method is reached ONLY at the exhaustion of the bounded
+        recovery, i.e. with ``cleanup_state != CLEANUP_PROVEN``, and in that state
+        NO presentation artifact may be written — neither ``disc-sheet.png``, nor
+        ``disc-sheet-state.json``, nor ``flex-v1.ini``.  The last valid/stale
+        content is KEPT (a stale fiche is recoverable; a fiche stamped from a
+        guess is a lie the next writer can contradict).  A SUCCESS or a REQUEST
+        is refused too: neither is a failed render, so neither may ever be
+        restamped as a fallback.  The observable trace is a log line and the
+        returned ``CLEANUP_FAIL_CLOSED_NO_WRITE`` — never a write.
+        """
+        pending = self.pending
+        generation = int(pending["generation"]) if pending is not None else 0
+        intent = pending["intent"] if pending is not None else None
+        if self.cleanup_state != CLEANUP_PROVEN:
+            self._log("REGENERATION_CLEANUP_FAIL_CLOSED_NO_WRITE", optical_generation=generation,
+                      cleanup_state=self.cleanup_state, intent=intent,
+                      event_reason="CLEANUP_UNPROVEN",
+                      generation_is_current=not regeneration_failure_is_stale(
+                          generation, self.current_generation()))
+            return ["CLEANUP_FAIL_CLOSED_NO_WRITE"]
+        # Unreachable from the exhaustion path above; a defensive refusal kept so
+        # that no future caller can turn a SUCCESS / REQUEST into a fallback, nor
+        # a write into a race the proof did not cover.
+        if pending is None or intent not in ("FAILED", "STALLED"):
+            self._log("REGENERATION_FAIL_CLOSED_NO_WRITE", optical_generation=generation,
+                      cleanup_state=self.cleanup_state, intent=intent,
+                      event_reason="INTENT_NOT_A_FAILURE")
+            return ["CLEANUP_FAIL_CLOSED_NO_WRITE"]
+        if not self._safe_to_write_fallback(generation):
+            self._log("REGENERATION_FAIL_CLOSED_NO_WRITE", optical_generation=generation,
+                      cleanup_state=self.cleanup_state, intent=intent,
+                      event_reason="WRITER_NOT_EXCLUDED")
+            return ["CLEANUP_FAIL_CLOSED_NO_WRITE"]
+        return self._publish_fail_closed_fallback(pending)
+
+    def _publish_fail_closed_fallback(self, pending: dict) -> list:
+        """The truthful fallback of a generation that never rendered, once safe."""
+        generation = int(pending["generation"])
+        if self._home is None or self._install is None:
+            return ["FAIL_CLOSED_NO_RENDERER"]
+        optical = self._current_optical()
+        reason = "MENU_REGENERATION_TIMEOUT" if pending["intent"] == "STALLED" else "MENU_REGENERATION_FAILED"
+        published = publish_generation_fallback(self._home, self._install, optical, reason,
+                                                expected_generation=generation)
+        self._log("PRESENTATION_FALLBACK" if published else "PRESENTATION_FALLBACK_REFUSED",
+                  optical_generation=generation, event_reason=reason, outcome="FAIL_CLOSED")
+        return ["FAIL_CLOSED_FALLBACK" if published else "FAIL_CLOSED_FALLBACK_REFUSED"]
+
+    def _resolve(self, outcome: str, failed_generation: int, released=None) -> str:
+        current = self.current_generation()
+        if regeneration_failure_is_stale(failed_generation, current):
+            self._log("REGENERATION_FAILURE_STALE", outcome=outcome,
+                      failed_generation=int(failed_generation or 0), current_generation=current,
+                      executions=self.executions)
+            return "STALE_FAILURE"
+        if regeneration_recovery(outcome, self.executions, self.max_attempts) == "RETRY":
+            if released in RELEASE_UNPROVEN or self.cleanup_state == CLEANUP_UNPROVEN:
+                # A retry renders the SAME generation: starting it while the
+                # previous worker's group may still be alive would put two
+                # writers on one presentation.  Fall through to the fallback,
+                # which publishes truthful, generation-matching provenance.
+                self._log("REGENERATION_RETRY_BLOCKED_GROUP", optical_generation=int(failed_generation or 0),
+                          outcome=outcome, group_release=released, executions=self.executions)
+            else:
+                self._log("REGENERATION_RETRY_SCHEDULED", optical_generation=int(failed_generation or 0),
+                          outcome=outcome, attempt=self.executions + 1, max_attempts=self.max_attempts,
+                          worker_budget_seconds=self.budget_s)
+                self.executions += 1
+                self.generation = int(failed_generation or 0)
+                self.started_at = self._clock()
+                self._start(self.generation)
+                return "RETRY"
+        if self._home is not None and self._install is not None:
+            optical = self._current_optical()
+            if disc_sheet_is_current(self._home, optical):
+                self._log("PRESENTATION_FALLBACK_SKIPPED", optical_generation=current,
+                          event_reason="DISC_SHEET_ALREADY_CURRENT", outcome=outcome,
+                          attempts=self.executions)
+                return "FALLBACK_SKIPPED"
+            reason = "MENU_REGENERATION_TIMEOUT" if outcome == "STALLED" else "MENU_REGENERATION_FAILED"
+            published = publish_generation_fallback(self._home, self._install, optical, reason,
+                                                    expected_generation=failed_generation)
+            self._log("PRESENTATION_FALLBACK" if published else "PRESENTATION_FALLBACK_REFUSED",
+                      optical_generation=current, event_reason=reason, outcome=outcome,
+                      attempts=self.executions)
+            return "FALLBACK" if published else "FALLBACK_REFUSED"
+        return "FALLBACK"
+
+
+def _safe_log(log, event, **fields):
+    """Journalise sans jamais abandonner un groupe retenu (l'autorité prime).
+
+    Finding (Codex, v8).  ``log`` is the caller's logging seam — for the
+    controller, a function that reaches the runtime's journal writer.  Catching
+    only ``Exception`` left the class OPEN: a logger raising a ``BaseException``
+    (``SystemExit`` from a broken CLI helper, ``KeyboardInterrupt`` from a
+    terminal signal) escaped ``guarded_release`` and returned to a caller that
+    had NOT been told the release was proven — so the caller's exit path ran
+    with the retained group abandoned, which is the exact failure this gate
+    exists to forbid.  No logging failure of ANY kind may decide anything here:
+    the authority outranks the journal.
+    """
+    try:
+        log(event, **fields)
+    except BaseException:                    # noqa: BLE001 — a logger never decides
+        pass
+
+
+UNKNOWN_TYPE_NAME = "unknown-type"
+
+
+def safe_type_name(value):
+    """The CLASS NAME of ``value`` — total, and never raising (Codex on v9).
+
+    Finding (Codex, v9 — blocker 2).  v9 read ``type(exc).__name__`` OUTSIDE any
+    guard, in ``safe_exception_text``, in the controller's boundary and in
+    ``guarded_release``'s POST-PROOF diagnostics.  Naming a value is an
+    ATTRIBUTE READ, and a metaclass may implement ``__name__`` as anything —
+    including a property that raises.  A description therefore decided the fate
+    of the very exception it was describing: it escaped the boundary (no
+    quarantine, lock released) or replaced the original instance after the
+    proof (masked re-raise).
+
+    Total by construction: the class, then its ``__name__``, then the stringness
+    of that name are each read inside their own ``BaseException`` guard, so a
+    hostile metaclass yields a STABLE placeholder and nothing else.  Every
+    diagnostic of this module goes through here — no payload reads
+    ``type(x).__name__`` outside a guard.
+    """
+    try:
+        cls = type(value)
+    except BaseException:                    # noqa: BLE001 — a diagnostic never decides anything
+        return UNKNOWN_TYPE_NAME
+    try:
+        name = cls.__name__
+    except BaseException:                    # noqa: BLE001 — a hostile metaclass lands here
+        return UNKNOWN_TYPE_NAME
+    try:
+        if isinstance(name, str) and name:
+            return name
+    except BaseException:                    # noqa: BLE001
+        return UNKNOWN_TYPE_NAME
+    return UNKNOWN_TYPE_NAME
+
+
+def safe_repr(value):
+    """``repr(value)`` that NEVER raises — fail-closed diagnostics (Codex on v8).
+
+    Finding (Codex, v8 — blocker 2).  A diagnostic may never outrank the
+    authority.  ``repr()`` of an object this gate merely RETAINS (an unreaped
+    ``Popen``, an object whose ``__repr__`` raises) was evaluated as an
+    ARGUMENT of the logging seam — i.e. OUTSIDE the seam's own guard — so a
+    raising ``__repr__`` escaped ``guarded_release`` and returned to a caller
+    that had not been told the release was proven.  Every representation the
+    gate emits now goes through here: a broken ``__repr__`` yields a stable
+    placeholder and nothing else.
+    """
+    try:
+        return repr(value)
+    except BaseException:                    # noqa: BLE001 — a diagnostic never decides anything
+        return f"<unrepresentable {safe_type_name(value)}>"
+
+
+def safe_exception_text(exc):
+    """A stable description of an exception, computed WITHOUT ever raising.
+
+    Finding (Codex, v8 — blocker 2).  ``exception=str(exc)`` was evaluated
+    BEFORE the non-escaping logging seam, so a custom exception whose
+    ``__str__`` raised a ``BaseException`` escaped the controller's boundary,
+    MASKED the original failure and never reached ``guarded_release`` at all —
+    the authority was released without any proof.
+
+    Finding (Codex, v9 — blocker 2).  The type name was read OUTSIDE the guard:
+    a metaclass whose ``__name__`` raises escaped exactly the same way.  It now
+    comes from :func:`safe_type_name`, which is total, and the message stays
+    best-effort: when ``__str__`` refuses, a fixed placeholder is returned
+    instead of propagating anything.
+    """
+    name = safe_type_name(exc)
+    try:
+        text = str(exc)
+    except BaseException:                    # noqa: BLE001 — a diagnostic never decides anything
+        return f"<{name}: unprintable>"
+    return text
+
+
+def _retained_repr(supervisor):
+    """A stable description of the group the gate retains — never raises.
+
+    ``getattr`` with a default only absorbs ``AttributeError``: a ``group``
+    PROPERTY that raises would otherwise escape from inside the quarantine.  A
+    diagnostic is never allowed to end the quarantine, so this absorbs
+    everything and answers a placeholder.
+    """
+    try:
+        return safe_repr(getattr(supervisor, "group", None))
+    except BaseException:                    # noqa: BLE001 — a diagnostic never decides anything
+        return "<unreadable retained group>"
+
+
+def _recovery_interval(seconds):
+    """The recovery interval as a safe, non-negative float — never raises.
+
+    A negative or NaN interval (or a value of the wrong type) must not shorten
+    the quarantine and must not escape the gate: either answers the production
+    cadence instead.
+    """
+    try:
+        value = float(seconds)
+    except BaseException:                    # noqa: BLE001 — the pacing never decides anything
+        return GUARDED_RECOVERY_PAUSE_S
+    if not value >= 0.0:                     # NaN or negative: never shorten the quarantine
+        return GUARDED_RECOVERY_PAUSE_S
+    return value
+
+
+# ── Pacing primitives, captured ONCE at import (blocker Codex v9-1) ──────────
+# None of them is a parameter; none of them is the caller's seam; each one is a
+# BOUND method or a syscall wrapper, so patching ``threading.Event.wait`` or
+# ``time.sleep`` later cannot reach it.  They are named at module level so a
+# review can FAULT one deliberately — a fault is absorbed like any other, and
+# never ends the quarantine.
+_PACE_CLOCK_WAIT = threading.Event().wait        # tier 2 — bounded clock-wait
+_PACE_SELECT = select.select                     # tier 3 — kernel, not the clock
+
+
+def _pace_default_clock():
+    """The production monotonic clock — resolved at CALL time (a faultable seam)."""
+    return time.monotonic()
+
+
+_PACE_CLOCK = _pace_default_clock                # tier 0 — the deadline clock
+#: The PROOF reading: the SAME physical clock, read through a DIFFERENT symbol
+#: (blocker Codex v10-1).  ``_PACE_CLOCK`` is a deliberately faultable seam, and
+#: a proof can never rest on the very name under test: v10 asked that one name
+#: both to pace and to measure, and answered "the interval was spent" for a wait
+#: it had not measured as soon as the name broke.  Both the function and the
+#: clock id are captured ONCE, at import, out of the real ``time`` module — so
+#: neither a later patch of ``time.monotonic`` nor a REPLACED ``time`` name can
+#: reach the reading that carries the proof.  It is what keeps a broken seam from
+#: turning every legitimate quarantine into a permanent hold — WITHOUT letting
+#: any unmeasured wait pass for a proof.
+_PACE_CLOCK_ALT_NS = time.clock_gettime_ns
+_PACE_CLOCK_ALT_CLOCK_ID = time.CLOCK_MONOTONIC
+
+
+def _pace_alt_clock():
+    """The proof reading, in SECONDS — same physical clock, different symbol."""
+    return _PACE_CLOCK_ALT_NS(_PACE_CLOCK_ALT_CLOCK_ID) / 1e9
+
+
+_PACE_CLOCK_ALT = _pace_alt_clock
+
+
+def _pace_now():
+    """A monotonic reading in SECONDS, or ``None`` when NO clock answers.
+
+    ``None`` means the interval cannot be PROVEN — never that the pacing is
+    optional.  The caller must then fall through to its next INDEPENDENT
+    primitive and, if none of them can prove either, to the conservative HOLD.
+    It NEVER propagates (Codex v9-1) and it is NEVER read as a proof (Codex
+    v10-1): ``None`` feeds ``_pace_wait``'s unverified branch, which answers
+    False and hands the remainder — not the decision — to the next tier.
+    """
+    try:
+        return float(_PACE_CLOCK())
+    except BaseException:                    # noqa: BLE001 — a clock never decides anything
+        pass
+    try:
+        return float(_PACE_CLOCK_ALT())
+    except BaseException:                    # noqa: BLE001
+        return None
+
+
+def _pace_syscall_wait(interval):
+    """A bounded wait through the KERNEL (``select``), independent of ``time``."""
+    _PACE_SELECT([], [], [], interval)
+
+
+#: The accounting demands the WHOLE interval: a waiter that under-consumes is
+#: NEVER accepted as proof of a spent interval (finding Codex v10-1 — the old
+#: ``0.9`` floor blessed a 10 % deficit, and any other floor would only have
+#: blessed a smaller one).  What is left is the RESOLUTION of the verification
+#: clock, not a discount: the deadline is a float sum, and a residual below one
+#: microsecond can be spent by NOTHING (``select`` and ``Event.wait`` round UP to
+#: the scheduler tick), so re-waiting it could only spin.  Every deficit a real
+#: waiter can produce — an instant return, a spurious wake-up, 90 %, 99 % — is
+#: orders of magnitude above this floor and is REFUSED, its remainder going to
+#: the next INDEPENDENT primitive (tier 3) or to the conservative hold.
+_PACE_ACCOUNTING_TOLERANCE_S = 1e-6
+
+
+def _pace_deadline(interval):
+    """``start + interval`` from a measured reading, or ``None`` without a clock."""
+    started = _pace_now()
+    if started is None:
+        return None
+    return started + interval
+
+
+def _pace_remaining(deadline):
+    """What is STILL owed on ``deadline``, or ``None`` when the clock is gone."""
+    if deadline is None:
+        return None
+    now = _pace_now()
+    if now is None:
+        return None
+    return deadline - now
+
+
+def _pace_unavailable(tier, exc, interval, *, log, rounds):
+    """Journal a waiter that RAISED — one event per tier, and no decision."""
+    _safe_log(log, "HOME_PACING_UNAVAILABLE", pacing_tier=tier,
+              exception_type=safe_type_name(exc), recovery_rounds=rounds,
+              interval_s=interval, event_status="QUARANTINE")
+
+
+def _pace_unverified(tier, interval, reason, *, log, rounds, remaining=0.0):
+    """Journal a waiter that could NOT be PROVEN — the absence of proof, named."""
+    _safe_log(log, "HOME_PACING_UNVERIFIED", pacing_tier=tier, pacing_reason=reason,
+              remaining_s=remaining, recovery_rounds=rounds,
+              interval_s=interval, event_status="QUARANTINE")
+
+
+def _pace_wait(tier, waiter, deadline, *, interval, log, rounds):
+    """ONE bounded wait of the REMAINDER — True ONLY with a PROOF it was spent.
+
+    The proof is a MEASUREMENT, made with an independent clock reading before
+    and after the wait.  Every other outcome answers False, which means « this
+    tier proved nothing; the next INDEPENDENT primitive gets the remainder » —
+    and when no tier proves anything, ``_pace_block`` ends in ``_pace_hold`` and
+    never hands the loop back.  False covers ALL of:
+
+      * a waiter that RAISED (absorbed, journalled, never a decision);
+      * a waiter that returned EARLY — instantly, or after 90 % of the interval;
+      * a waiter nobody could MEASURE, because no clock answers;
+      * a clock lost between the two readings.
+
+    Finding (Codex, v10 — blocker 1).  v10 trusted ``waiter`` the moment its own
+    clock was unavailable (``started is None`` ⇒ ``return True``): a clock-wait
+    that returned immediately WITHOUT raising was counted as a spent interval,
+    ``_PACE_SELECT`` was never reached, and the recovery loop ran unpaced.  An
+    unverifiable waiter is not a measurement — it is now never True.
+    """
+    remaining = _pace_remaining(deadline)
+    if remaining is None:
+        # No clock answers at all: NOTHING here can be proven.  The bounded
+        # primitive is still spent (fail-closed direction, never a shortcut to a
+        # proof), then the next tier is tried — and only a HOLD can end this.
+        try:
+            waiter(interval)
+        except BaseException as exc:         # noqa: BLE001 — a wait never decides anything
+            _pace_unavailable(tier, exc, interval, log=log, rounds=rounds)
+        else:
+            _pace_unverified(tier, interval, "CLOCK_UNAVAILABLE", log=log, rounds=rounds)
+        return False
+    if remaining <= _PACE_ACCOUNTING_TOLERANCE_S:
+        return True                          # nothing is owed: the interval is spent
+    try:
+        waiter(remaining)
+    except BaseException as exc:             # noqa: BLE001 — a wait never decides anything
+        _pace_unavailable(tier, exc, interval, log=log, rounds=rounds)
+        return False
+    left = _pace_remaining(deadline)
+    if left is None:
+        _pace_unverified(tier, interval, "CLOCK_LOST", log=log, rounds=rounds)
+        return False
+    if left <= _PACE_ACCOUNTING_TOLERANCE_S:
+        return True                          # FULL interval accounted: the only proof
+    _pace_unverified(tier, interval, "UNDERSPENT", log=log, rounds=rounds, remaining=left)
+    return False
+
+
+def _pace_hold(*, log, rounds):
+    """THE LAST RESORT: hold the quarantine instead of returning to the loop.
+
+    Finding (Codex, v9 — blocker 1, last clause).  When every BOUNDED primitive
+    is broken the interval cannot be spent — so the pacing must not pretend it
+    was.  A "conservative hold" is the fail-closed answer: this process keeps
+    the only memory identity of the retained group and its ``ui-session.lock``,
+    so it stays here, blocked, instead of handing control back to a recovery
+    loop that would spin on the same broken primitives.
+
+    Finding (Codex, v10 — blocker 1, third clause).  « Broken » is not the only
+    way to lose the interval: a tier can also be UNPROVABLE — no clock answers,
+    so nothing measured the wait.  Losing the MEASUREMENT is the same verdict as
+    losing the primitive: an unproven interval is never returned to the loop, so
+    the hold is also the answer when the gate cannot prove what it spent.
+
+    Each primitive below is a blocking operation with NO timeout: a ``Event``
+    created fresh on every iteration (it cannot have been set in advance), then
+    ``signal.pause`` (a syscall that returns only when a signal arrives).  They
+    consume no CPU while they block.  Nothing is published, no worker is
+    started, no exec and no exit happens: only a PROOF could end the quarantine,
+    and a proof requires a drain that this hold never re-runs.
+
+    Honest limit: an actor that made BOTH primitives raise would leave this loop
+    retrying — busy, but still inside the quarantine, with the identity and the
+    session lock retained.  There is no path from here to an exit, an exec or a
+    release.
+    """
+    _safe_log(log, "HOME_PACING_HOLD", recovery_rounds=rounds,
+              event_status="QUARANTINE",
+              event_reason="PACING_INTERVAL_UNPROVEN")
+    while True:
+        try:
+            threading.Event().wait()         # fresh, never set: blocks for good
+        except BaseException:                # noqa: BLE001 — a hold never decides anything
+            try:
+                signal.pause()               # last resort: a syscall, no clock at all
+            except BaseException:            # noqa: BLE001
+                pass                         # still no escape, no release, no proof
+
+
+def _pace_block(deadline, interval, *, log, rounds):
+    """Spend the REMAINDER on the gate's OWN primitives — or HOLD, never return.
+
+    The two bounded tiers below are INDEPENDENT of the caller's seam and of each
+    other (a clock-wait, then a raw kernel wait), and each one must PROVE the
+    interval it covered.  A tier that cannot prove hands the REMAINDER over
+    rather than the decision: the deadline is shared, so a tier that spent half
+    of it leaves half to spend — never a rescheduled interval, never an accepted
+    deficit.  When neither can prove, the gate HOLDS.
+    """
+    if _pace_wait("CLOCK_WAIT", _PACE_CLOCK_WAIT, deadline, interval=interval, log=log, rounds=rounds):
+        return
+    if _pace_wait("SELECT", _pace_syscall_wait, deadline, interval=interval, log=log, rounds=rounds):
+        return
+    _pace_hold(log=log, rounds=rounds)
+
+
+def _pace(sleep, seconds, *, log, rounds):
+    """Spend ONE recovery interval — fail-closed, NEVER a spin, never a decision.
+
+    Finding (Codex, v8 — blocker 1).  ``sleep(recovery_pause_s)`` sat OUTSIDE
+    the ``BaseException`` guard: a sleeper that raised during an UNPROVEN
+    cleanup killed HOME, released ``ui-session.lock``, abandoned the retained
+    ``WorkerGroup`` and could even mask the caller's original exception —
+    exactly the failure this gate exists to forbid.
+
+    Finding (Codex, v9 — blocker 1).  Two escapes and one spin survived v8:
+    ``type(exc).__name__`` and ``time.monotonic()`` were evaluated OUTSIDE any
+    guard, and the CLOCK_WAIT tier answered ``return`` the moment its own wait
+    failed — so a quarantine whose clock-wait was broken returned instantly on
+    every round and became a busy-loop (Codex: 10 000 nominal 10 ms rounds in
+    8 ms).
+
+    Finding (Codex, v10 — blocker 1).  v10 measured the interval with ONE name,
+    the very name an actor can fault, and read an unverifiable waiter as a spent
+    interval: with the clock broken and a clock-wait that returned instantly
+    WITHOUT raising, ``_PACE_SELECT`` was never reached and the loop ran unpaced.
+    The model is now ONE accounting routine over ONE deadline, and no tier
+    inherits another's proof:
+
+      * TIER 0 — the deadline, read from TWO independent clocks.  A missing
+        reading is never a proof: it forbids the tier and triggers the fall-through.
+      * TIER 1 — the caller's sleeper.  ONE call, then MEASURED.  Its failure is
+        absorbed and journalled; its early return is not trusted; either way the
+        gate's own tiers get the REMAINDER of the SAME deadline.
+      * TIER 2 — the gate's own bounded clock-wait (``_PACE_CLOCK_WAIT``).
+      * TIER 3 — an independent, bounded KERNEL wait (``select``), captured at
+        import, so a broken ``time`` module cannot disable it.
+      * TIER 4 — a conservative HOLD (``_pace_hold``): unusable — or simply
+        unprovable — bounded primitives mean the quarantine STAYS HELD, blocked,
+        never handed back.
+
+    The objective is fail-closed authority, not temporal precision: over-spending
+    is acceptable, returning early is not.  Only a PROOF reaches the loop; a
+    missing proof reaches the HOLD.  Only the RELEASE PROOF ends the quarantine.
+    """
+    interval = _recovery_interval(seconds)
+    deadline = _pace_deadline(interval)
+    if _pace_wait("SEAM", sleep, deadline, interval=interval, log=log, rounds=rounds):
+        return
+    _pace_block(deadline, interval, log=log, rounds=rounds)
+
+
+def guarded_release(supervisor, drain, log, *, reason, sleep=time.sleep,
+                    recovery_pause_s: float = GUARDED_RECOVERY_PAUSE_S,
+                    max_recovery_rounds: int | None = None, exception=None):
+    """Hold the controller ALIVE until its worker's group is PROVEN released (v7).
+
+    Finding (Codex on v6).  v6 drained ONCE and, when the release could not be
+    proven, exited with ``EXIT_CLEANUP_UNPROVEN``.  Leaving WAS the bug: this
+    process holds the only memory identity of the worker's group (the captured
+    ``WorkerGroup``, whose unreaped pid pins the pgid) AND the ``ui-session.lock``
+    it inherited on fd 8.  Exiting releases both, so the next plain
+    ``openhtpc-session-start`` starts a controller that races a group nobody
+    remembers — and no later attempt can identify it.
+
+    ``drain(reason)`` is the controller's bounded, ownership-respecting drain
+    (``supervisor.shutdown()``).  Until it PROVES the release:
+      * nothing is published, no new worker is started, and the caller does NOT
+        exec or exit — its exit path is GATED on this function returning True;
+      * the process STAYS ALIVE and keeps its authority (identity + session lock);
+      * the bounded drain is retried at a spaced cadence (``recovery_pause_s``) —
+        paced, never a CPU spin.  The pacing itself is FAIL-CLOSED (``_pace``):
+        a sleeper that fails is absorbed, the interval is still spent on the
+        gate's own blocking clock-wait, and the quarantine goes on.
+
+    Returns True once the release is proven (the caller may then act), or False
+    when ``max_recovery_rounds`` bounds the quarantine — a TEST-ONLY bound:
+    production passes ``None`` and NEVER abandons a retained group.
+
+    ``exception`` (the controller's exception boundary): when given, it is
+    journalised and RE-RAISED — the very SAME instance, unchanged — after the
+    proof.  No unhandled exception may abandon a live or unproven group, and
+    none is ever masked.  When NO exception is given (a planned departure), a
+    failure of the sleeper still cannot create a premature unguarded exit: the
+    only way out of this function remains the PROOF.
+    """
+    bound = None
+    if max_recovery_rounds is not None:
+        try:
+            bound = int(max_recovery_rounds)
+        except BaseException:                # noqa: BLE001 — the bound is TEST-ONLY bookkeeping
+            bound = None
+    rounds = 0
+    while True:
+        try:
+            may_exit = bool(drain(reason))
+        except BaseException as exc:         # noqa: BLE001 — the quarantine cannot itself escape
+            _safe_log(log, "HOME_DRAIN_EXCEPTION", exception_type=safe_type_name(exc),
+                      retained_worker=_retained_repr(supervisor),
+                      event_status="QUARANTINE")
+            may_exit = False
+        if may_exit:
+            break
+        rounds += 1
+        _safe_log(log, "HOME_GUARDED_RECOVERY", authority="RETAINED", recovery_rounds=rounds,
+                  retained_worker=_retained_repr(supervisor),
+                  event_status="QUARANTINE")
+        if bound is not None and rounds >= bound:
+            return False
+        _pace(sleep, recovery_pause_s, log=log, rounds=rounds)
+    _safe_log(log, "HOME_AUTHORITY_RELEASE_PROVEN", recovery_rounds=rounds, event_reason=reason)
+    if exception is not None:
+        # Finding (Codex, v9 — blocker 2, post-proof clause).  Naming the
+        # exception here read ``type(exception).__name__`` UNGUARDED: a hostile
+        # metaclass raised from the diagnostic and MASKED the instance this gate
+        # had just proven it could re-raise.  Only SAFE diagnostics now, and the
+        # raise is the LAST statement — of the very same object.
+        _safe_log(log, "HOME_SESSION_EXCEPTION_RERAISED",
+                  exception_type=safe_type_name(exception))
+        raise exception
+    return True
 
 
 def plugin_menu_entries(home: pathlib.Path, install: pathlib.Path) -> list[dict[str, str]]:
