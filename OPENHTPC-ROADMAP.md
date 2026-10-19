@@ -1,6 +1,6 @@
 # OPENHTPC — Roadmap globale
 
-Dernière mise à jour : 2026-10-18 (Europe/Brussels).
+Dernière mise à jour : 2026-10-18 (Europe/Brussels) — publication RC2 et backlog post-publication.
 Responsable des décisions et validations physiques : Steve Dehanne.
 
 ## Rôle et autorité
@@ -10,6 +10,115 @@ Ce document donne une vue globale de l'évolution du projet. Il relie les roadma
 Ordre d'autorité : code/tests/artifacts, état de travail validé, documents de qualification/architecture, roadmap, conversations historiques.
 Une entrée « prévu » n'autorise pas une implémentation, un commit, un déploiement ou une publication.
 Un changement présent dans le dépôt n'établit pas son installation ni sa qualification physique.
+
+
+## Situation actuelle après la publication — 2026-10-18
+
+- **OPENHTPC 1.3.2-rc2 Patina est publiée en préversion publique**, tag `v1.3.2-rc2` :
+  https://github.com/loganxwolverine/OpenHTPC/releases/tag/v1.3.2-rc2.
+  La version stable publique précédente était 1.3.0 ; RC2 n'est pas annoncée comme version stable définitive.
+- Canonique : machine de contrôle `.79`, dépôt `/home/steve/OpenHTPC/github-openhtpc-rc2-integration`,
+  branche `feature/magnificence-sd-auto`, HEAD `1764b8e77c5bd591bd163d3d1bdab1e36ea277ae`,
+  `VERSION=1.3.2-rc2`. Archive exacte vérifiée SHA-256
+  `abc8bd96bfa06c9e172fab26a0402846684f268b3c4e59f86e422ab956791ec1`.
+  Le tag et la release sont publics ; la branche de développement distante n'a PAS été poussée.
+- Suite RC2 : **2414 PASS, 12 FAIL historiques identiques** (tests de lanceur KDE exécutés sur `.79`
+  qui n'a pas Plasma), **23 SKIP**. Ces 12 échecs ne sont pas présentés comme des PASS.
+- `.59`, GEEKOM IT13 Max / Fedora 44 KDE Wayland : installation propre RC1, mise à jour
+  RC1→RC2, préférences préservées, session HOME/Flex unique, retour KDE et autostart rétabli,
+  Doctor `Overall READY`. Steve a physiquement validé une **lecture DVD complète sur RC2,
+  avec image, son et retour à Flex**. Aucune mutation nouvelle de `.229`.
+- Limitation connue et publiée : désinstallation RC2 laissant 23 fichiers de cache Python
+  `.pyc`. Correction étudiée et testée hors canonique ; Steve accepte le report à une
+  maintenance ultérieure sans créer automatiquement une RC3.
+- Preuves locales : `/home/steve/.local/state/openhtpc-agent-watch/prerc-20261018/rc2-publication-kit-20261018/PUBLICATION_STATUS.md`
+  et `.../rc2-qualification-20261018/RC2_QUALIFICATION_HANDOFF.md`.
+- La section « Point de situation pré-RC » ci-après est **historique** ; elle ne remplace
+  pas ce point courant. `OPENHTPC_CURRENT_STATE.json` décrit un ancien workstream P2 :
+  le considérer comme STALE, jamais comme permission d'exécution.
+
+## Politique transversale agents / quotas — 2026-10-19
+
+- Steve exige une gestion **hebdomadaire** des consommations, limites et
+  missions Codex, Hermes/DeepSeek via OpenRouter, AGY et autres agents, avec
+  une réserve significative pour ses projets et usages personnels.
+- Politique adoptée : `docs/OPENHTPC_AGENT_QUOTA_POLICY.md` ; 50 % de la
+  capacité hebdomadaire mesurée de chaque service partagé réservés par défaut
+  hors OPENHTPC (paramètre provisoire, modifiable par Steve). Ne pas inférer
+  des pourcentages depuis un exécutable ni initier de facturation sans accord.
+- L'abonnement Google AI est déclaré non renouvelé par Steve, mais sa date
+  de fin effective et ses quotas résiduels ne sont pas vérifiés. AGY peut
+  éventuellement continuer sur l'offre gratuite Antigravity, avec des
+  missions limitées ; aucune suppression ni substitution automatique.
+- **Ordre choisi le 19/10 :** 0, sécurisation du checkpoint documentaire ;
+  puis 1, cadrage et réalisation bornée de l'indicateur réseau/IP dans HOME,
+  sans toucher aux stashes protégés et sans déploiement implicite.
+
+## Backlog demandé par Steve après RC2 — 2026-10-18
+
+Les quatre chantiers ci-dessous sont **décidés en intention**, mais **non implémentés,
+non qualifiés et non priorisés entre eux**. La publication RC2 reste figée ; chaque
+chantier exigera cadrage, mandat borné, tests, puis validation adaptée. L'ajout à
+la roadmap n'autorise ni code, ni commit, ni déploiement, ni modification système.
+
+### MEDIA : une grille de jaquettes, identification par menu contextuel
+
+- Remplacer la présentation actuelle en liste horizontale des médias par une
+  **grille d'icônes/jaquettes plus larges**, lisibles depuis le salon.
+- Pour les films déjà identifiés, proposer « Changer l'identification » via
+  **clic droit** ou **appui long**, dans un menu contextuel plutôt qu'un
+  contrôle toujours visible.
+- Pour les médias non identifiés, utiliser une **icône générique** et le même
+  menu contextuel pour lancer le workflow d'identification du film.
+- Étudier une alternative accessible à la télécommande/manette et au clavier,
+  les états de focus, le maintien du parcours MEDIA/TMDb existant, l'absence
+  de clic accidentel et les dispositions 1080p/4K.
+- **Critère futur** : identifié/non identifié et ré-identification accessibles,
+  navigation fluide, aucun écrasement d'une identité validée sans confirmation.
+
+### INSTALLATION : choix utilisateur avec ou sans mot de passe au démarrage
+
+- Proposer dans l'installateur OPENHTPC le choix entre **connexion habituelle
+  avec mot de passe** et **connexion automatique à la session KDE/OPENHTPC**
+  au démarrage de la machine.
+- Mode sans mot de passe **opt-in**, risque d'accès physique explicite, mode
+  avec mot de passe conservé par défaut, retour arrière clairement décrit.
+- Détecter le gestionnaire de session réellement utilisé sous Fedora/KDE ;
+  ne pas supposer un composant unique (SDDM, Plasma Login Manager, etc.).
+- Ne pas conserver de mot de passe, ne pas désactiver l'authentification sudo,
+  ne pas modifier les comptes tiers ; toute action système nécessite consentement
+  et test de rollback. Vérifier les deux modes après reboot réel.
+- **État** : besoin UX confirmé, aucune configuration de login modifiée.
+
+### MAGNIFICENCE : recherche complémentaire Blu-ray / proches du Full HD
+
+- Continuer l'étude des recettes SD (DVD et sources proches du DVD) **en parallèle**
+  d'un chantier séparé pour **Blu-ray vidéo et films à résolution proche du
+  Blu-ray**, notamment Full HD/1080p ; préciser les classes d'entrée avec
+  des sources et mesures réelles, sans seuil inventé.
+- Adapter la chaîne de traitement à la nature de l'image, au GPU exact,
+  à la cadence, à la résolution de sortie, à la profondeur et au SDR/HDR.
+  **Ne pas recycler automatiquement la recette DVD→4K sur du Full HD.**
+- Comparer PURE et recettes candidates à distance réelle de visionnage et par
+  télémétrie MPV/Vulkan/VAAPI (qualité, artefacts, p95, budget de frame,
+  réserve GPU, endurance), puis validation visuelle par Steve.
+- Préserver les recettes DVD et les profils déjà qualifiés, PURE comme fallback,
+  les limites Core/`plugin.bluray` et la politique KEYDB. Ne pas promettre
+  menus ou déchiffrement Blu-ray par le seul traitement de l'image.
+- **État** : phase de recherche, aucune nouvelle recette Full HD/Blu-ray promue.
+
+### HOME : icône de connexion réseau + IP locale, en bas à droite
+
+- Reprendre l'idée d'une **petite icône réseau** sur l'accueil Flex, **coin
+  inférieur droit**, suffisamment visible et discrète, avec **adresse IP locale**.
+- Exprimer l'état **connecté au réseau local / déconnecté / indéterminé** ;
+  connexion Ethernet/Wi-Fi ou IP locale ne prouve pas un accès Internet.
+- Gérer plusieurs interfaces/IP, état sans adresse, IPv4/IPv6, changement à
+  chaud, taille/contraste/focus, sans bloquer l'interface.
+- Lecture d'état locale et non intrusive ; Fedora reste propriétaire de la
+  configuration réseau, aucun accès Internet ni service cloud nécessaire.
+- **État** : demande confirmée, faisabilité/implémentation non vérifiées.
+
 
 ## Point de situation pré-RC — 2026-10-18
 
@@ -131,6 +240,8 @@ Pas de réécriture périodique autonome : la maintenance accompagne les événe
 
 | Date | Événement / décision | État et preuve |
 | --- | --- | --- |
+| 2026-10-19 | Gouvernance des quotas IA et sélection HOME/IP | Politique hebdomadaire avec réserve de quota pour les autres usages de Steve, statut payant AGY à confirmer, option gratuite à qualifier ; sécurisation documentaire demandée puis chantier HOME/IP sélectionné. Aucun déploiement ou qualification physique nouveau. Voir `docs/OPENHTPC_AGENT_QUOTA_POLICY.md` et checkpoint du 19/10. |
+| 2026-10-18 | RC2 publiée + quatre demandes produit enregistrées pour l'après-RC2 | Release GitHub `v1.3.2-rc2` publique, commit `1764b8e`, archive exacte vérifiée ; `.59` mise à jour et lecture DVD complète image/son/retour Flex confirmée par Steve. 2414 PASS / 12 FAIL KDE historiques / 23 SKIP. Backlog ajouté : grille MEDIA et menu contextuel, autologin opt-in à l'installation, étude Magnificence Blu-ray/Full HD, indicateur LAN + IP en bas à droite de HOME. **Documentation uniquement, aucune implémentation, commit, déploiement ou changement Fedora autorisés par cette entrée.** Référence : `docs/continuity/2026-10-18-post-rc2-publication-roadmap-handoff.md`. |
 | 2026-10-16 | Consolidation 1.3.2 : C1, C2 et C4 intégrés ; C3 clôt la tranche gouvernance/documentation | C1 `b45bebc` (continuité et audits, 34 fichiers), C2 `30bdd45` (Magnificence et profil matériel), C4 `7b55df0` (outillage projet), dans l'ordre réellement appliqué C1 → C2 → C4 → C3. C3 clôt la tranche gouvernance/documentation et laisse le dépôt prêt pour le chantier distinct de gel 1.3.2 : worktree retombé à 8 entrées / 13 fichiers avant C3, index vide, deux stashes intacts, aucun push, merge ni tag. Voir `docs/OPENHTPC_CONTINUITY.md`. |
 | 2026-10-16 | Campagne physique IT13 acceptée : statut `PHYSICALLY_QUALIFIED` enregistré dans le profil matériel | Steve accepte la campagne du 16/10 comme qualification physique réussie pour le périmètre exact testé et autorise l'enregistrement — recette, tier et portée **inchangés** (comparaison champ par champ avant/après écriture). Lecture DVD PAL 720×576 25 i/s → 3840×2160@60, 13:08:58 → 13:30:35 (**21 min 37 s**, **1200 s instrumentées**, 2579 échantillons produit) : `vaapi-copy` et **BWDIF** prouvés (graphe de filtres construit), FSRCNNX-16/KrigBilateral/Vibrance prouvés par exécution, **zéro frame drop**, stabilité ressources sur 20 minutes, sortie mpv code 0, retour Flex correct. Limites écrites : endurance film complet, autres sources/sorties, bruit du ventilateur, *exact physical GPU decode binding*, pics thermiques isolés, source 10 bits. Sonde révisée en r3 et conservée **hors dépôt**. **Aucun commit.** Voir `docs/continuity/2026-10-16-campagne-physique-it13-qualification.md`. |
 | 2026-10-15 | Sauvegarde d'état : `git bundle --all` déclaré insuffisant | Mesuré : `stash@{1}` absent du bundle et reflogs non transportés, donc `git stash list` vide après restauration. Recette à quatre composantes écrite ; sauvegarde de 245 Mio préparée et **restauration vérifiée** dans un bac à sable (42 refs, 2 stashes, HEAD, arbre, état sale reproduits). Transfert NAS non effectué (identifiants retirés) : le risque « disque unique » n'est pas levé. Aucun commit. Voir `docs/continuity/2026-10-15-continuite-sauvegarde-et-it13.md`. |

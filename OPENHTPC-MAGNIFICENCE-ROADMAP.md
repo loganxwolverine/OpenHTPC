@@ -1,6 +1,6 @@
 # OPENHTPC Magnificence roadmap
 
-Last updated: 2026-10-11 (Europe/Brussels).
+Last updated: 2026-10-18 (Europe/Brussels) — nouvelle étude Full HD/Blu-ray, sans changement de recettes.
 
 ## RC scope
 
@@ -14,6 +14,34 @@ The reproducible qualification method and hardware inventory are maintained in
 `docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md` and
 `docs/OPENHTPC_REFERENCE_PLATFORMS.md`. Measurements are evidence for a later
 human-reviewed promotion; they are not an automatic runtime selector.
+
+
+## Nouvelle étude post-1.3.2-rc2 — sources Blu-ray / Full HD (2026-10-18)
+
+**Statut : mandat d'étude souhaité par Steve, aucune recette nouvelle implémentée
+ou qualifiée.** Cette recherche se conduit **en parallèle** de la poursuite des
+recettes SD/DVD, sans changer la matrice et les profils actuels ni PURE.
+
+- Cibler les films Blu-ray vidéo et les sources de qualité/résolution voisines
+  (en priorité 1080p / Full HD), en caractérisant effectivement le contenu :
+  format, entrelacement, codec, fréquence, profondeur et SDR/HDR.
+- Traiter l'amélioration d'image Blu-ray/Full HD comme un problème différent
+  de DVD 576p→4K : ne pas recycler automatiquement les chaînes coûteuses de
+  l'upscaling SD, privilégier l'intérêt perceptible à distance de salon.
+- Établir pour chaque GPU et sortie un comparatif PURE / chaînes candidates,
+  mesures MPV `gpu-next`, budget frame et marge GPU, décrochages, endurance,
+  artefacts et évaluation visuelle finale par Steve.
+- Réutiliser les sources et garde-fous du protocole
+  `docs/OPENHTPC_MAGNIFICENCE_QUALIFICATION_PROTOCOL.md` ; documenter
+  décisions positives et négatives. Ne promouvoir aucune règle GPU familiale
+  à partir d'un seul résultat, conserver le fallback PURE.
+- Garder séparées qualité d'image, navigation Blu-ray et déchiffrement ;
+  `plugin.bluray` et le Core conservent leur architecture gelée et la
+  politique KEYDB demeure inchangée.
+
+Prochaine étape : cadrage d'une expérience reproductible sur source(s) réelles,
+choix de 1 ou 2 GPU de référence et validation par Steve. Pas de preset installé
+sur un validateur par la simple inscription dans cette roadmap.
 
 ## RC qualified matrix
 

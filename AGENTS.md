@@ -61,6 +61,19 @@ OPENHTPC adapts to the correctly configured operating system.
 OPENHTPC must not repair or replace Fedora GPU drivers.
 
 
+## Quota governance — shared human resources
+
+The model/agent quota policy is `docs/OPENHTPC_AGENT_QUOTA_POLICY.md`.
+Steve reserves substantial weekly capacity for personal and other projects.
+A project mandate is not permission for unlimited tokens, API cost, quota
+exhaustion, model/provider substitution, or automated purchase.
+Prefer local tools and focused tasks; use the least costly qualified actor,
+check observable quotas, avoid guessing remaining capacity, and fail closed
+on unavailable provider entitlement. Weekly review is advisory and never
+overrides these Git, deployment, security or physical-qualification rules.
+Do not remove AGY merely because paid Gemini benefits expire; verify what
+the free Antigravity tier supports before proposing a change.
+
 ## Autopilot guidance
 
 When invoked by OPENHTPC Autopilot:
