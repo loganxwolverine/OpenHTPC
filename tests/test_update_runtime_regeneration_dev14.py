@@ -135,7 +135,7 @@ class Dev14UpdateRuntimeRegeneration(unittest.TestCase):
                          "flex/bin/flex-launcher", "flex/BUILD-METADATA.json",
                          "flex/assets/fonts/OpenSans-Regular.ttf", "flex/assets/icons/drive-empty.png",
                          "flex/assets/icons/dvd.png", "assets/branding/openhtpc-logo.png",
-                         "assets/branding/openhtpc-wallpaper.png"):
+                         "assets/branding/openhtpc-wallpaper.png", "assets/mpv/gamepad-input.conf"):
             target = payload / relative; target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(PAYLOAD / relative, target)
         for relative in ("assets/ui", "assets/benchmark", "assets/shaders"):

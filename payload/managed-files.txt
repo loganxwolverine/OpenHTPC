@@ -12,6 +12,7 @@ assets/branding/openhtpc-wallpaper.png
 assets/c3_calibration_catalog.json
 assets/magnificence_profiles.json
 assets/magnificence_gpu_knowledge.json
+assets/mpv/gamepad-input.conf
 assets/shaders/Anime4K_AutoDownscalePre_x2.glsl
 assets/shaders/Anime4K_AutoDownscalePre_x4.glsl
 assets/shaders/Anime4K_Clamp_Highlights.glsl

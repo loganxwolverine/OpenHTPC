@@ -15,10 +15,19 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <limits.h>
 #include "image.h"
 #include "util.h"
 #include "debug.h"
 #include "clock.h"
+
+/* HOME network indicator: local interface inspection only, never Internet probing. */
+#ifdef __linux__
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#endif
 #include "platform/platform.h"
 
 static void pre_launch(void);
@@ -49,6 +58,8 @@ static void execute_command(const char *command);
 static void refresh_live_optical_state(void);
 static void refresh_live_activity_state(void);
 static void draw_activity_overlay(void);
+static void refresh_home_network_indicator(void);
+static void draw_home_network_indicator(void);
 static void refresh_disc_sheet_background(void);
 static void reload_menu_section(Menu *menu);
 static void reload_media_menu_sections(void);
@@ -208,6 +219,20 @@ TextInfo title_info;
 SDL_Texture *activity_texture          = NULL;
 SDL_Rect activity_text_rect            = {0};
 bool activity_visible                  = false;
+
+/* HOME-only, passive and noninteractive network status. No Fedora mutation. */
+typedef enum {
+    HOME_NETWORK_UNKNOWN = 0,
+    HOME_NETWORK_DISCONNECTED,
+    HOME_NETWORK_CONNECTED
+} HomeNetworkStatus;
+static HomeNetworkStatus home_network_status = HOME_NETWORK_UNKNOWN;
+static char home_network_address[48] = "";
+static SDL_Texture *home_network_texture = NULL;
+static SDL_Rect home_network_text_rect = {0};
+static bool home_network_probed = false;
+static Uint32 home_network_last_probe = 0;
+#define HOME_NETWORK_POLL_MS 5000U
 int activity_level                     = 0;
 Ticks ticks;
 Geometry geo;
@@ -354,6 +379,11 @@ static void cleanup()
     SDL_WaitThread(Slideshowhread, NULL);
     SDL_WaitThread(clock_thread, NULL);
     
+    if (home_network_texture != NULL) {
+        SDL_DestroyTexture(home_network_texture);
+        home_network_texture = NULL;
+    }
+
     // Destroy renderer-owned live activity texture before the renderer.
     if (activity_texture != NULL) {
         SDL_DestroyTexture(activity_texture);
@@ -2129,6 +2159,214 @@ static void refresh_live_activity_state(void)
                    : 3;
 }
 
+/* Exclude container/tunnel interfaces when choosing the LAN display IP. */
+static bool home_is_virtual_interface(const char *name);
+
+/* Prefer the lowest-metric, eligible IPv4 default route (read-only).
+ * The route selects a local interface; it NEVER verifies Internet access.
+ * No default route is also legitimate for an isolated local network. */
+static void home_default_route_interface(char *result, size_t result_size)
+{
+    if (result == NULL || result_size == 0) return;
+    result[0] = '\0';
+#ifdef __linux__
+    FILE *stream = fopen("/proc/net/route", "r");
+    if (stream == NULL) return;
+    char line[256];
+    unsigned long best_metric = ULONG_MAX;
+    if (fgets(line, sizeof(line), stream) != NULL) {
+        while (fgets(line, sizeof(line), stream) != NULL) {
+            char interface[64] = {0};
+            unsigned long destination = 1, gateway = 0, flags = 0;
+            unsigned long refs = 0, uses = 0, metric = 0, mask = 1;
+            if (sscanf(line, "%63s %lx %lx %lx %lu %lu %lu %lx",
+                       interface, &destination, &gateway, &flags,
+                       &refs, &uses, &metric, &mask) == 8
+                && destination == 0 && mask == 0
+                && (flags & 1UL) != 0
+                && !home_is_virtual_interface(interface)
+                && (metric < best_metric
+                    || (metric == best_metric && strcmp(interface, result) < 0))) {
+                best_metric = metric;
+                snprintf(result, result_size, "%s", interface);
+            }
+        }
+    }
+    fclose(stream);
+#endif
+}
+
+static bool home_is_virtual_interface(const char *name)
+{
+    if (name == NULL) return true;
+    const char *prefixes[] = {"veth", "docker", "virbr", "br-", "cni",
+                              "podman", "tun", "tap", "wg", "tailscale"};
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        if (strncmp(name, prefixes[i], strlen(prefixes[i])) == 0) return true;
+    }
+    return false;
+}
+
+static HomeNetworkStatus home_network_probe(char *result, size_t result_size)
+{
+    if (result == NULL || result_size == 0) return HOME_NETWORK_UNKNOWN;
+    result[0] = '\0';
+#ifdef __linux__
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0) return HOME_NETWORK_UNKNOWN;
+
+    char default_interface[64] = {0};
+    home_default_route_interface(default_interface, sizeof(default_interface));
+    bool active_interface_found = false;
+    int best_score = -1;
+    char best_interface[64] = {0};
+    char best_address[48] = {0};
+
+    for (struct ifaddrs *item = interfaces; item != NULL; item = item->ifa_next) {
+        if (item->ifa_name == NULL
+            || (item->ifa_flags & IFF_LOOPBACK) != 0
+            || home_is_virtual_interface(item->ifa_name))
+            continue;
+
+        if ((item->ifa_flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING))
+            continue;
+        active_interface_found = true;
+        if (item->ifa_addr == NULL) continue;
+
+        int family = item->ifa_addr->sa_family;
+        char address[48] = {0};
+        if (family == AF_INET) {
+            const struct sockaddr_in *ipv4 = (const struct sockaddr_in *) item->ifa_addr;
+            unsigned long host_ip = ntohl(ipv4->sin_addr.s_addr);
+            if (host_ip == 0 || (host_ip >> 24) == 127
+                || (host_ip >> 16) == 0xA9FE || (host_ip >> 28) == 0xE)
+                continue;
+            if (inet_ntop(AF_INET, &ipv4->sin_addr, address, sizeof(address)) == NULL)
+                continue;
+        } else if (family == AF_INET6) {
+            const struct sockaddr_in6 *ipv6 = (const struct sockaddr_in6 *) item->ifa_addr;
+            if (IN6_IS_ADDR_LINKLOCAL(&ipv6->sin6_addr)
+                || IN6_IS_ADDR_LOOPBACK(&ipv6->sin6_addr)
+                || IN6_IS_ADDR_MULTICAST(&ipv6->sin6_addr)
+                || IN6_IS_ADDR_UNSPECIFIED(&ipv6->sin6_addr))
+                continue;
+            if (inet_ntop(AF_INET6, &ipv6->sin6_addr, address, sizeof(address)) == NULL)
+                continue;
+        } else {
+            continue;
+        }
+
+        const int is_default = (strcmp(item->ifa_name, default_interface) == 0);
+        int score = (is_default ? 100 : 0) + (family == AF_INET ? 20 : 10);
+        if (score > best_score || (score == best_score
+            && strcmp(item->ifa_name, best_interface) < 0)) {
+            best_score = score;
+            snprintf(best_interface, sizeof(best_interface), "%s", item->ifa_name);
+            snprintf(best_address, sizeof(best_address), "%s", address);
+        }
+    }
+    freeifaddrs(interfaces);
+    if (best_score >= 0) {
+        snprintf(result, result_size, "%s", best_address);
+        return HOME_NETWORK_CONNECTED;
+    }
+    return active_interface_found ? HOME_NETWORK_UNKNOWN : HOME_NETWORK_DISCONNECTED;
+#else
+    return HOME_NETWORK_UNKNOWN;
+#endif
+}
+
+static void refresh_home_network_indicator(void)
+{
+    Uint32 now = SDL_GetTicks();
+    if (home_network_probed && (Uint32) (now - home_network_last_probe) < HOME_NETWORK_POLL_MS)
+        return;
+    home_network_last_probe = now;
+    home_network_probed = true;
+
+    char next_address[sizeof(home_network_address)] = {0};
+    HomeNetworkStatus next_status = home_network_probe(next_address, sizeof(next_address));
+    if (next_status == home_network_status
+        && strcmp(next_address, home_network_address) == 0
+        && home_network_texture != NULL)
+        return;
+
+    home_network_status = next_status;
+    snprintf(home_network_address, sizeof(home_network_address), "%s", next_address);
+    const char *label = next_status == HOME_NETWORK_CONNECTED
+        ? next_address
+        : next_status == HOME_NETWORK_DISCONNECTED
+            ? "Réseau déconnecté" : "IP indisponible";
+
+    if (home_network_texture != NULL) {
+        SDL_DestroyTexture(home_network_texture);
+        home_network_texture = NULL;
+    }
+    if (title_info.font == NULL || renderer == NULL) return;
+    SDL_Color color = {238, 244, 250, 255};
+    SDL_Surface *surface = TTF_RenderUTF8_Blended(title_info.font, label, color);
+    if (surface == NULL) return;
+    home_network_texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (home_network_texture != NULL) {
+        int target_h = (geo.screen_height * 19) / 1000;
+        if (target_h < 16) target_h = 16;
+        int target_w = surface->h > 0 ? surface->w * target_h / surface->h : 0;
+        const int max_w = (geo.screen_width * 28) / 100;
+        if (target_w > max_w && max_w > 0) {
+            /* Preserve glyph proportions for long IPv6 addresses. */
+            target_h = target_h * max_w / target_w;
+            target_w = max_w;
+        }
+        home_network_text_rect = (SDL_Rect){0, 0, target_w, target_h};
+    }
+    SDL_FreeSurface(surface);
+}
+
+static void draw_home_network_indicator(void)
+{
+    if (!is_home_menu() || !home_network_probed) return;
+    int unit = geo.screen_height / 100;
+    if (unit < 8) unit = 8;
+    const int card_h = unit * 4;
+    const int icon_w = unit * 3;
+    const int text_w = home_network_texture != NULL ? home_network_text_rect.w : 0;
+    const int card_w = icon_w + text_w + unit * 3;
+    SDL_Rect card = {
+        geo.screen_width - geo.screen_margin - card_w,
+        geo.screen_height - geo.screen_margin - card_h,
+        card_w, card_h
+    };
+    /* The existing async activity notification also occupies bottom-right. */
+    if (activity_visible && activity_texture != NULL)
+        card.y = activity_text_rect.y - unit * 2 - card_h;
+
+    fill_rounded_rect(renderer, &card, unit, (SDL_Color){12, 25, 40, 170});
+    SDL_Color accent = home_network_status == HOME_NETWORK_CONNECTED
+        ? (SDL_Color){55, 185, 220, 220}
+        : home_network_status == HOME_NETWORK_DISCONNECTED
+            ? (SDL_Color){175, 105, 105, 215}
+            : (SDL_Color){168, 175, 184, 215};
+    int icon_x = card.x + unit;
+    int icon_y = card.y + (card.h - unit * 2) / 2;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 230, 242, 248, 215);
+    SDL_Rect monitor = {icon_x, icon_y, unit * 2, unit * 13 / 10};
+    SDL_RenderDrawRect(renderer, &monitor);
+    SDL_RenderDrawLine(renderer, icon_x + unit, monitor.y + monitor.h,
+                       icon_x + unit, monitor.y + monitor.h + unit / 2);
+    SDL_RenderDrawLine(renderer, icon_x + unit / 2, monitor.y + monitor.h + unit / 2,
+                       icon_x + unit * 3 / 2, monitor.y + monitor.h + unit / 2);
+    SDL_Rect dot = {icon_x + unit * 2, icon_y - unit / 3, unit, unit};
+    fill_rounded_rect(renderer, &dot, unit / 2, accent);
+
+    if (home_network_texture != NULL) {
+        SDL_Rect text = home_network_text_rect;
+        text.x = card.x + icon_w + unit * 2;
+        text.y = card.y + (card.h - text.h) / 2;
+        SDL_RenderCopy(renderer, home_network_texture, NULL, &text);
+    }
+}
+
 static void draw_activity_overlay(void)
 {
     if (!activity_visible || activity_texture == NULL)
@@ -2657,6 +2895,7 @@ static void draw_screen()
 
         // Draw non-blocking OPENHTPC activity feedback above the menu, but
         // below the screensaver. It never participates in input/navigation.
+        draw_home_network_indicator();
         draw_activity_overlay();
 
         // Draw screensaver
@@ -3405,6 +3644,8 @@ int main(int argc, char *argv[])
         // Post-event loop updates
         refresh_live_optical_state();
         refresh_live_activity_state();
+        if (!(state.application_running || state.application_launching) && is_home_menu())
+            refresh_home_network_indicator();
         if (!(state.application_running || state.application_launching)) {
             refresh_disc_sheet_background();
             refresh_current_menu_background_and_entries();

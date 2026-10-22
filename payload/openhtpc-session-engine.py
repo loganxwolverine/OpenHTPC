@@ -2673,7 +2673,7 @@ Hotkey1=#1B;:back
 Hotkey2=#08;:back
 
 [Gamepad]
-Enabled=false
+Enabled=true
 DeviceIndex=-1
 LStickX-=:left
 LStickX+=:right

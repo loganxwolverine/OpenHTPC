@@ -157,6 +157,11 @@ try:
  v=float(json.loads(sys.argv[1]).get("physical_edition",{}).get("video",{}).get("fps"))
  print(f"{v:.6f}".rstrip("0").rstrip(".")) if math.isfinite(v) and 1 <= v <= 120 else None
 except (TypeError,ValueError): pass' "$state" 2>/dev/null || true)"
+# SDL gamepad input belongs to the synchronous MPV child, never to a global daemon.
+gamepad_args=()
+if [[ -r $INSTALL/assets/mpv/gamepad-input.conf ]]; then
+    gamepad_args=(--input-gamepad=yes "--input-conf=$INSTALL/assets/mpv/gamepad-input.conf")
+fi
 refresh_runner=()
 if [[ -f $INSTALL/openhtpc-refresh-match.py ]]; then
     # Display mutations MUST finish and settle before HDMI/PipeWire bitstream is prepared.
@@ -178,7 +183,7 @@ else
             --field "attempted=$pw_attempted" --field "sink_id=$pw_sink_id"
     fi
 fi
-"${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${policy_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
+"${refresh_runner[@]}" "$mpv_bin" --no-config --include="$runtime" "${readahead_args[@]}" "${policy_args[@]}" "${gamepad_args[@]}" --log-file="$dvd_attempt" --osd-playing-msg-duration=5000 --osd-align-x=left --osd-align-y=top --osd-margin-x=48 --osd-margin-y=48 --osd-font-size=32 --osd-playing-msg="$osd_text" --fullscreen=yes --border=no --terminal=no --dvd-device="$device" -- dvd://longest 2>>"$log"
 rc=$?
 audio_observed_json="$(python3 - "$INSTALL/openhtpc-playback-policy.py" "$HOME_DIR" "$policy_json" "$dvd_attempt" "$rc" "${dispatch_id:-}" <<'PY'
 import importlib.util,json,pathlib,sys

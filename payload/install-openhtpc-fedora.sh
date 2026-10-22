@@ -380,6 +380,7 @@ fi
 [[ -x $SOURCE_DNF_TRANSACTION ]] || die "Le constructeur de transaction DNF est absent."
 [[ -r $SCRIPT_DIR/VERSION && -r $SCRIPT_DIR/plugins/README.md ]] || die "Les métadonnées produit 1.3.1 sont incomplètes."
 for name in "${PRODUCT_FILES[@]}"; do [[ -r $SCRIPT_DIR/$name ]] || die "Composant produit absent : $name"; done
+[[ -r $SCRIPT_DIR/assets/mpv/gamepad-input.conf ]] || die "Profil manette MPV absent : assets/mpv/gamepad-input.conf"
 [[ -x $SCRIPT_DIR/openhtpc-tmdb-recovery ]] || die "Le contrôleur de récupération TMDb est absent."
 log "Fedora ${VERSION_ID:-inconnue}, KDE Plasma détecté."
 stage SYSTÈME
@@ -616,6 +617,7 @@ install -m 0755 "$SCRIPT_DIR/openhtpc-eject" "$INSTALL_DIR/openhtpc-eject"
 install -m 0755 "$SOURCE_DVD_DEPENDENCIES" "$INSTALL_DIR/openhtpc-dvd-dependencies.py"
 for name in "${PRODUCT_FILES[@]}"; do install -m 0755 "$SCRIPT_DIR/$name" "$INSTALL_DIR/$name"; done
 install -m 0755 "$SCRIPT_DIR/openhtpc-tmdb-recovery" "$INSTALL_DIR/openhtpc-tmdb-recovery"
+install -Dm 0644 "$SCRIPT_DIR/assets/mpv/gamepad-input.conf" "$INSTALL_DIR/assets/mpv/gamepad-input.conf"
 install -m 0644 "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
 install -m 0644 "$SCRIPT_DIR/version.json" "$INSTALL_DIR/version.json"
 install -Dm 0644 "$SCRIPT_DIR/plugins/README.md" "$INSTALL_DIR/plugins/README.md"
