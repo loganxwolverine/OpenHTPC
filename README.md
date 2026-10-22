@@ -6,23 +6,28 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.3.2 RC2 — Patina
+# OPENHTPC 1.3.2 RC3 — Patina
 
-Version: `1.3.2-rc2`
-Build: `public-release-1.3.2-rc2`
-Status: **Release Candidate — public installation/physical qualification pending (not published)**
+Version: `1.3.2-rc3`
+Build: `public-release-1.3.2-rc3`
+Status: **Release Candidate 3 in preparation — final build and physical qualification pending; not published**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
 Flex Launcher provides the ten-foot interface and MPV provides playback. The
 Hardware Passport, capabilities, media configuration and playback history stay
 on the local machine; normal operation does not require a cloud service.
 
-OPENHTPC 1.3.2 RC2 **Patina** is a stabilization-only candidate. It carries
-forward the 1.3.1 Magnificence and media qualifications without changing image
-recipes. This candidate adds the V11 DVD optical-generation publication and
-menu-regeneration correction, plus a repaired synthetic test fixture for the
-release tooling. A complete movie was watched successfully after the optical
-fix on the .229 validator; that does not prove a clean public installation.
+OPENHTPC 1.3.2 RC3 **Patina** builds on the published RC2 prerelease. This
+candidate integrates a discreet HOME network-link/local-IP indicator, gamepad
+navigation in Flex HOME and MEDIA, and a managed native SDL2 MPV gamepad mapping
+for local films and DVD playback, including playback transport, seek, volume
+and the MPV Stats overlay/pages.
+
+It retains RC2 optical-generation refresh and HOME session protections, the
+managed installation/removal policy, and the previous Magnificence GPU recipes.
+The HOME/IP and Flex gamepad changes were physically exercised on the former
+GEEKOM validator. The final combined RC3 package is not yet qualified on a
+clean Fedora 44 KDE installation or across different gamepad models.
 
 The preceding 1.3.1 version completed its physical gates on both Radeon RX 5700 XT and
 Intel Arc A310 systems. The A310 retained its CLEAN + FSRCNNX-16 +
@@ -30,33 +35,22 @@ KrigBilateral + Vibrance Mild recipe and HDMI AC3 passthrough; the RX validator
 confirmed the exact per-PCI codec view, PAL 50 Hz switching with restoration to
 60 Hz, and safe PCM fallback on the available S/PDIF output.
 
-The qualified Dev14 baseline passed on Fedora 44 KDE Plasma/Wayland with
-Intel/ZimaBoard 2, AMD/Ryzen and NVIDIA/RTX 3050. RC2 adds only the protected
-optical stabilization required after the RC1 and RC2 physical gates closed
-NO-GO. RC4 added PipeWire HDMI HD passthrough sink preparation, RC5 added
-effective PipeWire IEC958 SPA parameter verification, and RC6 recovered MEDIA
-bitstream passthrough by sharing dynamic PipeWire IEC958 sink preparation with
-local media playback. RC7 added automatic frame-rate matching, dynamic display
-settings synchronization, and protected optical / local playback display resync
-audio stability. RC8 introduced the Media Foundation persistent database,
-normalized media probe, living-room movie matcher and resolver, cached poster
-rendering, asynchronous library/identity/TMDb operations with live activity
-feedback, and Unicode/CJK fallback rendering. OPENHTPC 1.2.0 promotes the
-RC9-qualified behavior unchanged as the stable release: an authoritative library
-summary, clearer unidentified-media review, mounted NAS/network source discovery,
-and contextual first-use guidance from source selection through first analysis.
+Historical platform and media qualification is detailed in CHANGELOG.md,
+the previous release notes and the reference-platform documentation. RC3's
+full software regression, exact-commit artifact build, clean installation,
+RC2-to-RC3 upgrade and physical validation are still pending.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.3.2-RC2.tar.gz.sha256
+sha256sum -c OpenHTPC-1.3.2-RC3.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.3.2-RC2.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.3.2-RC3.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -80,7 +74,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted OPENHTPC 1.3.2 RC2 directory:
+From the extracted OPENHTPC 1.3.2 RC3 directory:
 
 ```bash
 ./update.sh
@@ -137,6 +131,15 @@ their libaacs environment independently outside OPENHTPC. Protected optical
 `AVAILABLE` means `READY_TO_ATTEMPT`, never guaranteed decryptability or
 playback for every disc.
 
+## RC3 qualification boundaries
+
+The checksums and installation instructions above will apply to a real RC3
+artifact once built and verified; no such RC3 archive has been released yet.
+Source tests and prototype physical observations do not prove a final package
+install, support for every gamepad, DVD, or audio output. SDL2 mappings depend
+on the controller; MPV Stats pages depend on the installed MPV scripts.
+Interactive DVD menus are not included.
+
 ## Known limitations
 
 - Run `openhtpc rebuild-passport` when protected-optical dependencies are
@@ -146,7 +149,7 @@ playback for every disc.
 - Plasma Login Manager on the qualified NVIDIA system required an external
   SDDM workaround; OPENHTPC does not require that login manager.
 
-See [1.3.2 RC2 release notes](RELEASE-NOTES-OPENHTPC-1.3.2-RC2-FR-EN.md),
+See [1.3.2 RC3 release notes](RELEASE-NOTES-OPENHTPC-1.3.2-RC3-FR-EN.md),
 [preceding 1.3.1 release notes](RELEASE-NOTES-OPENHTPC-1.3.1-FR-EN.md),
 [known limitations](KNOWN_LIMITATIONS.md),
 [third-party notices](THIRD_PARTY_NOTICES.md) and

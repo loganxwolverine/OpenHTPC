@@ -1,11 +1,28 @@
 # Changelog
 
-# OPENHTPC 1.3.2 Release Candidate 2 — Patina (candidate, not published)
+# OPENHTPC 1.3.2 Release Candidate 3 — Patina (IN PREPARATION; NOT PUBLISHED)
+
+- Integrates a HOME network-link indicator and local IP address, without
+  claiming that link state proves public Internet connectivity.
+- Enables gamepad navigation in Flex HOME/MEDIA and a managed SDL2 MPV
+  controller mapping for local MEDIA and DVD playback, including Stats/pages.
+- Retains RC2 optical/menu publication safeguards and exact HOME session
+  ownership, prior GPU image recipes and managed-file install/remove rules.
+- On 2026-10-22: 240 targeted pre-commit tests PASS, in addition to earlier
+  partially overlapping 321 targeted PASS (not 561 unique tests).
+- Previous GEEKOM HOME/IP and Flex gamepad tests are evidence for that
+  prototype only, NOT the final RC3 archive or all controller models.
+- Full regression, exact-commit release build, clean install, RC2-to-RC3
+  upgrade and physical validation remain PENDING. This RC3 is NOT PUBLISHED.
+- Deferred: interactive DVD menus, new MEDIA grid, playback resume,
+  optional autologin and HD/Blu-ray Magnificence research.
+
+# OPENHTPC 1.3.2 Release Candidate 2 — Patina (published prerelease 2026-10-18)
 
 - Same physically validated DVD playback code as RC1.
 - Fixes incomplete 1.3.x removal using a validated managed-file manifest.
 - Preserves unknown user files and checks unsafe paths before deleting anything.
-- Not yet released or physically qualified as RC2.
+- Published as a GitHub prerelease on 2026-10-18 after Fedora KDE/Wayland clean-install, upgrade and real-DVD qualification on the GEEKOM IT13 Max.
 
 # OPENHTPC 1.3.2 Release Candidate 1 — Patina (candidate, not published)
 
