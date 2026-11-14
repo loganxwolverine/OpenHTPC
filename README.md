@@ -6,51 +6,50 @@ Part of the OPENHTPC project.
 Original project by Steve Dehanne.
 -->
 
-# OPENHTPC 1.3.2 RC3 — Patina
+# OPENHTPC 1.3.2 RC4 — Patina
 
-Version: `1.3.2-rc3`
-Build: `public-release-1.3.2-rc3`
-Status: **Release Candidate 3 in preparation — final build and physical qualification pending; not published**
+Version: `1.3.2-rc4`
+Build: `public-release-1.3.2-rc4` (frozen Flex binary provenance retained)
+Status: **Release Candidate 4 — public prerelease**
 
 OPENHTPC is a local-first couch interface for a Fedora KDE home-theater PC.
-Flex Launcher provides the ten-foot interface and MPV provides playback. The
-Hardware Passport, capabilities, media configuration and playback history stay
-on the local machine; normal operation does not require a cloud service.
+Flex Launcher provides the ten-foot interface and MPV provides playback.
+The Hardware Passport, capabilities, media configuration and playback
+history stay on the local machine.
 
-OPENHTPC 1.3.2 RC3 **Patina** builds on the published RC2 prerelease. This
-candidate integrates a discreet HOME network-link/local-IP indicator, gamepad
-navigation in Flex HOME and MEDIA, and a managed native SDL2 MPV gamepad mapping
-for local films and DVD playback, including playback transport, seek, volume
-and the MPV Stats overlay/pages.
+RC4 adds the alphabetical MEDIA poster wall with controller repeat timing
+420 ms / 120 ms, enriched UX-F1 movie cards (including credits only when
+provider data is available), and native playback Resume / Start over / Back.
+Magnificence SD now supports aspect-preserving crop-to-fill for local PAL
+4:3 films; 16:9/HD/UHD films retain their existing geometry. No separate
+Recently Added or resolution-based filter view is included in RC4.
 
-It retains RC2 optical-generation refresh and HOME session protections, the
-managed installation/removal policy, and the previous Magnificence GPU recipes.
-The HOME/IP and Flex gamepad changes were physically exercised on the former
-GEEKOM validator. The final combined RC3 package is not yet qualified on a
-clean Fedora 44 KDE installation or across different gamepad models.
+The 14 November 2026 Fedora 44 KDE salon A310 qualification confirmed
+the poster wall, two low-resolution films with Magnificence crop-to-fill,
+playback resume and a live TMDB credits refresh. The user also confirmed
+the resulting visual presentation. This does not certify every GPU,
+controller, disc format or HDR output, and the review screenshots were
+generated with SDL offscreen, not a physical controller test.
 
-The preceding 1.3.1 version completed its physical gates on both Radeon RX 5700 XT and
-Intel Arc A310 systems. The A310 retained its CLEAN + FSRCNNX-16 +
-KrigBilateral + Vibrance Mild recipe and HDMI AC3 passthrough; the RX validator
-confirmed the exact per-PCI codec view, PAL 50 Hz switching with restoration to
-60 Hz, and safe PCM fallback on the available S/PDIF output.
-
-Historical platform and media qualification is detailed in CHANGELOG.md,
-the previous release notes and the reference-platform documentation. RC3's
-full software regression, exact-commit artifact build, clean installation,
-RC2-to-RC3 upgrade and physical validation are still pending.
+**Release Candidate 4 is published as a GitHub prerelease tagged
+`v1.3.2-rc4`. The optional demonstration screenshots are published
+as separately labeled release assets, not embedded in the source archive.**
+Review screenshots with third-party posters are published as separate
+illustrative release assets at the owner's request, not in the source archive.
+See `RELEASE-NOTES-OPENHTPC-1.3.2-RC4-FR-EN.md` and
+`RC4-QUALIFICATION-EVIDENCE.md` for accurate scope and known limitations.
 
 ## Verify the download
 
 Keep the archive and checksum sidecar together, then run from their directory:
 
 ```bash
-sha256sum -c OpenHTPC-1.3.2-RC3.tar.gz.sha256
+sha256sum -c OpenHTPC-1.3.2-RC4.tar.gz.sha256
 ```
 
 ## Install
 
-Extract `OpenHTPC-1.3.2-RC3.tar.gz`, enter the extracted directory and inspect
+Extract `OpenHTPC-1.3.2-RC4.tar.gz`, enter the extracted directory and inspect
 the installation first:
 
 ```bash
@@ -74,7 +73,7 @@ the Hardware Passport.
 
 ## Update
 
-From the extracted OPENHTPC 1.3.2 RC3 directory:
+From the extracted OPENHTPC 1.3.2 RC4 directory:
 
 ```bash
 ./update.sh
@@ -92,6 +91,10 @@ final Flex configuration. The command prints a JSON summary and returns a
 nonzero status if any source or item failed or Flex publication was incomplete.
 Unchanged files and previously matched identities keep their existing
 incremental behavior.
+Already existing metadata snapshots are not automatically re-fetched:
+perform a specifically authorized, bounded TMDB presentation refresh for
+missing credits. An ordinary library scan alone will not enrich existing
+credits-free snapshots. No API key is bundled with the distribution.
 
 ## Public commands
 

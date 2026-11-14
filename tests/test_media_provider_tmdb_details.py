@@ -8,7 +8,7 @@
 Verifies:
 - 100% offline execution with zero real network access, zero access to real secrets.
 - Strict positive integer TMDb ID validation (zero network calls on invalid ID).
-- Single HTTP GET request to /3/movie/{id}?language={locale}.
+- Single HTTP GET request to /3/movie/{id} with append_to_response=credits.
 - Zero automatic retries.
 - Headers: Accept: application/json, User-Agent: OpenHTPC/1.2.0, Bearer token (v4) / api_key (v3).
 - Strict secret redaction in error reporting.
@@ -147,7 +147,7 @@ def test_get_movie_details_success_v4_bearer(sandbox):
     assert res.status == tmdb_provider.STATUS_OK
     assert res.movie is not None
     assert len(requested_urls) == 1
-    assert requested_urls[0] == "https://api.themoviedb.org/3/movie/129?language=fr-FR"
+    assert requested_urls[0] == "https://api.themoviedb.org/3/movie/129?language=fr-FR&append_to_response=credits"
 
     movie = res.movie
     assert movie.external_id == "129"
@@ -186,6 +186,7 @@ def test_get_movie_details_success_v3_api_key(sandbox):
     assert parsed.path == "/3/movie/129"
     q = urllib.parse.parse_qs(parsed.query)
     assert q["language"] == ["ja-JP"]
+    assert q["append_to_response"] == ["credits"]
     assert q["api_key"] == ["abcdef0123456789abcdef0123456789"]
 
 
@@ -340,7 +341,7 @@ def test_privacy_boundary(sandbox):
     req = captured_reqs[0]
     parsed = urllib.parse.urlparse(req.full_url)
     assert parsed.path == "/3/movie/129"
-    assert urllib.parse.parse_qs(parsed.query) == {"language": ["fr-FR"]}
+    assert urllib.parse.parse_qs(parsed.query) == {"language": ["fr-FR"], "append_to_response": ["credits"]}
     assert "home" not in req.full_url
     assert "openhtpc" not in req.full_url.lower()
 
@@ -457,3 +458,37 @@ def test_response_id_binding_malformed_id(sandbox):
         assert res.error_code == tmdb_provider.STATUS_INVALID_RESPONSE
         assert res.movie is None
         assert call_count == 1
+
+
+def test_get_movie_details_credits_in_single_call_feed_real_card(sandbox):
+    """One mocked TMDb details response must feed both director and cast in UX-F1."""
+    incoming = dict(SPIRITED_AWAY_PAYLOAD)
+    incoming["vote_average"] = 8.5
+    incoming["vote_count"] = 1234
+    incoming["credits"] = {
+        "crew": [{"job": "Director", "name": "Réalisateur de test"}],
+        "cast": [{"name": "Actrice de test", "order": 0}],
+    }
+    calls = []
+
+    def fake_opener(req, timeout=8):
+        calls.append(req.full_url)
+        return MockHTTPResponse(json.dumps(incoming, ensure_ascii=False))
+
+    result = tmdb_provider.get_movie_details(
+        129, language="fr-FR", home=sandbox["home"], opener=fake_opener
+    )
+    assert result.status == tmdb_provider.STATUS_OK
+    assert len(calls) == 1
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(calls[0]).query)
+    assert q["append_to_response"] == ["credits"]
+    assert result.movie.raw_payload["credits"] == incoming["credits"]
+
+    card_path = PAYLOAD / "openhtpc-media-card-v1.py"
+    spec = importlib.util.spec_from_file_location("card_from_real_candidate", card_path)
+    card = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(card)
+    facts = card.all_facts({"payload_json": json.dumps(result.movie.raw_payload, ensure_ascii=False)},
+                           {"width": 1920, "height": 1080})
+    assert any("RÉALISATION" in s and "Réalisateur de test" in s for s in facts)
+    assert any("CASTING" in s and "Actrice de test" in s for s in facts)

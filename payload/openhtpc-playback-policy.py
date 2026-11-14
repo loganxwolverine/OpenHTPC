@@ -1571,6 +1571,11 @@ def play_mpv(home, command, *, media=None, runner=subprocess.run, refresh_dispat
                 prepare_audio_target_bitstream(decision, runner=runner)
             except Exception:
                 pass
+        # Resume telemetry is understood by the optional refresh helper,
+        # NOT by subprocess.run. If that helper cannot load, continue normal
+        # MPV playback without IPC/resume rather than raising TypeError and
+        # rendering every MEDIA action unusable.
+        kwargs.pop("resume_context", None)
         return runner(command, **kwargs)
     return helper.run_playback(home, command, media=media, runner=runner, dispatch_id=refresh_dispatch_id, decision=decision, audio_prep=audio_prep, **kwargs)
 
@@ -1830,6 +1835,15 @@ def resolve(home: pathlib.Path, media: pathlib.Path | None = None, kind: str = "
         if magnificence_choice.get("shader_files"):
             shader_value = ":".join(magnificence_choice["shader_files"])
             magnificence_args.append(f"--glsl-shaders={shader_value}")
+    # Movie files near PAL-DVD resolution in 4:3 may be pillarboxed by mpv:
+    # fullscreen sets the window size, not the image fill.  Preserve the
+    # source's proportions and crop top/bottom only under Magnificence SD.
+    # Never change PURE, HD/UHD or physical disc-menu playback geometry.
+    if magnificence_choice is not None and kind == "local" and _magnificence_source_scope(kind, probe) == "DVD_PAL_FILM":
+        streams = probe.get("streams", []) if isinstance(probe, dict) else []
+        video = next((s for s in streams if isinstance(s, dict) and s.get("codec_type") == "video"), {})
+        if str(video.get("display_aspect_ratio", "")).strip() == "4:3":
+            magnificence_args.append("--panscan=1.0")
     mpv_args = [
         *mpv_gpu_args,
         *mpv_decode_args,

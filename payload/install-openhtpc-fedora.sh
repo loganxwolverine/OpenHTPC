@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly OPENHTPC_VERSION="1.3.2-rc3"
+readonly OPENHTPC_VERSION="1.3.2-rc4"
 
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ readonly SOURCE_OPTICAL="${SCRIPT_DIR}/openhtpc-optical.py"
 readonly SOURCE_DVD_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-dvd-dependencies.py"
 readonly SOURCE_FEDORA_DEPENDENCIES="${SCRIPT_DIR}/openhtpc-fedora-dependencies.py"
 readonly SOURCE_DNF_TRANSACTION="${SCRIPT_DIR}/openhtpc-dnf-transaction.py"
-readonly PRODUCT_FILES=(openhtpc openhtpc-media-update-request openhtpc-media-update-control.py openhtpc-media-action-request openhtpc-media-action-control.py openhtpc-media-activity.py openhtpc-media-search-control.py openhtpc-media-artwork.py openhtpc-media-db.py openhtpc-media-enrich.py openhtpc-media-probe.py openhtpc-media-ingest.py openhtpc-media-scan.py openhtpc-media-library-update openhtpc-media-match.py openhtpc-media-match-ui openhtpc-media-manual-search-ui openhtpc-text-entry.py openhtpc-media-provider-tmdb.py openhtpc-media-presentation.py openhtpc-media-types.py openhtpc-validator openhtpc-core.py openhtpc-plugin-registry.py openhtpc-plugin-contracts.py openhtpc-capabilities.py openhtpc-protected-optical.py openhtpc-protected-optical-backend.py openhtpc-play-optical openhtpc-gpu-policy.py openhtpc-gpu-runtime.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-refresh-match.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-audio.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-runtime-generator.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files)
+readonly PRODUCT_FILES=(openhtpc-beta-wall.py openhtpc-media-card-v1.py resume_media_lab.py resume_mpv_bridge_lab.py openhtpc openhtpc-media-update-request openhtpc-media-update-control.py openhtpc-media-action-request openhtpc-media-action-control.py openhtpc-media-activity.py openhtpc-media-search-control.py openhtpc-media-artwork.py openhtpc-media-db.py openhtpc-media-enrich.py openhtpc-media-probe.py openhtpc-media-ingest.py openhtpc-media-scan.py openhtpc-media-library-update openhtpc-media-match.py openhtpc-media-match-ui openhtpc-media-manual-search-ui openhtpc-text-entry.py openhtpc-media-provider-tmdb.py openhtpc-media-presentation.py openhtpc-media-types.py openhtpc-validator openhtpc-core.py openhtpc-plugin-registry.py openhtpc-plugin-contracts.py openhtpc-capabilities.py openhtpc-protected-optical.py openhtpc-protected-optical-backend.py openhtpc-play-optical openhtpc-gpu-policy.py openhtpc-gpu-runtime.py openhtpc-readahead.py openhtpc-benchmark.py openhtpc-recipes.py openhtpc-visual-review.py openhtpc-calibrate.py openhtpc-calibrate-ui openhtpc-cinema-auto.py openhtpc-video-profile.py openhtpc-playback-policy.py openhtpc-refresh-match.py openhtpc-playback-setting openhtpc-eject-current openhtpc-power-menu openhtpc-tmdb.py openhtpc-tmdb-management.py openhtpc-fedora-dependencies.py openhtpc-dnf-transaction.py openhtpc-system-page openhtpc-system-model.py openhtpc-audio.py openhtpc-system-action openhtpc-system-view openhtpc-ui.py openhtpc-disc-sheet.py openhtpc-disc-view.py openhtpc-configure-tmdb openhtpc-appliance-mode openhtpc-kde-device-popup openhtpc-desktop-restore.py openhtpc-support-bundle.py openhtpc-quit openhtpc-home.py openhtpc-installer-ui.py openhtpc-theme.py openhtpc-runtime.py openhtpc-runtime-generator.py openhtpc-bind-disc openhtpc-media-sources openhtpc-media-picker openhtpc-media-remove openhtpc-media-sources-action openhtpc-update-managed-files openhtpc-preflight-payload.py)
 
 
 readonly SOURCE_FLEX="${SCRIPT_DIR}/flex"
@@ -382,6 +382,9 @@ fi
 for name in "${PRODUCT_FILES[@]}"; do [[ -r $SCRIPT_DIR/$name ]] || die "Composant produit absent : $name"; done
 [[ -r $SCRIPT_DIR/assets/mpv/gamepad-input.conf ]] || die "Profil manette MPV absent : assets/mpv/gamepad-input.conf"
 [[ -x $SCRIPT_DIR/openhtpc-tmdb-recovery ]] || die "Le contrôleur de récupération TMDb est absent."
+python3 "$SCRIPT_DIR/openhtpc-preflight-payload.py" --payload "$SCRIPT_DIR" ||
+    die "Contrôle du paquet échoué, installation refusée."
+
 log "Fedora ${VERSION_ID:-inconnue}, KDE Plasma détecté."
 stage SYSTÈME
 preflight_updates
@@ -747,9 +750,8 @@ fi
 if ! $capabilities_refreshed && ! OPENHTPC_HOME="$HOME" OPENHTPC_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/openhtpc-capabilities.py" --refresh >/dev/null; then
     log "Le snapshot de capacités n'a pas pu être généré; il pourra être relancé avec openhtpc capabilities --refresh."
 fi
-# Safely remove only specific legacy transitional non-disc cache if present
-rm -f -- "${HOME}/.local/share/openhtpc/media-cache/dvd/80ebf0f74dc6d50b350636314e91eb3b734527de8d2d69c0674c33e2c492232a/metadata.json" 2>/dev/null || true
-rmdir -- "${HOME}/.local/share/openhtpc/media-cache/dvd/80ebf0f74dc6d50b350636314e91eb3b734527de8d2d69c0674c33e2c492232a" 2>/dev/null || true
+# Preserve all DVD media-cache metadata on install and upgrade.
+# Cache maintenance belongs to a separately authorized migration.
 
 log "Installation prête. OPENHTPC démarrera à la prochaine ouverture de session."
 log "Diagnostic : openhtpc doctor"

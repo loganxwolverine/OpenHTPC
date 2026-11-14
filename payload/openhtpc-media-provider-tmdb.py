@@ -533,7 +533,8 @@ def get_movie_details(
 ) -> MovieDetailsResult:
     """Fetch movie details from TMDb by ID.
 
-    Performs exactly ONE HTTP GET request to /3/movie/{tmdb_id}?language={language}.
+    Performs exactly ONE HTTP GET request to /3/movie/{tmdb_id} with
+    append_to_response=credits. No second HTTP request for cast/director.
     Zero retries. Secret redaction applied to diagnostics.
     """
     valid_id = validate_tmdb_id(tmdb_id)
@@ -556,7 +557,9 @@ def get_movie_details(
 
     is_v4 = token.startswith("ey")
     req_lang = (language or DEFAULT_LANGUAGE).strip() or DEFAULT_LANGUAGE
-    params = [("language", req_lang)]
+    # Fetch cast and crew in the SAME details request (no extra API call).
+    # MovieDetails.raw_payload is stored atomically by presentation refresh.
+    params = [("language", req_lang), ("append_to_response", "credits")]
     if not is_v4:
         params.append(("api_key", token))
 

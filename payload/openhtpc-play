@@ -234,12 +234,38 @@ def flex_instances(install:pathlib.Path)->tuple[int,list[int]]:
     return len(pids),pids
 
 
+def _resume_probe(home: pathlib.Path, token: str) -> int:
+    """Read-only, single-token action probe. 0=offer, 1=first-play, 2=invalid."""
+    try:
+        action = load_media_action(home, token)
+        if action.get("item_type") != "file":
+            return 2
+        media, _root = resolve_media_request(
+            home, action["source_id"], action["relative_path"], action["page_id"]
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return 2
+    try:
+        import resume_media_lab
+        return 0 if resume_media_lab.offer(home,media) is not None else 1
+    except (OSError, ImportError, ValueError, AttributeError):
+        # Missing optional helper must never disable first-play MEDIA.
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     home = pathlib.Path(os.environ.get("OPENHTPC_HOME", pathlib.Path.home()))
+    if len(argv) == 2 and argv[0] == "--resume-probe":
+        return _resume_probe(home,argv[1])
+    explicit_resume_choice = None
+    if len(argv) == 3 and argv[0] == "--resume-choice" and argv[1] in ("resume","restart"):
+        explicit_resume_choice = argv[1]
+        argv = [argv[2]]
     install = pathlib.Path(os.environ.get("OPENHTPC_INSTALL_DIR", home / ".local/lib/openhtpc"))
     log = home / ".local/state/openhtpc/playback.log"
     expected_source = generation = relative_arg = item_id = item_type = None
+    resume_action = None
     activated=False
     if len(argv)==1 and not argv[0].startswith("mact_"):media_arg=argv[0]
     else:
@@ -257,13 +283,20 @@ def main(argv: list[str] | None = None) -> int:
         try:
             trusted=load_media_action(home,token)
             expected_source=trusted["source_id"];generation=trusted["page_id"];relative_arg=trusted["relative_path"];item_id=trusted["semantic_id"];item_type=trusted["item_type"];media_arg=relative_arg
+            # V5 never mints resume submenu tokens; Core keeps one
+            # immutable action token for every movie detail.
+            resume_action = None
             update_action_state(home,model_generation=generation,source_id=expected_source,item_id=item_id,item_type=item_type,current_page=generation,action_token_valid=True,generation_valid=True,item_identity_valid=True,source_identity_valid=True,manifest_present=True,page_id_match=True,token_found=True,error_class="NONE")
             runtime_event(home,install,"MEDIA_ITEM_ACTIVATED",item_type=item_type,model_generation=generation,semantic_id=item_id,token_present=True,manifest_present=True,page_id_match=True,token_found=True,source_identity_valid=True)
             runtime_event(home,install,"ACTION_TOKEN_RESOLVED",item_type=item_type,page_id=generation)
         except ValueError as exc:
             reason=str(exc);token_valid=bool(re.fullmatch(r"mact_[0-9a-f]{32}",token or ""));manifest_present=(home/".local/state/openhtpc/media-actions/current.json").is_file();token_found=reason not in {"INVALID_ACTION_TOKEN","TOKEN_NOT_FOUND","ACTION_MANIFEST_MISSING","ACTION_MANIFEST_INVALID"};update_action_state(home,action_token_valid=token_valid,manifest_present=manifest_present,token_found=token_found,page_id_match=False,error_class=reason)
             runtime_event(home,install,"MEDIA_ACTION_REJECTED",reason=reason,token_present=bool(token),manifest_present=manifest_present,page_id_match=False,token_found=token_found,action_token_valid=token_valid)
-            notify("Cette sélection média a expiré. Revenez à MEDIA puis réessayez." if reason=="STALE_PAGE" else "Sélection du média invalide.")
+            if token_valid and manifest_present and reason in {"STALE_PAGE","TOKEN_NOT_FOUND"}:
+                runtime_event(home,install,"MEDIA_STALE_GENERATION_IGNORED_NONMODAL",
+                              reason=reason)
+                return 0
+            notify("Sélection du média invalide.")
             return 0
         if item_type!="file":
             update_action_state(home,error_class="ACTION_TYPE_INVALID")
@@ -305,6 +338,37 @@ def main(argv: list[str] | None = None) -> int:
         notify("Le fichier média est indisponible ou n'appartient plus à une source configurée.")
         return return_to_ui(home, install)
 
+    # P0 V5: modal is rendered inside retained Flex BEFORE this dispatcher.
+    # An action checkpoint does NOT regenerate MEDIA tokens or the global graph.
+    # The dispatcher still enforces the same trusted token/page/source gates.
+    try:
+        import resume_media_lab
+        existing_offer = resume_media_lab.offer(home,media)
+    except (OSError, ImportError, ValueError, AttributeError):
+        resume_media_lab = None
+        existing_offer = None
+        runtime_event(home,install,"MEDIA_RESUME_HELPER_UNAVAILABLE")
+    resume_start_arg = "--start=0"
+    if explicit_resume_choice is not None:
+        if not activated or existing_offer is None or resume_media_lab is None:
+            runtime_event(home,install,"MEDIA_RESUME_MODAL_CHOICE_STALE_REFUSED")
+            update_action_state(home,error_class="RESUME_MODAL_CHOICE_STALE")
+            return return_to_ui(home,install)
+        try:
+            resume_start_arg=resume_media_lab.start_arg(
+                existing_offer,
+                "Reprise de lecture" if explicit_resume_choice=="resume"
+                else "Lire depuis le début",
+            )
+        except ValueError:
+            runtime_event(home,install,"MEDIA_RESUME_MODAL_CHOICE_INVALID")
+            return return_to_ui(home,install)
+    elif activated and existing_offer is not None:
+        # Fail closed if a previously paused movie is invoked by bypassing
+        # the popup. Never silently restart and wipe an in-progress choice.
+        runtime_event(home,install,"MEDIA_RESUME_MODAL_REQUIRED")
+        return return_to_ui(home,install)
+
     playback_lock_path = home / ".local/state/openhtpc/playback-active.lock"
     playback_lock_path.parent.mkdir(parents=True, exist_ok=True)
     playback_lock = playback_lock_path.open("a+")
@@ -331,6 +395,10 @@ def main(argv: list[str] | None = None) -> int:
     attempt = tempfile.NamedTemporaryFile(prefix="openhtpc-mpv-", delete=False)
     attempt_path = pathlib.Path(attempt.name); attempt.close()
     command = [mpv, "--no-config", f"--include={runtime}", "--fullscreen=yes", "--border=no", "--terminal=no", *policy_args, "--osd-playing-msg-duration=5000", "--osd-align-x=left", "--osd-align-y=top", "--osd-margin-x=48", "--osd-margin-y=48", "--osd-font-size=32", f"--osd-playing-msg={osd}", f"--log-file={attempt_path}", "--", str(media)]
+    command[command.index("--"):command.index("--")] = [
+        "--resume-playback=no","--save-position-on-quit=no",
+        resume_start_arg,
+    ]
     # Only OPENHTPC-owned MPV sessions load the managed gamepad mapping.
     gamepad_mapping = install / "assets/mpv/gamepad-input.conf"
     if gamepad_mapping.is_file():
@@ -386,7 +454,20 @@ def main(argv: list[str] | None = None) -> int:
         return diag
     started = time.monotonic()
     try:
-        result = policy.play_mpv(home, command, media=media, refresh_dispatch_id=dispatch_id, decision=decision, audio_prep=audio_prep, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, env=os.environ.copy())
+        result = policy.play_mpv(
+            home, command, media=media, refresh_dispatch_id=dispatch_id,
+            decision=decision, audio_prep=audio_prep,
+            resume_context=({
+                "home":home,
+                "media":media,
+                "previous":existing_offer,
+                "choice":(
+                    "Reprise de lecture" if explicit_resume_choice=="resume"
+                    else "Lire depuis le début"
+                ),
+            } if resume_media_lab is not None else None),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False, env=os.environ.copy())
         rc = result.returncode
     except OSError:
         rc = 127

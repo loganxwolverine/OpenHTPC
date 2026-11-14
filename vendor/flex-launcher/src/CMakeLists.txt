@@ -12,6 +12,8 @@ set(SOURCES
   debug.h
   clock.c
   clock.h
+  media_wall.c
+  media_wall.h
 )
 if (UNIX)
   add_executable(${EXECUTABLE_TITLE} ${SOURCES})

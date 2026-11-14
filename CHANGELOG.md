@@ -1,5 +1,28 @@
 # Changelog
 
+# OPENHTPC 1.3.2 Release Candidate 4 — Patina (prerelease, 2026-11-14)
+
+- UX-M1/M2: alphabetic poster-wall navigation, poster-focused gamepad interaction
+  and 420 ms initial / 120 ms repeated directional input timing.
+- UX-F1: film cards showing genres, TMDB rating, synopsis, known video/HDR
+  metadata and credits when provided by an authorized TMDB refresh.
+- P0 V5.2: restored Resume / Start over / Back choice, position recording
+  and MPV lifecycle tracking after a regression in isolated packaging.
+- Magnificence: PAL 4:3 local SD movie crop-to-fill on widescreen TVs
+  while preserving aspect ratio; no change to 16:9, HD/UHD or disc menus.
+- TMDB provider fetches credits in the existing movie-details request using
+  append_to_response=credits; no automatic refresh of old snapshots.
+- Qualification on Fedora 44 KDE salon A310 on 14 Nov: poster wall accepted
+  visually, two low-resolution movies and resume accepted by operator;
+  119 TMDB metadata records refreshed with 0 failed requests; 214/214
+  managed source components matched the isolated candidate.
+- Deliberately excluded: separate Recently Added/resolution-filter side
+  views, interactive DVD/Blu-ray menus, unqualified source-entry form gamepad
+  fix, comprehensive HDR/DV cross-platform certification.
+- Public RC4 prerelease: tagged source and SHA256-verified release archive;
+  screenshots included separately as illustrative QA captures.
+
+
 # OPENHTPC 1.3.2 Release Candidate 3 — Patina (IN PREPARATION; NOT PUBLISHED)
 
 - Integrates a HOME network-link indicator and local IP address, without

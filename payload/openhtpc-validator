@@ -184,9 +184,13 @@ def capture(reason="MANUAL"):
  with tarfile.open(archive,"w:gz") as output: output.add(work,arcname=work.name)
  checksum=archive.with_suffix(archive.suffix+".sha256");checksum.write_text(f"{sha256(archive)}  {archive.name}\n",encoding="utf-8")
  upload="DIAGNOSTIC_UPLOAD_BLOCKED"
- if os.environ.get("OPENHTPC_VALIDATOR_DISABLE_UPLOAD")!="1" and shutil.which("smbclient"):
+ # Public RC4 safety: diagnostic archives may include system logs and must
+ # stay local unless the operator deliberately configures their destination.
+ share=os.environ.get("OPENHTPC_VALIDATOR_UPLOAD_SHARE","").strip()
+ opt_in=os.environ.get("OPENHTPC_VALIDATOR_UPLOAD_OPT_IN","")=="1"
+ if opt_in and os.environ.get("OPENHTPC_VALIDATOR_DISABLE_UPLOAD")!="1" and share.startswith("//") and shutil.which("smbclient"):
   remote=f"put {archive} {archive.name}; put {checksum} {checksum.name}"
-  result=run(["smbclient","//192.168.1.10/Tools","-N","-c",f"cd openhtpc; mkdir validator-logs; cd validator-logs; {remote}"],120)
+  result=run(["smbclient",share,"-N","-c",f"cd openhtpc; mkdir validator-logs; cd validator-logs; {remote}"],120)
   if result.returncode==0: upload="DIAGNOSTIC_UPLOAD PASS"
  print(f"VALIDATOR_CAPTURE PASS\narchive={archive}\nsha256={sha256(archive)}\n{upload}")
  return archive

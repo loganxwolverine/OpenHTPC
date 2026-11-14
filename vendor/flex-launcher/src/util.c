@@ -443,6 +443,8 @@ int config_handler(void *user, const char *section, const char *name, const char
         if (MATCH(name, "Layout")) {
             if (MATCH(value, "MovieDetail")) {
                 menu->layout = LAYOUT_MOVIE_DETAIL;
+            } else if (MATCH(value, "MediaWall")) {
+                menu->layout = LAYOUT_MEDIA_WALL;
             } else {
                 menu->layout = LAYOUT_DEFAULT;
             }
@@ -471,6 +473,18 @@ int config_handler(void *user, const char *section, const char *name, const char
         if (MATCH(name, "Metadata")) {
             free(menu->detail_metadata);
             menu->detail_metadata = strdup(value);
+            return 0;
+        }
+        if (strlen(name) == 5 && !strncmp(name, "Fact", 4) &&
+            name[4] >= '1' && name[4] <= '5') {
+            int fact = name[4] - '1';
+            free(menu->detail_facts[fact]);
+            menu->detail_facts[fact] = strdup(value);
+            return 0;
+        }
+        if (MATCH(name, "Fact6")) {
+            free(menu->detail_source_colorimetry);
+            menu->detail_source_colorimetry = strdup(value);
             return 0;
         }
 
@@ -1130,7 +1144,7 @@ Menu *get_menu(const char *menu_name)
 // A function to allocate memory to and initialize a menu struct
 Menu *create_menu(const char *menu_name, size_t *num_menus)
 {
-    Menu *menu = malloc(sizeof(Menu));
+    Menu *menu = calloc(1, sizeof(Menu));
     *menu = (Menu) {
         .first_entry = NULL,
         .next = NULL,
@@ -1150,12 +1164,19 @@ Menu *create_menu(const char *menu_name, size_t *num_menus)
         .detail_original_title = NULL,
         .detail_original_title_texture = NULL,
         .detail_metadata = NULL,
+        .detail_source_colorimetry = NULL,
         .detail_metadata_texture = NULL,
         .detail_synopsis = NULL,
-        .detail_synopsis_texture = NULL
+        .detail_synopsis_texture = NULL,
+        .media_wall_entries = NULL,
+        .media_wall_initialized = false
     };
     for (int i = 0; i < 32; i++)
         menu->synopsis_chunks[i] = NULL;
+    for (int i = 0; i < 5; i++)
+        menu->detail_facts[i] = NULL;
+    for (int i = 0; i < 6; i++)
+        menu->detail_fact_textures[i] = NULL;
     menu->name = strdup(menu_name);
     (*num_menus)++;
     
@@ -1199,6 +1220,18 @@ void free_menu_detail(Menu *menu)
     menu->detail_original_title = NULL;
     free(menu->detail_metadata);
     menu->detail_metadata = NULL;
+    free(menu->detail_source_colorimetry);
+    menu->detail_source_colorimetry = NULL;
+    for (int i = 0; i < 5; i++) {
+        free(menu->detail_facts[i]);
+        menu->detail_facts[i] = NULL;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (menu->detail_fact_textures[i] != NULL) {
+            SDL_DestroyTexture(menu->detail_fact_textures[i]);
+            menu->detail_fact_textures[i] = NULL;
+        }
+    }
     free(menu->detail_synopsis);
     menu->detail_synopsis = NULL;
 }

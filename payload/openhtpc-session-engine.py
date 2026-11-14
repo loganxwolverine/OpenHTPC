@@ -1346,6 +1346,28 @@ def _format_media_technical(info: dict[str, Any] | None) -> str:
     return " · ".join(parts)
 
 
+_movie_card_module = None
+_movie_card_checked = False
+
+def _load_movie_card():
+    """One bounded optional helper; absence must not break V5 MEDIA."""
+    global _movie_card_module, _movie_card_checked
+    if _movie_card_checked:
+        return _movie_card_module
+    _movie_card_checked = True
+    target = pathlib.Path(__file__).resolve().with_name("openhtpc-media-card-v1.py")
+    try:
+        loader = importlib.machinery.SourceFileLoader("oht_movie_card_v1", str(target))
+        spec = importlib.util.spec_from_loader("oht_movie_card_v1", loader)
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _movie_card_module = module
+    except (OSError, ImportError, ValueError, SyntaxError, AttributeError):
+        _movie_card_module = None
+    return _movie_card_module
+
+
 def _build_movie_detail_section(
     section_id: str,
     token: str,
@@ -1366,7 +1388,7 @@ def _build_movie_detail_section(
     ]
     if background_image is not None:
         lines.append(f"BackgroundImage={background_image}")
-    play_cmd = f":tracked $HOME/.local/lib/openhtpc/openhtpc-play {token}"
+    play_cmd = f":mediaresumepopup {token}"
 
     # Determine presentation validity
     is_unmatched = (ident is None) or (ident.get("work_id") is None) or (ident.get("identification_state") == "UNMATCHED")
@@ -1413,7 +1435,20 @@ def _build_movie_detail_section(
             disp_orig = disp_orig[:-1].rstrip()
         lines.append(f"OriginalTitle={disp_orig}")
 
-    # 3. Metadata property
+    # Rich card is optional and NEVER participates in action generation.
+    # Parsing/rendering cannot change the 3 action entries or V5 resume.
+    card = _load_movie_card()
+    facts: list[str] = []
+    if card is not None:
+        try:
+            facts = card.all_facts(
+                pres_info if not is_unmatched and not is_malformed else None,
+                technical_info,
+            )
+        except (ValueError, TypeError, KeyError, AttributeError):
+            facts = []
+
+    # 3. Basic metadata (year and duration), facts have separate rows.
     meta_parts: list[str] = []
     if not is_unmatched and not is_malformed:
         yr = None
@@ -1429,11 +1464,13 @@ def _build_movie_detail_section(
             if rt:
                 meta_parts.append(rt)
 
-        if pres_info and pres_info.get("genres_json"):
+        if not facts and pres_info and pres_info.get("genres_json"):
             gn = _format_genres(pres_info["genres_json"])
             if gn:
                 meta_parts.append(gn)
 
+    # Do not regress previously visible audio/track/format metadata:
+    # keep the V5 technical line intact even with separated new facts.
     technical_label = _format_media_technical(technical_info)
     if technical_label:
         meta_parts.append(technical_label)
@@ -1452,6 +1489,11 @@ def _build_movie_detail_section(
     while len(f"Metadata={meta_label}".encode("utf-8")) > 198:
         meta_label = meta_label[:-1].rstrip()
     lines.append(f"Metadata={meta_label}")
+
+    # Non-focusable, provenance-labelled fields; each line < 200 UTF-8 B.
+    for fact in facts:
+        if fact.startswith(("Fact1=","Fact2=","Fact3=","Fact4=","Fact5=","Fact6=")) and len(fact.encode("utf-8"))<=180:
+            lines.append(fact)
 
     # 4. Synopsis properties (Synopsis1..N)
     if is_unmatched:
@@ -1574,31 +1616,66 @@ def media_menu_sections(home: pathlib.Path, sources: list[pathlib.Path], icon: p
                         "candidate_count": r[9] or 0,
                     }
 
-                lang_labels = {"fre": "FR", "fra": "FR", "fr": "FR", "eng": "EN", "en": "EN", "ita": "IT", "it": "IT", "dut": "NL", "nld": "NL", "spa": "ES", "por": "PT", "ara": "AR", "deu": "DE", "ger": "DE"}
-                resource_rows = db.execute("SELECT id, source_id, relative_path, container_format FROM resources WHERE resource_kind='FILE' AND source_id IS NOT NULL AND relative_path IS NOT NULL").fetchall()
-                for rr in resource_rows:
-                    rid, sid, rel, container = rr
-                    v = db.execute("SELECT codec,width,height,frame_rate_num,frame_rate_den FROM video_streams WHERE resource_id=? ORDER BY stream_index LIMIT 1", (rid,)).fetchone()
-                    aud = db.execute("SELECT codec,channels,language FROM audio_streams WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)).fetchall()
-                    sub = db.execute("SELECT language FROM subtitle_streams WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)).fetchall()
-                    audio_langs: list[str] = []
-                    for row in aud:
-                        code = lang_labels.get(str(row[2] or '').lower(), str(row[2] or '').upper())
-                        if code and code not in audio_langs: audio_langs.append(code)
-                    sub_langs: list[str] = []
-                    for row in sub:
-                        code = lang_labels.get(str(row[0] or '').lower(), str(row[0] or '').upper())
-                        if code and code not in sub_langs: sub_langs.append(code)
-                    fps = None
-                    if v and v[3] and v[4]:
-                        try: fps = float(v[3]) / float(v[4])
-                        except (TypeError, ValueError, ZeroDivisionError): fps = None
-                    technical_map[(sid, rel)] = {
-                        "container": container,
-                        "video_codec": v[0] if v else None, "width": v[1] if v else None, "height": v[2] if v else None, "fps": fps,
-                        "audio_codec": aud[0][0] if aud else None, "audio_channels": aud[0][1] if aud else None,
-                        "audio_languages": audio_langs, "subtitle_languages": sub_langs,
+                # Optional stream facts must NEVER invalidate the already loaded
+                # movie identity / display work and Core V5 action tokens.
+                try:
+                    lang_labels = {"fre": "FR", "fra": "FR", "fr": "FR", "eng": "EN", "en": "EN", "ita": "IT", "it": "IT", "dut": "NL", "nld": "NL", "spa": "ES", "por": "PT", "ara": "AR", "deu": "DE", "ger": "DE"}
+                    available_video = {
+                        str(col[1]) for col in db.execute("PRAGMA table_info(video_streams)")
                     }
+                    allowed_video = (
+                        "codec", "width", "height", "frame_rate_num", "frame_rate_den",
+                        "hdr_format", "color_transfer", "color_primaries", "dolby_vision_profile",
+                    )
+                    video_columns = tuple(c for c in allowed_video if c in available_video)
+                    video_statement = (
+                        "SELECT " + ",".join(video_columns) +
+                        " FROM video_streams WHERE resource_id=? ORDER BY stream_index LIMIT 1"
+                    ) if video_columns else None
+                    resource_rows = db.execute(
+                        "SELECT id, source_id, relative_path, container_format FROM resources "
+                        "WHERE resource_kind='FILE' AND source_id IS NOT NULL AND relative_path IS NOT NULL"
+                    ).fetchall()
+                    for rr in resource_rows:
+                        rid, sid, rel, container = rr
+                        video_row = db.execute(video_statement, (rid,)).fetchone() if video_statement else None
+                        video = dict(zip(video_columns, video_row)) if video_row else {}
+                        aud = db.execute(
+                            "SELECT codec,channels,language FROM audio_streams "
+                            "WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)
+                        ).fetchall()
+                        sub = db.execute(
+                            "SELECT language FROM subtitle_streams "
+                            "WHERE resource_id=? ORDER BY is_default DESC,stream_index", (rid,)
+                        ).fetchall()
+                        audio_langs: list[str] = []
+                        for row in aud:
+                            code = lang_labels.get(str(row[2] or '').lower(), str(row[2] or '').upper())
+                            if code and code not in audio_langs: audio_langs.append(code)
+                        sub_langs: list[str] = []
+                        for row in sub:
+                            code = lang_labels.get(str(row[0] or '').lower(), str(row[0] or '').upper())
+                            if code and code not in sub_langs: sub_langs.append(code)
+                        fps = None
+                        if video.get("frame_rate_num") and video.get("frame_rate_den"):
+                            try:
+                                fps = float(video["frame_rate_num"]) / float(video["frame_rate_den"])
+                            except (TypeError, ValueError, ZeroDivisionError):
+                                fps = None
+                        technical_map[(sid, rel)] = {
+                            "container": container, "video_codec": video.get("codec"),
+                            "width": video.get("width"), "height": video.get("height"), "fps": fps,
+                            "hdr_format": video.get("hdr_format"),
+                            "color_transfer": video.get("color_transfer"),
+                            "color_primaries": video.get("color_primaries"),
+                            "dolby_vision_profile": video.get("dolby_vision_profile"),
+                            "audio_codec": aud[0][0] if aud else None,
+                            "audio_channels": aud[0][1] if aud else None,
+                            "audio_languages": audio_langs, "subtitle_languages": sub_langs,
+                        }
+                except (sqlite3.Error, TypeError, ValueError, IndexError):
+                    technical_map.clear()
+                    # The base MEDIA identity, pres_map and movie entries stay intact.
 
                 if configured_source_ids:
                     placeholders = ",".join("?" for _ in configured_source_ids)
@@ -2620,6 +2697,23 @@ def _write_flex_config(path: pathlib.Path, home: pathlib.Path, sources: list[pat
     media_generation=media_generation or f"{ui_generation_id}-{menu_generation}"
     manifest_candidate=path.with_name(path.name+".media-actions.json")
     _media_root, media_sections = media_menu_sections(home, sources, media_icon, media_generation,manifest_candidate)
+    # RC: poster wall is available after a clean install, without a LAB-only
+    # beta marker. A new/empty library must keep the usable MEDIA_ROOT menu.
+    wall_enabled = False
+    wall_helper = install / "openhtpc-beta-wall.py"
+    if wall_helper.is_file():
+        wall_spec = importlib.util.spec_from_file_location("openhtpc_beta_wall", wall_helper)
+        if wall_spec is None or wall_spec.loader is None:
+            raise RuntimeError("UXF1 wall helper invalid")
+        wall_module = importlib.util.module_from_spec(wall_spec)
+        wall_spec.loader.exec_module(wall_module)
+        wall_sections = wall_module.wall_from_core(media_sections, home, bounded_flex_entry, media_icon)
+        if wall_sections:
+            entries[2] = f"Entry3=MÉDIA;{media_icon};:submenu MEDIA_WALL"
+            media_sections += "\n\n" + wall_sections
+            wall_enabled = True
+    dpad_up_action = ":up" if wall_enabled else ":left"
+    dpad_down_action = ":down" if wall_enabled else ":right"
     content = f"""# OPENHTPC menu_generation={menu_generation} ui_generation_id={ui_generation_id} media_generation={media_generation} optical_generation={optical_generation} state_hash={state_hash}
 [General]
 DefaultMenu=OPENHTPC
@@ -2677,14 +2771,14 @@ Enabled=true
 DeviceIndex=-1
 LStickX-=:left
 LStickX+=:right
-LStickY-=:left
-LStickY+=:right
+LStickY-={dpad_up_action}
+LStickY+={dpad_down_action}
 ButtonA=:select
 ButtonB=:back
 ButtonDPadLeft=:left
 ButtonDPadRight=:right
-ButtonDPadUp=:left
-ButtonDPadDown=:right
+ButtonDPadUp={dpad_up_action}
+ButtonDPadDown={dpad_down_action}
 
 [OPENHTPC]
 {os.linesep.join(entries)}
@@ -2853,13 +2947,19 @@ def activate_media_manifest(config_path:pathlib.Path,home:pathlib.Path)->pathlib
     return target
 
 
-def publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None)->bool:
-    """Publish one MEDIA generation at the synchronous Flex action boundary."""
+def publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None,*,expected_optical_generation:int|None=None)->bool:
+    """Publish matching INI, candidate and current MEDIA manifest under one lock.
+
+    The retained HOME regeneration worker must not publish an INI alone:
+    doing so strands action tokens in the old current.json after an ordinary
+    optical or metadata regeneration (observed in incident 2026-11-02).
+    """
     with flex_publication_lock(home):
-        return _publish_flex_config(path, home, sources, install)
+        return _publish_flex_config(path, home, sources, install,
+                                   expected_optical_generation=expected_optical_generation)
 
 
-def _publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None)->bool:
+def _publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathlib.Path],install:pathlib.Path|None=None,*,expected_optical_generation:int|None=None)->bool:
     path.parent.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix=path.name+".publish.",dir=path.parent);os.close(fd);staged=pathlib.Path(name)
     candidate=path.with_name(path.name+".media-actions.json");staged_candidate=staged.with_name(staged.name+".media-actions.json")
@@ -2874,7 +2974,8 @@ def _publish_flex_config(path:pathlib.Path,home:pathlib.Path,sources:list[pathli
             if os.path.exists(tmp):os.unlink(tmp)
     try:
         staged.unlink()
-        if not _write_flex_config(staged,home,sources,install):return False
+        if not _write_flex_config(staged,home,sources,install,
+                                  expected_optical_generation=expected_optical_generation):return False
         model=load_object(staged_candidate,"media_actions","ACTION_MANIFEST_MISSING","ACTION_MANIFEST_INVALID")
         if model.get("schema")!=1 or not isinstance(model.get("items"),dict):raise GateError("media_actions","ACTION_MANIFEST_INVALID","Le manifeste MEDIA candidat est invalide.")
         replace_bytes(candidate,staged_candidate.read_bytes())

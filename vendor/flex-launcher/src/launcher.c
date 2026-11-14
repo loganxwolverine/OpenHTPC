@@ -14,12 +14,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include "image.h"
 #include "util.h"
 #include "debug.h"
 #include "clock.h"
+#include "media_wall.h"
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+static unsigned int lab_qa_loop = 0;
+#endif
 
 /* HOME network indicator: local interface inspection only, never Internet probing. */
 #ifdef __linux__
@@ -29,6 +35,7 @@
 #include <netinet/in.h>
 #endif
 #include "platform/platform.h"
+#include <time.h>
 
 static void pre_launch(void);
 static void post_launch(void);
@@ -50,6 +57,11 @@ static void render_buttons(Menu *menu);
 static void free_menu_detail_textures(Menu *menu);
 static void move_left(void);
 static void move_right(void);
+static void media_wall_move(int horizontal, int vertical);
+static bool is_media_wall(const Menu *menu);
+static bool prepare_media_wall(Menu *menu);
+static void draw_media_wall(void);
+static void free_media_wall(Menu *menu);
 static void load_submenu(const char *submenu);
 static void load_back_menu(Menu *menu);
 static void draw_screen(void);
@@ -58,6 +70,9 @@ static void execute_command(const char *command);
 static void refresh_live_optical_state(void);
 static void refresh_live_activity_state(void);
 static void draw_activity_overlay(void);
+static void draw_resume_modal(void);
+static void close_resume_modal(void);
+static void run_resume_modal_action(const char *token);
 static void refresh_home_network_indicator(void);
 static void draw_home_network_indicator(void);
 static void refresh_disc_sheet_background(void);
@@ -207,6 +222,13 @@ Screensaver *screensaver              = NULL;
 FILE *log_file                        = NULL;
 Gamepad *gamepads                     = NULL;
 GamepadControl *gamepad_controls      = NULL;
+static bool gamepad_return_requires_b_release = false;
+static bool resume_modal_active = false;
+static int resume_modal_selected = 0;
+static char resume_modal_token[38] = {0};
+static SDL_Texture *resume_modal_labels[5] = {NULL};
+static int resume_modal_label_width[5] = {0};
+static int resume_modal_label_height[5] = {0};
 Hotkey *hotkeys                       = NULL;
 Clock *clk                            = NULL;
 TTF_Font *clock_font                  = NULL;
@@ -259,6 +281,14 @@ static void init_sdl()
         log_fatal("Could not initialize SDL\n%s", SDL_GetError());
 
     SDL_GetDesktopDisplayMode(0, &display_mode);
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+    if (getenv("OPENHTPC_LAB_QA_SOFTWARE") != NULL) {
+        bool qa_4k = getenv("OPENHTPC_LAB_QA_4K") != NULL;
+        display_mode.w = qa_4k ? 3840 : 1920;
+        display_mode.h = qa_4k ? 2160 : 1080;
+        display_mode.refresh_rate = 60;
+    }
+#endif
     geo.screen_width = display_mode.w;
     geo.screen_height = display_mode.h;
     refresh_period = 1000 / (Uint32) display_mode.refresh_rate;
@@ -268,19 +298,30 @@ static void init_sdl()
 // A function to create the window and renderer
 static void create_window()
 {
+    Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP |
+                          SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
+    int win_w = 0, win_h = 0;
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+    if (getenv("OPENHTPC_LAB_QA_SOFTWARE") != NULL) {
+        window_flags = SDL_WINDOW_HIDDEN;
+        win_w = geo.screen_width;
+        win_h = geo.screen_height;
+    }
+#endif
     window = SDL_CreateWindow(PROJECT_NAME,
-                 SDL_WINDOWPOS_UNDEFINED,
-                 SDL_WINDOWPOS_UNDEFINED,
-                 0,
-                 0,
-                 SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP
-             );
+                 SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                 win_w, win_h, window_flags);
     if (window == NULL)
         log_fatal("Could not create SDL Window\n%s", SDL_GetError());
     SDL_ShowCursor(SDL_DISABLE);
 
     // Create HW accelerated renderer, get screen resolution for geometry calculations
     Uint32 renderer_flags = SDL_RENDERER_ACCELERATED;
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+    if (getenv("OPENHTPC_LAB_QA_SOFTWARE") != NULL) {
+        renderer_flags = SDL_RENDERER_SOFTWARE;
+    }
+#endif
     if (!config.vsync) {
         if (config.fps_limit > MIN_FPS_LIMIT && config.fps_limit <= display_mode.refresh_rate)
             refresh_period = 1000 / (Uint32) config.fps_limit;
@@ -389,6 +430,11 @@ static void cleanup()
         SDL_DestroyTexture(activity_texture);
         activity_texture = NULL;
     }
+
+    for (Menu *m = config.first_menu; m != NULL; m = m->next)
+        if (m->media_wall_initialized) free_media_wall(m);
+
+    close_resume_modal();
 
     // Destroy renderer and window
     if (renderer != NULL) {
@@ -505,6 +551,11 @@ static bool is_media_list(void)
     return current_menu != NULL && current_menu->name != NULL &&
         strncmp(current_menu->name, "MEDIA", 5) == 0 &&
         !is_movie_detail(current_menu);
+}
+
+static bool is_media_wall(const Menu *menu)
+{
+    return menu != NULL && menu->layout == LAYOUT_MEDIA_WALL;
 }
 
 static bool __attribute__((unused)) is_system_dashboard(void)
@@ -672,6 +723,682 @@ static void fill_rounded_rect(
     }
 }
 
+#define MEDIA_WALL_TEXTURE_LIMIT 20U
+enum {HEAD_OPEN, HEAD_HTPC, HEAD_FILMS, HEAD_SERIES, HEAD_DISQUE,
+      HEAD_DOSSIERS, HEAD_STATUS, HEAD_CLOCK, HEAD_DATE,
+      HEAD_ELEMENT_COUNT};
+static unsigned long media_wall_texture_clock = 0;
+
+static Entry *media_wall_entry(Menu *menu, MediaWallRow row, size_t position)
+{
+    size_t index = media_wall_manifest_index(&menu->media_wall, row, position);
+    if (index == SIZE_MAX || index >= menu->num_entries)
+        return NULL;
+    return menu->media_wall_entries[index];
+}
+
+static bool media_wall_resolve_technical(const Entry *selected,
+                                         MediaWallTechnical *technical)
+{
+    if (selected == NULL || selected->cmd == NULL || technical == NULL)
+        return false;
+    const char *prefix = ":submenu ";
+    if (strncmp(selected->cmd, prefix, strlen(prefix)) != 0)
+        return false;
+    const char *name = selected->cmd + strlen(prefix);
+    if (strncmp(name, "MEDIA_D", 7) != 0 || strlen(name) > 50 ||
+        strchr(name, ' ') != NULL)
+        return false;
+    Menu *detail = get_menu(name);
+    if (detail == NULL || detail->layout != LAYOUT_MOVIE_DETAIL)
+        return false;
+    bool has_technical = media_wall_parse_core_metadata(
+        detail->detail_metadata, technical);
+    technical->source_format = media_wall_parse_source_format(
+        detail->detail_source_colorimetry);
+    return has_technical ||
+           technical->source_format != MEDIA_WALL_FORMAT_UNKNOWN;
+}
+
+static void update_media_wall_footer(Menu *menu)
+{
+    if (menu->media_wall_footer_title != NULL) {
+        SDL_DestroyTexture(menu->media_wall_footer_title);
+        menu->media_wall_footer_title = NULL;
+    }
+    if (menu->media_wall_footer_meta != NULL) {
+        SDL_DestroyTexture(menu->media_wall_footer_meta);
+        menu->media_wall_footer_meta = NULL;
+    }
+    for (size_t i = 0; i < 4; i++) {
+        if (menu->media_wall_badge_text[i] != NULL) {
+            SDL_DestroyTexture(menu->media_wall_badge_text[i]);
+            menu->media_wall_badge_text[i] = NULL;
+        }
+    }
+    Entry *selected = media_wall_entry(menu, menu->media_wall.row,
+        menu->media_wall.selected[menu->media_wall.row]);
+    if (selected == NULL)
+        return;
+    current_entry = selected;
+    TextInfo info = title_info;
+    if (menu->media_wall_font != NULL) {
+        info.font = menu->media_wall_font;
+        info.font_size = menu->media_wall_font_size;
+    }
+    info.max_width = (geo.screen_width * 23) / 100;
+    info.oversize_mode = OVERSIZE_SHRINK;
+    int h = 0;
+    char clean_title[1024];
+    unsigned int year = 0;
+    bool has_year = media_wall_title_and_year(selected->title,
+                                              clean_title, sizeof(clean_title),
+                                              &year);
+    MediaWallTechnical technical = {0};
+    bool has_technical = media_wall_resolve_technical(selected, &technical);
+    menu->media_wall_badge_source_format = technical.source_format;
+    menu->media_wall_footer_title = render_text_texture(
+        has_year ? clean_title : selected->title, &info,
+        &menu->media_wall_footer_title_rect, &h);
+    menu->media_wall_footer_title_rect.x = (geo.screen_width * 6) / 100;
+    menu->media_wall_footer_title_rect.y = (geo.screen_height * 915) / 1000;
+    if (has_year) {
+        char meta[96];
+        if (has_technical && technical.duration[0] != '\0')
+            snprintf(meta, sizeof(meta), "%u  ·  %s", year, technical.duration);
+        else
+            snprintf(meta, sizeof(meta), "%u  ·  FILM", year);
+        SDL_Color secondary = {0x8C, 0x9A, 0xB5, 255};
+        TextInfo meta_info = info;
+        if (menu->media_wall_meta_font != NULL) {
+            meta_info.font = menu->media_wall_meta_font;
+            meta_info.font_size = (geo.screen_height * 18) / 1080;
+            if (meta_info.font_size < 18)
+                meta_info.font_size = 18;
+        }
+        meta_info.color = &secondary;
+        meta_info.max_width = geo.screen_width * 24 / 100;
+        menu->media_wall_footer_meta = render_text_texture(
+            meta, &meta_info, &menu->media_wall_footer_meta_rect, &h);
+        menu->media_wall_footer_meta_rect.x = (geo.screen_width * 6) / 100;
+        menu->media_wall_footer_meta_rect.y = (geo.screen_height * 950) / 1000;
+    }
+    if (has_technical) {
+        const char *source_label = media_wall_source_format_label(
+            technical.source_format);
+        const char *badges[] = {
+            technical.resolution, technical.video_codec, technical.audio,
+            source_label != NULL ? source_label : ""
+        };
+        TextInfo badge_info = info;
+        badge_info.color = &(SDL_Color){0xD9, 0xE7, 0xFF, 255};
+        if (menu->media_wall_meta_font != NULL) {
+            badge_info.font = menu->media_wall_meta_font;
+            badge_info.font_size = geo.screen_height / 60;
+        }
+        badge_info.max_width = geo.screen_width * 15 / 100;
+        badge_info.oversize_mode = OVERSIZE_SHRINK;
+        int pad_x = geo.screen_height * 13 / 1080;
+        int pad_y = geo.screen_height * 8 / 1080;
+        int gap_x = geo.screen_width * 8 / 1000;
+        int x = geo.screen_width * 30 / 100;
+        for (size_t i = 0; i < 4; i++) {
+            if (badges[i][0] == '\0')
+                continue;
+            int text_h = 0;
+            SDL_Rect text_rect = {0};
+            SDL_Texture *texture = render_text_texture(badges[i], &badge_info,
+                                                       &text_rect, &text_h);
+            if (texture == NULL)
+                continue;
+            int card_w = text_rect.w + pad_x * 2;
+            if (x + card_w > geo.screen_width * 72 / 100) {
+                SDL_DestroyTexture(texture);
+                break;
+            }
+            menu->media_wall_badge_text[i] = texture;
+            menu->media_wall_badge_rect[i] = (SDL_Rect){
+                x, geo.screen_height * 925 / 1000 - pad_y,
+                card_w, text_rect.h + 2 * pad_y
+            };
+            menu->media_wall_badge_text_rect[i] = (SDL_Rect){
+                x + pad_x, geo.screen_height * 925 / 1000, text_rect.w, text_rect.h
+            };
+            x += card_w + gap_x;
+        }
+    }
+}
+
+static void update_media_wall_footer_help(Menu *menu)
+{
+    if (menu->media_wall_footer_help != NULL) {
+        SDL_DestroyTexture(menu->media_wall_footer_help);
+        menu->media_wall_footer_help = NULL;
+    }
+    TextInfo info = title_info;
+    if (menu->media_wall_font != NULL) {
+        info.font = menu->media_wall_font;
+        info.font_size = menu->media_wall_font_size;
+    }
+    info.max_width = geo.screen_width * 54 / 100;
+    info.oversize_mode = OVERSIZE_SHRINK;
+    int h = 0;
+    const char *help = menu->media_wall.tab_focused
+        ? "A  OUVRIR    BAS  AFFICHES    B  RETOUR"
+        : "HAUT  ONGLETS    A  FICHE    B  RETOUR";
+    menu->media_wall_footer_help = render_text_texture(help, &info,
+        &menu->media_wall_footer_help_rect, &h);
+    menu->media_wall_footer_help_rect.x = geo.screen_width -
+        geo.screen_width * 6 / 100 - menu->media_wall_footer_help_rect.w;
+    menu->media_wall_footer_help_rect.y = geo.screen_height * 92 / 100;
+}
+
+static bool prepare_media_wall(Menu *menu)
+{
+    if (menu == NULL || menu->num_entries == 0)
+        return false;
+    if (menu->media_wall_initialized)
+        return true;
+
+    menu->media_wall_entries = calloc(menu->num_entries,
+                                       sizeof(*menu->media_wall_entries));
+    const char **titles = calloc(menu->num_entries, sizeof(*titles));
+    if (menu->media_wall_entries == NULL || titles == NULL) {
+        free(menu->media_wall_entries);
+        menu->media_wall_entries = NULL;
+        free(titles);
+        return false;
+    }
+    size_t i = 0;
+    for (Entry *entry = menu->first_entry; entry != NULL && i < menu->num_entries;
+         entry = entry->next, i++) {
+        menu->media_wall_entries[i] = entry;
+        titles[i] = entry->title;
+    }
+
+    MediaWallGeometry wall;
+    if (!media_wall_geometry(geo.screen_width, geo.screen_height, &wall)) {
+        free(titles);
+        return false;
+    }
+    bool ok = media_wall_init(&menu->media_wall, titles, menu->num_entries,
+                              wall.viewport);
+    free(titles);
+    if (!ok)
+        return false;
+
+    /* Use screen-relative typography for TV viewing; config FontSize=24
+     * from headless fixture is otherwise unreadable on a 4K television. */
+    int wall_font_size = geo.screen_height / 44;
+    if (wall_font_size < 24) wall_font_size = 24;
+    if (wall_font_size > 64) wall_font_size = 64;
+    const char *wall_font_path = config.title_font_path;
+    if (wall_font_path != NULL) {
+        menu->media_wall_font = TTF_OpenFont(wall_font_path, wall_font_size);
+        if (menu->media_wall_font != NULL)
+            menu->media_wall_font_size = wall_font_size;
+        int meta_font_size = geo.screen_height / 60;
+        if (meta_font_size < 18) meta_font_size = 18;
+        if (meta_font_size > 42) meta_font_size = 42;
+        menu->media_wall_meta_font = TTF_OpenFont(wall_font_path,
+                                                   meta_font_size);
+    }
+    TextInfo label_info = title_info;
+    if (menu->media_wall_font != NULL) {
+        label_info.font = menu->media_wall_font;
+        label_info.font_size = menu->media_wall_font_size;
+    }
+    label_info.max_width = (geo.screen_width * 50) / 100;
+    label_info.oversize_mode = OVERSIZE_SHRINK;
+    int h = 0;
+    menu->media_wall_recent_label = render_text_texture("Récemment ajoutés",
+        &label_info, &menu->media_wall_recent_label_rect, &h);
+    menu->media_wall_recent_label_rect.x = (geo.screen_width * 6) / 100;
+    menu->media_wall_recent_label_rect.y = wall.recent_label_y;
+    menu->media_wall_all_label = render_text_texture("Tous les films A-Z",
+        &label_info, &menu->media_wall_all_label_rect, &h);
+    menu->media_wall_all_label_rect.x = (geo.screen_width * 6) / 100;
+    menu->media_wall_all_label_rect.y = wall.all_label_y;
+    update_media_wall_footer_help(menu);
+    /* Maquette Médiathèque V2: header and a quiet status strip.
+     * Only the REAL number of works in the current view is displayed.
+     * We never reproduce mock-up catalogue counters or fake PLAY actions. */
+    SDL_Color white = {0xE8, 0xEE, 0xF8, 255};
+    SDL_Color blue = {0x3D, 0x8B, 0xFF, 255};
+    SDL_Color muted = {0x8C, 0x9A, 0xB5, 255};
+    TextInfo header = label_info;
+    header.color = &white;
+    int scale_y = geo.screen_height;
+    menu->media_wall_header[HEAD_OPEN] = render_text_texture("OPEN", &header,
+        &menu->media_wall_header_rect[HEAD_OPEN], &h);
+    menu->media_wall_header_rect[HEAD_OPEN].x = geo.screen_width * 4 / 100;
+    menu->media_wall_header_rect[HEAD_OPEN].y = 39 * scale_y / 1080;
+    header.color = &blue;
+    menu->media_wall_header[HEAD_HTPC] = render_text_texture("HTPC", &header,
+        &menu->media_wall_header_rect[HEAD_HTPC], &h);
+    menu->media_wall_header_rect[HEAD_HTPC].x =
+        menu->media_wall_header_rect[HEAD_OPEN].x +
+        menu->media_wall_header_rect[HEAD_OPEN].w;
+    menu->media_wall_header_rect[HEAD_HTPC].y = 39 * scale_y / 1080;
+    header.color = &white;
+    menu->media_wall_header[HEAD_FILMS] = render_text_texture("FILMS", &header,
+        &menu->media_wall_header_rect[HEAD_FILMS], &h);
+    menu->media_wall_header_rect[HEAD_FILMS].x = geo.screen_width * 14 / 100;
+    menu->media_wall_header_rect[HEAD_FILMS].y = 44 * scale_y / 1080;
+    header.color = &(SDL_Color){0x62, 0x6F, 0x86, 255};
+    menu->media_wall_header[HEAD_SERIES] = render_text_texture("SÉRIES", &header,
+        &menu->media_wall_header_rect[HEAD_SERIES], &h);
+    menu->media_wall_header_rect[HEAD_SERIES].x = geo.screen_width * 22 / 100;
+    menu->media_wall_header_rect[HEAD_SERIES].y = 44 * scale_y / 1080;
+    header.color = &muted;
+    menu->media_wall_header[HEAD_DISQUE] = render_text_texture("DISQUE", &header,
+        &menu->media_wall_header_rect[HEAD_DISQUE], &h);
+    menu->media_wall_header_rect[HEAD_DISQUE].x = geo.screen_width * 31 / 100;
+    menu->media_wall_header_rect[HEAD_DISQUE].y = 44 * scale_y / 1080;
+    menu->media_wall_header[HEAD_DOSSIERS] = render_text_texture("DOSSIERS", &header,
+        &menu->media_wall_header_rect[HEAD_DOSSIERS], &h);
+    menu->media_wall_header_rect[HEAD_DOSSIERS].x = geo.screen_width * 40 / 100;
+    menu->media_wall_header_rect[HEAD_DOSSIERS].y = 44 * scale_y / 1080;
+    char summary[128];
+    snprintf(summary, sizeof(summary), "MÉDIATHÈQUE   ·   %u films identifiés",
+             menu->num_entries);
+    header.color = &white;
+    menu->media_wall_header[HEAD_STATUS] = render_text_texture(summary, &header,
+        &menu->media_wall_header_rect[HEAD_STATUS], &h);
+    menu->media_wall_header_rect[HEAD_STATUS].x = geo.screen_width * 6 / 100;
+    menu->media_wall_header_rect[HEAD_STATUS].y = 134 * scale_y / 1080;
+    menu->media_wall_clock_key = -1;
+    menu->media_wall_focus_started = SDL_GetTicks();
+    menu->media_wall_initialized = true;
+    update_media_wall_footer(menu);
+    return true;
+}
+
+static void free_media_wall(Menu *menu)
+{
+    if (menu == NULL)
+        return;
+    media_wall_destroy(&menu->media_wall);
+    free(menu->media_wall_entries);
+    menu->media_wall_entries = NULL;
+    SDL_Texture **textures[] = {
+        &menu->media_wall_recent_label, &menu->media_wall_all_label,
+        &menu->media_wall_footer_title, &menu->media_wall_footer_meta,
+        &menu->media_wall_footer_help,
+        &menu->media_wall_badge_text[0], &menu->media_wall_badge_text[1],
+        &menu->media_wall_badge_text[2],
+        &menu->media_wall_badge_text[3]
+    };
+    for (size_t i = 0; i < sizeof(textures) / sizeof(textures[0]); i++) {
+        if (*textures[i] != NULL) {
+            SDL_DestroyTexture(*textures[i]);
+            *textures[i] = NULL;
+        }
+    }
+    if (menu->media_wall_font != NULL) {
+        TTF_CloseFont(menu->media_wall_font);
+        menu->media_wall_font = NULL;
+    }
+    if (menu->media_wall_meta_font != NULL) {
+        TTF_CloseFont(menu->media_wall_meta_font);
+        menu->media_wall_meta_font = NULL;
+    }
+    menu->media_wall_font_size = 0;
+    for (size_t i = 0; i < HEAD_ELEMENT_COUNT; i++) {
+        if (menu->media_wall_header[i] != NULL) {
+            SDL_DestroyTexture(menu->media_wall_header[i]);
+            menu->media_wall_header[i] = NULL;
+        }
+    }
+    menu->media_wall_initialized = false;
+}
+
+static bool media_wall_position_visible(const Menu *menu, size_t manifest_index)
+{
+    for (int row = 0; row < MEDIA_WALL_ROWS; row++) {
+        size_t start = menu->media_wall.scroll[row];
+        size_t count = media_wall_row_count(&menu->media_wall, (MediaWallRow) row);
+        size_t end = start + menu->media_wall.viewport;
+        if (end > count) end = count;
+        for (size_t pos = start; pos < end; pos++) {
+            if (media_wall_manifest_index(&menu->media_wall,
+                    (MediaWallRow) row, pos) == manifest_index)
+                return true;
+        }
+    }
+    return false;
+}
+
+static void media_wall_bound_cache(Menu *menu)
+{
+    size_t loaded = 0;
+    for (size_t i = 0; i < menu->num_entries; i++)
+        if (menu->media_wall_entries[i]->icon != NULL) loaded++;
+    while (loaded > MEDIA_WALL_TEXTURE_LIMIT) {
+        Entry *oldest = NULL;
+        size_t oldest_index = 0;
+        for (size_t i = 0; i < menu->num_entries; i++) {
+            Entry *entry = menu->media_wall_entries[i];
+            if (entry->icon != NULL && !media_wall_position_visible(menu, i) &&
+                (oldest == NULL || entry->texture_use < oldest->texture_use)) {
+                oldest = entry;
+                oldest_index = i;
+            }
+        }
+        (void) oldest_index;
+        if (oldest == NULL) break;
+        SDL_DestroyTexture(oldest->icon);
+        oldest->icon = NULL;
+        loaded--;
+    }
+}
+
+static void draw_media_wall_row(Menu *menu, MediaWallRow row, int y)
+{
+    size_t start = menu->media_wall.scroll[row];
+    size_t count = media_wall_row_count(&menu->media_wall, row);
+    size_t visible = count - start;
+    if (visible > menu->media_wall.viewport) visible = menu->media_wall.viewport;
+    MediaWallGeometry wall;
+    if (!media_wall_geometry(geo.screen_width, geo.screen_height, &wall))
+        return;
+    int poster_h = wall.poster_h;
+    int poster_w = wall.poster_w;
+    int gap = wall.gap;
+    int total_w = (int) visible * poster_w + ((int) visible - 1) * gap;
+    int x0 = (geo.screen_width - total_w) / 2;
+
+    /* Two passes guarantee that the focused poster is composited last. */
+    for (int focus_pass = 0; focus_pass < 2; focus_pass++) {
+        for (size_t slot = 0; slot < visible; slot++) {
+            size_t position = start + slot;
+            Entry *entry = media_wall_entry(menu, row, position);
+            if (entry == NULL) continue;
+            bool selected = !menu->media_wall.tab_focused &&
+                            menu->media_wall.row == row &&
+                            menu->media_wall.selected[row] == position;
+            if ((selected ? 1 : 0) != focus_pass) continue;
+            if (entry->icon == NULL)
+                entry->icon = load_texture_from_file(entry->icon_path);
+            entry->texture_use = ++media_wall_texture_clock;
+
+            SDL_Rect poster = { x0 + (int) slot * (poster_w + gap), y,
+                                poster_w, poster_h };
+            if (selected) {
+                /* SDL-native 180 ms ease-out focus. The grid never reflows.
+                 * The poster's bottom edge remains anchored while it rises. */
+                unsigned int progress = media_wall_focus_progress(
+                    SDL_GetTicks() - menu->media_wall_focus_started);
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+                if (getenv("OPENHTPC_LAB_QA_SCENARIO") != NULL &&
+                    (lab_qa_loop == 35 || lab_qa_loop == 36 ||
+                     lab_qa_loop == 40 || lab_qa_loop == 45 ||
+                     lab_qa_loop == 60)) {
+                    fprintf(stderr, "LAB_QA_FOCUS step=%u progress=%u row=%d slot=%zu\n",
+                            lab_qa_loop, progress, (int) row, slot);
+                }
+#endif
+                int grow_w = (int) (((int64_t) poster.w * 14 * progress) / 100000);
+                int grow_h = (int) (((int64_t) poster.h * 14 * progress) / 100000);
+                int lift = (int) (((int64_t) geo.screen_height * 16 * progress) /
+                                  1080000);
+                poster.x -= grow_w / 2;
+                poster.y -= grow_h + lift;
+                poster.w += grow_w;
+                poster.h += grow_h;
+                SDL_Rect shadow = {poster.x - 8, poster.y + 9,
+                                   poster.w + 16, poster.h + 17};
+                fill_rounded_rect(renderer, &shadow, 12,
+                                  (SDL_Color){0, 0, 0, 155});
+                SDL_BlendMode previous_blend;
+                SDL_GetRenderDrawBlendMode(renderer, &previous_blend);
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                /* Soft blue glow, then the crisp 3px #3D8BFF border. */
+                for (int radius = 12; radius >= 3; radius -= 3) {
+                    int strength = (36 - radius) * (int) progress / 1000;
+                    SDL_SetRenderDrawColor(renderer, 0x3D, 0x8B, 0xFF,
+                                           (Uint8) strength);
+                    SDL_Rect glow = {poster.x - radius, poster.y - radius,
+                        poster.w + 2 * radius, poster.h + 2 * radius};
+                    SDL_RenderDrawRect(renderer, &glow);
+                }
+                SDL_SetRenderDrawColor(renderer, 0x3D, 0x8B, 0xFF, 255);
+                for (int border = 1; border <= 3; border++) {
+                    SDL_Rect outline = {poster.x - border, poster.y - border,
+                        poster.w + 2 * border, poster.h + 2 * border};
+                    SDL_RenderDrawRect(renderer, &outline);
+                }
+                SDL_SetRenderDrawBlendMode(renderer, previous_blend);
+            }
+            if (entry->icon != NULL) {
+                int shade = selected ? 255 :
+                    (menu->media_wall.row == row ? 140 : 180);
+                SDL_SetTextureColorMod(entry->icon, shade, shade, shade);
+                SDL_SetTextureAlphaMod(entry->icon, 255);
+                int tex_w = 0, tex_h = 0;
+                MediaWallCrop crop;
+                if (SDL_QueryTexture(entry->icon, NULL, NULL,
+                                     &tex_w, &tex_h) == 0 &&
+                    media_wall_cover_crop(tex_w, tex_h, poster.w, poster.h, &crop)) {
+                    SDL_Rect src = {crop.x, crop.y, crop.w, crop.h};
+                    SDL_RenderCopy(renderer, entry->icon, &src, &poster);
+                } else {
+                    SDL_RenderCopy(renderer, entry->icon, NULL, &poster);
+                }
+                SDL_SetTextureColorMod(entry->icon, 255, 255, 255);
+                SDL_SetTextureAlphaMod(entry->icon, 255);
+            } else {
+                fill_rounded_rect(renderer, &poster, 8, (SDL_Color){28, 34, 46, 255});
+            }
+        }
+    }
+}
+
+/* French date/time, refreshed only when the minute changes. */
+static void update_media_wall_clock(Menu *menu)
+{
+    time_t timestamp = time(NULL);
+    struct tm local;
+    if (localtime_r(&timestamp, &local) == NULL)
+        return;
+    int key = ((local.tm_year * 366 + local.tm_yday) * 24 +
+               local.tm_hour) * 60 + local.tm_min;
+    if (menu->media_wall_clock_key == key)
+        return;
+    menu->media_wall_clock_key = key;
+    const char *days[] = {"dim.", "lun.", "mar.", "mer.",
+                          "jeu.", "ven.", "sam."};
+    const char *months[] = {"janv.", "févr.", "mars", "avr.",
+                            "mai", "juin", "juil.", "août",
+                            "sept.", "oct.", "nov.", "déc."};
+    char clock[16], date[40];
+    snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
+    snprintf(date, sizeof(date), "%s %d %s", days[local.tm_wday],
+             local.tm_mday, months[local.tm_mon]);
+    TextInfo info = title_info;
+    if (menu->media_wall_font != NULL) {
+        info.font = menu->media_wall_font;
+        info.font_size = menu->media_wall_font_size;
+    }
+    info.max_width = geo.screen_width / 4;
+    SDL_Color white = {0xE8, 0xEE, 0xF8, 255};
+    SDL_Color muted = {0x8C, 0x9A, 0xB5, 255};
+    info.color = &white;
+    for (int i = HEAD_CLOCK; i <= HEAD_DATE; i++) {
+        if (menu->media_wall_header[i] != NULL) {
+            SDL_DestroyTexture(menu->media_wall_header[i]);
+            menu->media_wall_header[i] = NULL;
+        }
+    }
+    int h = 0;
+    menu->media_wall_header[HEAD_CLOCK] = render_text_texture(clock, &info,
+        &menu->media_wall_header_rect[HEAD_CLOCK], &h);
+    menu->media_wall_header_rect[HEAD_CLOCK].x = geo.screen_width * 96 / 100 -
+        menu->media_wall_header_rect[HEAD_CLOCK].w;
+    menu->media_wall_header_rect[HEAD_CLOCK].y = geo.screen_height * 35 / 1080;
+    info.color = &muted;
+    menu->media_wall_header[HEAD_DATE] = render_text_texture(date, &info,
+        &menu->media_wall_header_rect[HEAD_DATE], &h);
+    menu->media_wall_header_rect[HEAD_DATE].x = geo.screen_width * 96 / 100 -
+        menu->media_wall_header_rect[HEAD_DATE].w;
+    menu->media_wall_header_rect[HEAD_DATE].y = geo.screen_height * 71 / 1080;
+}
+
+static void draw_media_wall(void)
+{
+    Menu *menu = current_menu;
+    if (!prepare_media_wall(menu))
+        return;
+    MediaWallGeometry wall;
+    if (!media_wall_geometry(geo.screen_width, geo.screen_height, &wall))
+        return;
+    SDL_Rect night = {0, 0, geo.screen_width, geo.screen_height};
+    SDL_SetRenderDrawColor(renderer, 7, 11, 22, 255);
+    SDL_RenderFillRect(renderer, &night);
+
+    /* FILMS is the currently active section; controller Up transfers
+     * focus into the masthead. A triggers only an existing registered menu.
+     * SERIES is intentionally dimmed and never focusable. */
+    for (int tab = MEDIA_WALL_TAB_FILMS; tab <= MEDIA_WALL_TAB_DOSSIERS; tab++) {
+        if (tab == MEDIA_WALL_TAB_SERIES)
+            continue;
+        int index = HEAD_FILMS + tab;
+        SDL_Rect text_rect = menu->media_wall_header_rect[index];
+        SDL_Rect target = {
+            text_rect.x - geo.screen_width / 110,
+            text_rect.y - geo.screen_height / 105,
+            text_rect.w + geo.screen_width / 55,
+            text_rect.h + geo.screen_height / 55
+        };
+        bool active = tab == MEDIA_WALL_TAB_FILMS;
+        bool focused = menu->media_wall.tab_focused &&
+                       menu->media_wall.tab == (MediaWallTab) tab;
+        if (active || focused) {
+            fill_rounded_rect(renderer, &target, geo.screen_height / 130,
+                (SDL_Color){15, 24, 48, 245});
+            SDL_SetRenderDrawColor(renderer, 0x3D, 0x8B, 0xFF, 255);
+            if (focused) {
+                for (int edge = 0; edge < 3; edge++) {
+                    SDL_Rect outline = {target.x - edge, target.y - edge,
+                        target.w + 2 * edge, target.h + 2 * edge};
+                    SDL_RenderDrawRect(renderer, &outline);
+                }
+            } else
+                SDL_RenderDrawRect(renderer, &target);
+        }
+    }
+
+    SDL_Rect status = {geo.screen_width * 4 / 100, wall.status_y,
+                       geo.screen_width * 92 / 100, wall.status_h};
+    fill_rounded_rect(renderer, &status, geo.screen_height / 120,
+                      (SDL_Color){15, 24, 48, 255});
+    SDL_SetRenderDrawColor(renderer, 28, 42, 74, 255);
+    SDL_RenderDrawRect(renderer, &status);
+
+    update_media_wall_clock(menu);
+    for (size_t i = 0; i < HEAD_ELEMENT_COUNT; i++) {
+        if (menu->media_wall_header[i] != NULL)
+            SDL_RenderCopy(renderer, menu->media_wall_header[i], NULL,
+                           &menu->media_wall_header_rect[i]);
+    }
+    if (menu->media_wall_recent_label != NULL)
+        SDL_RenderCopy(renderer, menu->media_wall_recent_label, NULL,
+                       &menu->media_wall_recent_label_rect);
+    if (menu->media_wall_all_label != NULL)
+        SDL_RenderCopy(renderer, menu->media_wall_all_label, NULL,
+                       &menu->media_wall_all_label_rect);
+    draw_media_wall_row(menu, MEDIA_WALL_RECENT, wall.recent_poster_y);
+    draw_media_wall_row(menu, MEDIA_WALL_ALL, wall.all_poster_y);
+    SDL_Rect footer = {0, wall.footer_y, geo.screen_width, wall.footer_h};
+    SDL_SetRenderDrawColor(renderer, 8, 15, 28, 245);
+    SDL_RenderFillRect(renderer, &footer);
+    SDL_SetRenderDrawColor(renderer, 28, 42, 74, 255);
+    SDL_RenderDrawLine(renderer, 0, wall.footer_y,
+                       geo.screen_width, wall.footer_y);
+    if (menu->media_wall_footer_title != NULL)
+        SDL_RenderCopy(renderer, menu->media_wall_footer_title, NULL,
+                       &menu->media_wall_footer_title_rect);
+    if (menu->media_wall_footer_meta != NULL)
+        SDL_RenderCopy(renderer, menu->media_wall_footer_meta, NULL,
+                       &menu->media_wall_footer_meta_rect);
+    for (size_t i = 0; i < 4; i++) {
+        if (menu->media_wall_badge_text[i] == NULL)
+            continue;
+        SDL_Rect badge = menu->media_wall_badge_rect[i];
+        SDL_Color fill = {17, 30, 51, 240};
+        SDL_Color border = {57, 82, 121, 255};
+        if (i == 3) {
+            /* Format of file source: no claims about output/tone mapping. */
+            switch (menu->media_wall_badge_source_format) {
+                case MEDIA_WALL_FORMAT_DOLBY_VISION:
+                    fill = (SDL_Color){52, 28, 80, 245};
+                    border = (SDL_Color){172, 112, 233, 255};
+                    break;
+                case MEDIA_WALL_FORMAT_HDR10_PLUS:
+                case MEDIA_WALL_FORMAT_HDR10:
+                    fill = (SDL_Color){70, 48, 18, 245};
+                    border = (SDL_Color){225, 171, 70, 255};
+                    break;
+                case MEDIA_WALL_FORMAT_HLG:
+                    fill = (SDL_Color){20, 65, 57, 245};
+                    border = (SDL_Color){80, 186, 164, 255};
+                    break;
+                default: break;
+            }
+        }
+        fill_rounded_rect(renderer, &badge, geo.screen_height / 170, fill);
+        SDL_SetRenderDrawColor(renderer, border.r, border.g, border.b, border.a);
+        SDL_RenderDrawRect(renderer, &badge);
+        SDL_RenderCopy(renderer, menu->media_wall_badge_text[i], NULL,
+                       &menu->media_wall_badge_text_rect[i]);
+    }
+    if (menu->media_wall_footer_help != NULL)
+        SDL_RenderCopy(renderer, menu->media_wall_footer_help, NULL,
+                       &menu->media_wall_footer_help_rect);
+    media_wall_bound_cache(menu);
+}
+
+/* Header navigation is a view of the existing CORE menus, not a new
+ * media engine. Never create / invent an absent route or playback action. */
+static void media_wall_activate_tab(void)
+{
+    if (!is_media_wall(current_menu) || !prepare_media_wall(current_menu) ||
+        !current_menu->media_wall.tab_focused)
+        return;
+    MediaWallTab tab = current_menu->media_wall.tab;
+    if (tab == MEDIA_WALL_TAB_FILMS) {
+        (void) media_wall_move_vertical(&current_menu->media_wall, 1);
+        current_menu->media_wall_focus_started = SDL_GetTicks();
+        update_media_wall_footer(current_menu);
+        update_media_wall_footer_help(current_menu);
+        return;
+    }
+    const char *target = media_wall_tab_target(tab);
+    if (target == NULL || get_menu(target) == NULL) {
+        log_debug("MediaWall tab without CORE destination: %d", (int) tab);
+        return;
+    }
+    load_submenu(target);
+}
+
+static void media_wall_move(int horizontal, int vertical)
+{
+    if (!is_media_wall(current_menu) || !prepare_media_wall(current_menu))
+        return;
+    bool was_tab_focused = current_menu->media_wall.tab_focused;
+    bool changed = false;
+    if (horizontal != 0)
+        changed = media_wall_move_horizontal(&current_menu->media_wall, horizontal);
+    if (vertical != 0)
+        changed = media_wall_move_vertical(&current_menu->media_wall, vertical) || changed;
+    if (changed) {
+        current_menu->media_wall_focus_started = SDL_GetTicks();
+        update_media_wall_footer(current_menu);
+        if (was_tab_focused != current_menu->media_wall.tab_focused)
+            update_media_wall_footer_help(current_menu);
+    }
+}
+
 
 
 static void draw_home_card(const SDL_Rect *icon_rect, bool selected)
@@ -735,11 +1462,46 @@ static void handle_keypress(SDL_Keysym *key)
     if (!tracked_is_interaction_allowed())
         return;
 
+    /* Keyboard navigation normally mutates current_entry directly.
+     * Route it to the native modal first to block hidden navigation. */
+    if (resume_modal_active) {
+        switch (key->sym) {
+            case SDLK_UP:
+            case SDLK_LEFT:
+                execute_command(":up");
+                break;
+            case SDLK_DOWN:
+            case SDLK_RIGHT:
+                execute_command(":down");
+                break;
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                execute_command(":select");
+                break;
+            case SDLK_ESCAPE:
+            case SDLK_BACKSPACE:
+                execute_command(":back");
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+
+
     if (config.debug)
         log_debug("Key %s (#%X) detected", SDL_GetKeyName(key->sym), key->sym);
 
     // Check default keys
-    if ((is_media_sidebar() || is_media_list() || is_system_root() || is_disc_ambiguous()) && key->sym == SDLK_UP) {
+    if (is_media_wall(current_menu) && key->sym == SDLK_UP)
+        media_wall_move(0, -1);
+    else if (is_media_wall(current_menu) && key->sym == SDLK_DOWN)
+        media_wall_move(0, 1);
+    else if (is_media_wall(current_menu) && key->sym == SDLK_LEFT)
+        media_wall_move(-1, 0);
+    else if (is_media_wall(current_menu) && key->sym == SDLK_RIGHT)
+        media_wall_move(1, 0);
+    else if ((is_media_sidebar() || is_media_list() || is_system_root() || is_disc_ambiguous()) && key->sym == SDLK_UP) {
         if (current_entry != NULL) current_entry->context_selected = false;
         move_left();
     }
@@ -761,6 +1523,10 @@ static void handle_keypress(SDL_Keysym *key)
         move_left();
     else if (key->sym == SDLK_RIGHT)
         move_right();
+    else if (is_media_wall(current_menu) && key->sym == SDLK_RETURN &&
+             current_menu->media_wall.tab_focused) {
+        media_wall_activate_tab();
+    }
     else if (key->sym == SDLK_RETURN) {
         log_debug("Selected Entry:\n"
             "Title: %s\n"
@@ -958,6 +1724,14 @@ static int load_menu(Menu *menu, bool set_back_menu, bool reset_position)
         current_menu->back = previous_menu;
 
     if (reset_position) {
+        if (is_media_wall(current_menu) && current_menu->media_wall_initialized) {
+            current_menu->media_wall.row = MEDIA_WALL_RECENT;
+            current_menu->media_wall.selected[MEDIA_WALL_RECENT] = 0;
+            current_menu->media_wall.selected[MEDIA_WALL_ALL] = 0;
+            current_menu->media_wall.scroll[MEDIA_WALL_RECENT] = 0;
+            current_menu->media_wall.scroll[MEDIA_WALL_ALL] = 0;
+            update_media_wall_footer(current_menu);
+        }
         current_entry = current_menu->first_entry;
         current_menu->root_entry = current_entry;
         current_menu->highlight_position = 0;
@@ -984,6 +1758,15 @@ static int load_menu(Menu *menu, bool set_back_menu, bool reset_position)
             current_menu->highlight_position = 0;
             current_menu->page = 0;
         }
+    }
+
+    if (is_media_wall(current_menu)) {
+        current_entry = media_wall_entry(current_menu, current_menu->media_wall.row,
+            current_menu->media_wall.selected[current_menu->media_wall.row]);
+        current_menu->last_selected_entry = current_entry;
+        geo.num_buttons = 0;
+        publish_media_page(current_menu->name);
+        return current_entry == NULL;
     }
 
     unsigned int page_size = menu_page_size(current_menu);
@@ -1410,6 +2193,11 @@ static void render_buttons(Menu *menu)
     Entry *entry;
     int h;
 
+    if (is_media_wall(menu)) {
+        menu->rendered = prepare_media_wall(menu);
+        return;
+    }
+
     if (is_movie_detail(menu)) {
         assemble_menu_synopsis(menu);
         free_menu_detail_textures(menu);
@@ -1454,7 +2242,15 @@ static void render_buttons(Menu *menu)
         int dock_top_y = (geo.screen_height * 86) / 100;
 
         const char *font_path = (config.title_font_path != NULL) ? config.title_font_path : NULL;
-        int base_pt = (config.title_font_size > 0) ? (int)config.title_font_size : 28;
+        /* UX-F1: the HOME title font is deliberately large (e.g. 72pt on
+         * 1080p TVs), but cannot be reused as the movie-detail body font.
+         * A 72pt body clips fact-card rows and pushes synopsis below the
+         * action dock. Size detail text by output height instead:
+         * 26pt base / 35pt title at 1080p, 52pt / 70pt at 2160p.
+         * Preserve the configured font FAMILY and CJK fallback. */
+        int base_pt = (geo.screen_height * 26 + 540) / 1080;
+        if (base_pt < 16)
+            base_pt = 16;
 
         // 1. Title
         if (menu->detail_title != NULL && menu->detail_title[0] != '\0') {
@@ -1488,10 +2284,19 @@ static void render_buttons(Menu *menu)
             if (font_path != NULL) orig_font = TTF_OpenFont(font_path, orig_pt);
             if (orig_font == NULL) orig_font = title_info.font;
 
+            /* CORE original titles may contain Korean/Japanese/Han script.
+             * Use a locally installed CJK fallback when configuration has
+             * not explicitly provided one; never download font assets. */
+            const char *original_fallback = config.title_fallback_font_path;
+#ifdef __linux__
+            if (original_fallback == NULL || original_fallback[0] == '\0')
+                original_fallback =
+                    "/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc";
+#endif
             menu->detail_original_title_texture = render_text_wrapped(
                 menu->detail_original_title,
                 orig_font,
-                config.title_fallback_font_path,
+                original_fallback,
                 orig_pt,
                 (SDL_Color){160, 160, 160, 255},
                 text_max_w,
@@ -1530,7 +2335,86 @@ static void render_buttons(Menu *menu)
             if (meta_font != title_info.font) TTF_CloseFont(meta_font);
         }
 
-        // 4. Synopsis
+        // 4. Structured movie facts, taken verbatim from CORE Fact1..Fact6.
+        // Keep the synopsis and the action dock visible; missing data gets
+        // no invented placeholder. The last two facts share a technical row.
+        int fact_pt = (int)(base_pt * 0.84);
+        if (fact_pt < 12) fact_pt = 12;
+        TTF_Font *fact_font = NULL;
+        if (font_path != NULL) fact_font = TTF_OpenFont(font_path, fact_pt);
+        if (fact_font == NULL) fact_font = title_info.font;
+        const char *facts[6] = {
+            menu->detail_facts[0], menu->detail_facts[1],
+            menu->detail_facts[2], menu->detail_facts[3],
+            menu->detail_facts[4], menu->detail_source_colorimetry
+        };
+        const SDL_Color fact_colors[6] = {
+            {198, 222, 246, 255}, {245, 194, 100, 255},
+            {200, 218, 240, 255}, {204, 212, 230, 255},
+            {158, 204, 240, 255}, {190, 162, 247, 255}
+        };
+        int fact_pad_y = (geo.screen_height * 6) / 1000;
+        int fact_pad_x = (geo.screen_width * 10) / 1000;
+        int fact_gap_y = (geo.screen_height * 7) / 1000;
+        int reserved_synopsis = (menu->detail_synopsis != NULL &&
+                                 menu->detail_synopsis[0] != '\0')
+                              ? geo.screen_height * 18 / 100 : 0;
+        int facts_bottom = dock_top_y - reserved_synopsis;
+        for (int fi = 0; fi < 4; fi++) {
+            if (facts[fi] == NULL || facts[fi][0] == '\0' ||
+                cur_y + fact_pad_y * 2 >= facts_bottom)
+                continue;
+            int row_height = (fi == 3 ? geo.screen_height * 72 / 1000 :
+                                        geo.screen_height * 57 / 1000);
+            if (row_height > facts_bottom - cur_y)
+                row_height = facts_bottom - cur_y;
+            if (row_height <= fact_pad_y * 2)
+                break;
+            menu->detail_fact_textures[fi] = render_text_wrapped(
+                facts[fi], fact_font, config.title_fallback_font_path,
+                fact_pt, fact_colors[fi],
+                text_max_w - fact_pad_x * 2, row_height - fact_pad_y * 2,
+                &menu->detail_fact_rects[fi]);
+            if (menu->detail_fact_textures[fi] == NULL)
+                continue;
+            menu->detail_fact_rects[fi].x = text_x + fact_pad_x;
+            menu->detail_fact_rects[fi].y = cur_y + fact_pad_y;
+            cur_y += menu->detail_fact_rects[fi].h +
+                     fact_pad_y * 2 + fact_gap_y;
+        }
+        int technical_gap = geo.screen_width * 12 / 1000;
+        int technical_width = (text_max_w - technical_gap) / 2;
+        int technical_height = 0;
+        for (int fi = 4; fi < 6; fi++) {
+            if (facts[fi] == NULL || facts[fi][0] == '\0' ||
+                cur_y + fact_pad_y * 2 >= facts_bottom)
+                continue;
+            int max_height = geo.screen_height * 82 / 1000;
+            if (max_height > facts_bottom - cur_y)
+                max_height = facts_bottom - cur_y;
+            menu->detail_fact_textures[fi] = render_text_wrapped(
+                facts[fi], fact_font, config.title_fallback_font_path,
+                fact_pt, fact_colors[fi],
+                technical_width - fact_pad_x * 2,
+                max_height - fact_pad_y * 2,
+                &menu->detail_fact_rects[fi]);
+            if (menu->detail_fact_textures[fi] == NULL)
+                continue;
+            menu->detail_fact_rects[fi].x =
+                text_x + (fi - 4) * (technical_width + technical_gap) +
+                fact_pad_x;
+            menu->detail_fact_rects[fi].y = cur_y + fact_pad_y;
+            int height = menu->detail_fact_rects[fi].h +
+                         fact_pad_y * 2;
+            if (height > technical_height)
+                technical_height = height;
+        }
+        if (technical_height > 0)
+            cur_y += technical_height + fact_gap_y;
+        if (fact_font != title_info.font)
+            TTF_CloseFont(fact_font);
+
+        // 5. Synopsis — remaining height is bounded by the action dock.
         if (menu->detail_synopsis != NULL && menu->detail_synopsis[0] != '\0') {
             int avail_h = dock_top_y - cur_y;
             if (avail_h > 0) {
@@ -1615,6 +2499,12 @@ static void render_buttons(Menu *menu)
 static void free_menu_detail_textures(Menu *menu)
 {
     if (menu == NULL) return;
+    for (int i = 0; i < 6; i++) {
+        if (menu->detail_fact_textures[i] != NULL) {
+            SDL_DestroyTexture(menu->detail_fact_textures[i]);
+            menu->detail_fact_textures[i] = NULL;
+        }
+    }
     if (menu->detail_poster_texture != NULL) {
         SDL_DestroyTexture(menu->detail_poster_texture);
         menu->detail_poster_texture = NULL;
@@ -1640,6 +2530,7 @@ static void free_menu_detail_textures(Menu *menu)
 static void free_menu_entries(Menu *menu)
 {
     if (menu == NULL) return;
+    free_media_wall(menu);
     free_menu_detail_textures(menu);
     Entry *entry = menu->first_entry;
     while (entry != NULL) {
@@ -1721,6 +2612,8 @@ static void reload_menu_section(Menu *menu)
         if (!strcmp(key, "Layout")) {
             if (!strcmp(val, "MovieDetail")) {
                 menu->layout = LAYOUT_MOVIE_DETAIL;
+            } else if (!strcmp(val, "MediaWall")) {
+                menu->layout = LAYOUT_MEDIA_WALL;
             } else {
                 menu->layout = LAYOUT_DEFAULT;
             }
@@ -1749,6 +2642,18 @@ static void reload_menu_section(Menu *menu)
         if (!strcmp(key, "Metadata")) {
             free(menu->detail_metadata);
             menu->detail_metadata = strdup(val);
+            continue;
+        }
+        if (strlen(key) == 5 && !strncmp(key, "Fact", 4) &&
+            key[4] >= '1' && key[4] <= '5') {
+            int fact = key[4] - '1';
+            free(menu->detail_facts[fact]);
+            menu->detail_facts[fact] = strdup(val);
+            continue;
+        }
+        if (!strcmp(key, "Fact6")) {
+            free(menu->detail_source_colorimetry);
+            menu->detail_source_colorimetry = strdup(val);
             continue;
         }
 
@@ -2367,6 +3272,294 @@ static void draw_home_network_indicator(void)
     }
 }
 
+/* P0 V5 modal is purely in-process, non-modal to the persistent service,
+ * but blocks ordinary Flex navigation until a choice or B/cancel.
+ * The trusted token is always revalidated by openhtpc-play before MPV. */
+static bool resume_token_valid(const char *token)
+{
+    if (token == NULL || strlen(token) != 37 || strncmp(token, "mact_", 5) != 0)
+        return false;
+    for (int i = 5; i < 37; i++)
+        if (!((token[i] >= '0' && token[i] <= '9') ||
+              (token[i] >= 'a' && token[i] <= 'f')))
+            return false;
+    return true;
+}
+
+static bool resume_player_path(char *path, size_t length)
+{
+    const char *install = getenv("OPENHTPC_INSTALL_DIR");
+    const char *home = getenv("HOME");
+    int n = -1;
+    if (install != NULL && install[0] == '/')
+        n = snprintf(path, length, "%s/openhtpc-play", install);
+    else if (home != NULL && home[0] == '/')
+        n = snprintf(path, length, "%s/.local/lib/openhtpc/openhtpc-play", home);
+    return n > 0 && (size_t)n < length && access(path, X_OK) == 0;
+}
+
+/* Query a checkpoint only when user selects LIRE LE FILM, never during
+ * global HOME regeneration. The returned 0/1/2 is stable and bounded.
+ * 0 checkpoint: modal; 1 first play: immediate MPV; 2 invalid: deny.
+ */
+static int resume_offer_probe(const char *token)
+{
+    char executable[PATH_MAX];
+    if (!resume_token_valid(token) ||
+        !resume_player_path(executable, sizeof(executable)))
+        return 2;
+    pid_t pid = fork();
+    if (pid < 0) return 2;
+    if (pid == 0) {
+        /* Isolate probe descendants so a hung helper cannot leave a
+         * background subprocess behind when the 1.5 s budget expires. */
+        if (setpgid(0, 0) != 0) _exit(126);
+        execl(executable, executable, "--resume-probe", token, (char *)NULL);
+        _exit(126);
+    }
+    int status = 0;
+    for (int tries = 0; tries < 30; tries++) {
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) {
+            /* Even when the probe exits quickly, an untrusted helper may
+             * leave descendants alive. Reap their dedicated process group
+             * without changing the successful 0/1 probe contract. */
+            (void)kill(-pid, SIGKILL);
+            return WIFEXITED(status) &&
+                (WEXITSTATUS(status) == 0 || WEXITSTATUS(status) == 1)
+                    ? WEXITSTATUS(status) : 2;
+        }
+        if (result < 0) {
+            if (errno == EINTR) continue;
+            if (getpgid(pid) == pid)
+                (void)kill(-pid, SIGKILL);
+            (void)kill(pid, SIGKILL);
+            (void)waitpid(pid, &status, 0);
+            return 2;
+        }
+        SDL_Delay(50);
+    }
+    /* The child created its own process group before exec; terminate the
+     * entire timed-out probe tree, not just its shell wrapper. */
+    if (getpgid(pid) == pid)
+        (void)kill(-pid, SIGKILL);
+    (void)kill(pid, SIGKILL);
+    (void)waitpid(pid, &status, 0);
+    log_error("P0 resume checkpoint probe exceeded timeout");
+    return 2;
+}
+
+static void close_resume_modal(void)
+{
+    for (int i = 0; i < 5; i++) {
+        if (resume_modal_labels[i] != NULL) {
+            SDL_DestroyTexture(resume_modal_labels[i]);
+            resume_modal_labels[i] = NULL;
+        }
+        resume_modal_label_width[i] = 0;
+        resume_modal_label_height[i] = 0;
+    }
+    resume_modal_active = false;
+    resume_modal_selected = 0;
+    resume_modal_token[0] = '\0';
+}
+
+static void open_resume_modal(const char *token)
+{
+    if (!resume_token_valid(token) || !is_movie_detail(current_menu)) return;
+    close_resume_modal();
+    snprintf(resume_modal_token, sizeof(resume_modal_token), "%s", token);
+    const char *labels[5] = {
+        "REPRISE DE LECTURE",
+        "Comment continuer ?",
+        "Reprise de lecture",
+        "Lire depuis le début",
+        "Retour"
+    };
+    const SDL_Color white = {239, 247, 255, 255};
+    for (int i = 0; i < 5; i++) {
+        if (title_info.font == NULL) break;
+        SDL_Surface *surface = TTF_RenderUTF8_Blended(
+            title_info.font, labels[i], white);
+        if (surface == NULL) continue;
+        resume_modal_labels[i] = SDL_CreateTextureFromSurface(renderer, surface);
+        resume_modal_label_width[i] = surface->w;
+        resume_modal_label_height[i] = surface->h;
+        SDL_FreeSurface(surface);
+    }
+    resume_modal_active = true;
+    resume_modal_selected = 0;
+    log_debug("P0_NATIVE_MODAL_OPEN");
+}
+
+static void draw_resume_modal_label(int index, const SDL_Rect *area,
+                                    int max_text_height)
+{
+    if (index < 0 || index >= 5 || resume_modal_labels[index] == NULL ||
+        resume_modal_label_width[index] <= 0 ||
+        resume_modal_label_height[index] <= 0)
+        return;
+    int h = max_text_height;
+    int w = (resume_modal_label_width[index] * h) /
+             resume_modal_label_height[index];
+    if (w > area->w) {
+        w = area->w;
+        h = (resume_modal_label_height[index] * w) /
+             resume_modal_label_width[index];
+    }
+    SDL_Rect destination = {
+        area->x + (area->w - w) / 2,
+        area->y + (area->h - h) / 2, w, h
+    };
+    if (index == 0)
+        SDL_SetTextureColorMod(resume_modal_labels[index], 65, 205, 255);
+    else if (index == 1)
+        SDL_SetTextureColorMod(resume_modal_labels[index], 190, 206, 218);
+    else
+        SDL_SetTextureColorMod(resume_modal_labels[index], 250, 250, 250);
+    SDL_RenderCopy(renderer, resume_modal_labels[index], NULL, &destination);
+}
+
+static void draw_resume_modal(void)
+{
+    if (!resume_modal_active) return;
+    const int sw = geo.screen_width, sh = geo.screen_height;
+    if (sw <= 0 || sh <= 0) return;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 4, 12, 150);
+    SDL_Rect shade = {0, 0, sw, sh};
+    SDL_RenderFillRect(renderer, &shade);
+    /* V5.2 cosmetic-only: a clearly compact, centered popup.
+     * 36 x 39% of screen area, approximately 55% less than V5 initial.
+     * Every controller, token, checkpoint and playback path is unchanged. */
+    SDL_Rect panel = {sw * 32 / 100, sh * 305 / 1000,
+                      sw * 36 / 100, sh * 39 / 100};
+    int radius = sh / 45;
+    SDL_Rect shadow = {panel.x - 12, panel.y - 12,
+                       panel.w + 24, panel.h + 24};
+    fill_rounded_rect(renderer, &shadow, radius + 6,
+                      (SDL_Color){0, 0, 0, 150});
+    fill_rounded_rect(renderer, &panel, radius,
+                      (SDL_Color){40, 170, 225, 245});
+    SDL_Rect inner = {panel.x + 2, panel.y + 2,
+                      panel.w - 4, panel.h - 4};
+    fill_rounded_rect(renderer, &inner, radius - 1,
+                      (SDL_Color){11, 24, 37, 248});
+    SDL_Rect bar = {panel.x + panel.w / 15, panel.y + panel.h * 31 / 100,
+                    panel.w * 13 / 15, sh / 500 + 2};
+    fill_rounded_rect(renderer, &bar, 2,
+                      (SDL_Color){35, 198, 255, 210});
+    SDL_Rect heading = {panel.x + panel.w / 12, panel.y + panel.h * 7 / 100,
+                        panel.w * 10 / 12, panel.h * 11 / 100};
+    draw_resume_modal_label(0, &heading, sh * 57 / 1000);
+    SDL_Rect sub = {panel.x + panel.w / 14, panel.y + panel.h * 20 / 100,
+                    panel.w * 12 / 14, panel.h * 10 / 100};
+    draw_resume_modal_label(1, &sub, sh * 32 / 1000);
+    int first_y = panel.y + panel.h * 37 / 100;
+    int row_h = panel.h * 14 / 100;
+    int row_gap = panel.h * 5 / 100;
+    for (int i = 0; i < 3; i++) {
+        SDL_Rect item = {panel.x + panel.w / 8,
+                         first_y + i * (row_h + row_gap),
+                         panel.w * 3 / 4, row_h};
+        if (i == resume_modal_selected) {
+            SDL_Rect outer = {item.x - 3, item.y - 3,
+                              item.w + 6, item.h + 6};
+            fill_rounded_rect(renderer, &outer, sh / 100,
+                              (SDL_Color){39, 200, 255, 215});
+            fill_rounded_rect(renderer, &item, sh / 100,
+                              (SDL_Color){21, 80, 110, 246});
+        } else {
+            fill_rounded_rect(renderer, &item, sh / 100,
+                              (SDL_Color){30, 43, 57, 238});
+        }
+        SDL_Rect text_area = {item.x + item.w / 15,
+                              item.y, item.w * 13 / 15, item.h};
+        draw_resume_modal_label(i + 2, &text_area, sh * 44 / 1000);
+    }
+}
+
+
+/* Use exactly the same vetted executable for probe and tracked playback.
+ * Shell-quote an arbitrary absolute installed path, including spaces and
+ * apostrophes. The token and mode remain strictly validated literals. */
+static bool resume_shell_quote_path(const char *path, char *dest, size_t cap)
+{
+    if (path == NULL || path[0] != '/' || cap < 3)
+        return false;
+    size_t pos = 0;
+    dest[pos++] = '\'';
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '\'') {
+            const char escaped[] = "'\\''";
+            if (pos + sizeof(escaped) >= cap)
+                return false;
+            memcpy(dest + pos, escaped, sizeof(escaped) - 1);
+            pos += sizeof(escaped) - 1;
+        } else {
+            if (pos + 2 >= cap)
+                return false;
+            dest[pos++] = *p;
+        }
+    }
+    dest[pos++] = '\'';
+    dest[pos] = '\0';
+    return true;
+}
+
+static void resume_launch_player(const char *token, const char *choice)
+{
+    if (!resume_token_valid(token))
+        return;
+    if (choice != NULL && strcmp(choice, "resume") != 0 &&
+        strcmp(choice, "restart") != 0)
+        return;
+
+    char executable[PATH_MAX];
+    char quoted[(PATH_MAX * 4) + 3];
+    if (!resume_player_path(executable, sizeof(executable)) ||
+        !resume_shell_quote_path(executable, quoted, sizeof(quoted))) {
+        log_error("P0 player launch refused: executable path unavailable");
+        return;
+    }
+
+    char cmd[sizeof(quoted) + 128];
+    int n = choice != NULL
+        ? snprintf(cmd, sizeof(cmd), ":tracked %s --resume-choice %s %s",
+                   quoted, choice, token)
+        : snprintf(cmd, sizeof(cmd), ":tracked %s %s", quoted, token);
+    if (n > 0 && (size_t)n < sizeof(cmd))
+        execute_command(cmd);
+    else
+        log_error("P0 player launch refused: command path too long");
+}
+
+static void launch_resume_modal_choice(const char *token, int choice)
+{
+    if (choice == 2) return; /* Retour means no action, no MPV. */
+    if (choice != 0 && choice != 1) return;
+    resume_launch_player(token, choice == 0 ? "resume" : "restart");
+}
+
+static void run_resume_modal_action(const char *token)
+{
+    if (!resume_token_valid(token) || !is_movie_detail(current_menu))
+        return;
+    if (!tracked_can_launch()) return;
+    int offer = resume_offer_probe(token);
+    if (offer == 0) {
+        log_debug("P0_NATIVE_MODAL_CHECKPOINT_OFFER");
+        open_resume_modal(token);
+        return;
+    }
+    if (offer == 1) {
+        log_debug("P0_NATIVE_MODAL_FIRST_PLAY_DIRECT");
+        resume_launch_player(token, NULL);
+    } else {
+        log_error("P0 resume probe refused playback due to invalid action");
+    }
+}
+
 static void draw_activity_overlay(void)
 {
     if (!activity_visible || activity_texture == NULL)
@@ -2542,8 +3735,16 @@ static void load_back_menu(Menu *menu)
 {
     if (menu == NULL)
         return;
-    if (menu->back != NULL)
-        load_menu(menu->back, false, config.reset_on_back);
+    if (menu->back != NULL) {
+        /* Preserve the exact action button on MovieDetail after returning
+         * from an identification or other child sheet. MediaWall keeps its
+         * already validated poster selection behavior unchanged. */
+        const bool preserve_action = is_movie_detail(menu->back);
+        load_menu(menu->back, false,
+                  preserve_action ? false :
+                  media_wall_reset_on_back(is_media_wall(menu->back),
+                                           config.reset_on_back));
+    }
     else if (default_menu != NULL && menu != default_menu)
         load_menu(default_menu, false, config.reset_on_back);
 }
@@ -2567,11 +3768,11 @@ static void draw_screen()
             SDL_RenderCopy(renderer, background_overlay, NULL, NULL);
 
         // Draw scroll indicators
-        if (config.scroll_indicators &&
+        if (!is_media_wall(current_menu) && config.scroll_indicators &&
         (current_menu->page*menu_page_size(current_menu) + (unsigned int) geo.num_buttons) <= (current_menu->num_entries - 1))
             SDL_RenderCopy(renderer, scroll->texture, NULL, &scroll->rect_right);
 
-        if (config.scroll_indicators && current_menu->page > 0)
+        if (!is_media_wall(current_menu) && config.scroll_indicators && current_menu->page > 0)
             SDL_RenderCopyEx(renderer, scroll->texture, NULL, &scroll->rect_left, 0, NULL, SDL_FLIP_HORIZONTAL);
 
         // Draw clock
@@ -2579,6 +3780,90 @@ static void draw_screen()
             SDL_RenderCopy(renderer, clk->time_texture, NULL, &clk->time_rect);
             if (config.clock_show_date)
                 SDL_RenderCopy(renderer, clk->date_texture, NULL, &clk->date_rect);
+        }
+
+        if (is_media_wall(current_menu)) {
+            draw_media_wall();
+            draw_home_network_indicator();
+            draw_activity_overlay();
+            if (state.screensaver_active)
+                SDL_RenderCopy(renderer, screensaver->texture, NULL, NULL);
+
+
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+            /* QA-only screenshots: real cached posters, HOME and config remain isolated. */
+            bool qa_actions_capture = getenv("OPENHTPC_LAB_QA_SCENARIO") != NULL &&
+                strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"),
+                       "uxf1-actions") == 0;
+            bool tabs_test = getenv("OPENHTPC_LAB_QA_SCENARIO") != NULL &&
+                (strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"), "tabs") == 0 ||
+                 qa_actions_capture);
+            bool capture = (qa_actions_capture && lab_qa_loop == 245) ||
+                           (tabs_test
+                ? (lab_qa_loop == 20 || lab_qa_loop == 39 ||
+                   lab_qa_loop == 54 || lab_qa_loop == 90 ||
+                   lab_qa_loop == 104 || lab_qa_loop == 139 ||
+                   lab_qa_loop == 155 || lab_qa_loop == 175 ||
+                   lab_qa_loop == 195 || lab_qa_loop == 215)
+                : (lab_qa_loop == 20 || lab_qa_loop == 36 ||
+                   lab_qa_loop == 44 || lab_qa_loop == 60 ||
+                   lab_qa_loop == 100 || lab_qa_loop == 130 ||
+                   lab_qa_loop == 198 || lab_qa_loop == 235));
+            if (capture) {
+                const char *prefix = getenv("OPENHTPC_LAB_QA_SCREENSHOT_PREFIX");
+                if (prefix != NULL && prefix[0] == '/') {
+                    int width = 0, height = 0;
+                    if (SDL_GetRendererOutputSize(renderer, &width, &height) == 0
+                            && width > 0 && height > 0 && width <= 4096
+                            && height <= 2304) {
+                        SDL_Surface *frame = SDL_CreateRGBSurfaceWithFormat(
+                            0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
+                        if (frame != NULL) {
+                            if (SDL_RenderReadPixels(renderer, NULL,
+                                SDL_PIXELFORMAT_ARGB8888,
+                                frame->pixels, frame->pitch) == 0) {
+                                char name[1024];
+                                const char *stage = tabs_test ?
+                                    (lab_qa_loop == 20 ? "initial" :
+                                     lab_qa_loop == 39 ? "tab-films" :
+                                     lab_qa_loop == 54 ? "tab-disque" :
+                                     lab_qa_loop == 90 ? "back-disque" :
+                                     lab_qa_loop == 104 ? "tab-dossiers" :
+                                     lab_qa_loop == 139 ? "back-dossiers" :
+                                     lab_qa_loop == 155 ? "posters" :
+                                     lab_qa_loop == 175 ? "poster-next" :
+                                     lab_qa_loop == 195 ? "film-detail" :
+                                     qa_actions_capture && lab_qa_loop == 245 ?
+                                         "return-film" : "return-film") :
+                                    (lab_qa_loop == 20 ? "initial" :
+                                     lab_qa_loop == 36 ? "focus-start" :
+                                     lab_qa_loop == 44 ? "focus-mid" :
+                                     lab_qa_loop == 60 ? "right" :
+                                     lab_qa_loop == 100 ? "down" :
+                                     lab_qa_loop == 130 ? "return" :
+                                     lab_qa_loop == 198 ? "scrolled" : "return-scroll");
+                                snprintf(name, sizeof(name), "%s-%s.png",
+                                         prefix, stage);
+                                int rc = IMG_SavePNG(frame, name);
+                                fprintf(stderr, "LAB_QA_CAPTURE %s rc=%d %dx%d\n",
+                                    name, rc, width, height);
+                            } else {
+                                fprintf(stderr, "LAB_QA_READPIXELS %s\n",
+                                    SDL_GetError());
+                            }
+                            SDL_FreeSurface(frame);
+                        }
+                    }
+                }
+            }
+#endif
+            SDL_RenderPresent(renderer);
+            if (!config.vsync) {
+                Uint32 elapsed_ms = SDL_GetTicks() - ticks.main;
+                if (elapsed_ms < refresh_period)
+                    SDL_Delay(refresh_period - elapsed_ms);
+            }
+            return;
         }
 
         // OpenHTPC MediaSidebar :
@@ -2697,6 +3982,49 @@ static void draw_screen()
             }
             if (current_menu->detail_metadata_texture != NULL) {
                 SDL_RenderCopy(renderer, current_menu->detail_metadata_texture, NULL, &current_menu->detail_metadata_rect);
+            }
+            /* Compact, consistent cards; each label is a literal CORE fact.
+             * Two technical cards share the final row. */
+            int fact_pad_x = (geo.screen_width * 10) / 1000;
+            int fact_pad_y = (geo.screen_height * 6) / 1000;
+            int detail_x = (geo.screen_width * 6) / 100 +
+                           (geo.screen_width * 26) / 100 +
+                           (geo.screen_width * 4) / 100;
+            int detail_width = geo.screen_width * 94 / 100 - detail_x;
+            int technical_gap = geo.screen_width * 12 / 1000;
+            int technical_width = (detail_width - technical_gap) / 2;
+            for (int fi = 0; fi < 6; fi++) {
+                if (current_menu->detail_fact_textures[fi] == NULL)
+                    continue;
+                SDL_Rect text = current_menu->detail_fact_rects[fi];
+                SDL_Rect card = {
+                    text.x - fact_pad_x, text.y - fact_pad_y,
+                    fi < 4 ? detail_width : technical_width,
+                    text.h + fact_pad_y * 2
+                };
+                SDL_Color fill = {13, 29, 53, 233};
+                SDL_Color edge = {55, 81, 120, 255};
+                if (fi == 1) {
+                    fill = (SDL_Color){52, 40, 21, 237};
+                    edge = (SDL_Color){150, 112, 55, 255};
+                } else if (fi == 5) {
+                    MediaWallSourceFormat format = media_wall_parse_source_format(
+                        current_menu->detail_source_colorimetry);
+                    if (format == MEDIA_WALL_FORMAT_DOLBY_VISION) {
+                        fill = (SDL_Color){46, 27, 72, 238};
+                        edge = (SDL_Color){139, 94, 189, 255};
+                    } else if (format == MEDIA_WALL_FORMAT_HDR10 ||
+                               format == MEDIA_WALL_FORMAT_HDR10_PLUS) {
+                        fill = (SDL_Color){55, 39, 21, 237};
+                        edge = (SDL_Color){151, 113, 53, 255};
+                    }
+                }
+                fill_rounded_rect(renderer, &card,
+                                  geo.screen_height / 150, fill);
+                SDL_SetRenderDrawColor(renderer, edge.r, edge.g, edge.b, 255);
+                SDL_RenderDrawRect(renderer, &card);
+                SDL_RenderCopy(renderer, current_menu->detail_fact_textures[fi],
+                               NULL, &text);
             }
             if (current_menu->detail_synopsis_texture != NULL) {
                 SDL_RenderCopy(renderer, current_menu->detail_synopsis_texture, NULL, &current_menu->detail_synopsis_rect);
@@ -2897,6 +4225,7 @@ static void draw_screen()
         // below the screensaver. It never participates in input/navigation.
         draw_home_network_indicator();
         draw_activity_overlay();
+        draw_resume_modal();
 
         // Draw screensaver
         if (state.screensaver_active)
@@ -2905,12 +4234,72 @@ static void draw_screen()
     else
         SDL_RenderFillRect(renderer, NULL);
 
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+    /* The main wall takes its own screenshots before an early return.
+     * MovieDetail uses the ordinary renderer path: capture it separately,
+     * without changing any real production behavior or controller input. */
+    if (is_movie_detail(current_menu) &&
+        lab_qa_loop == 195 &&
+        getenv("OPENHTPC_LAB_QA_SCENARIO") != NULL &&
+        (strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"), "tabs") == 0 ||
+         strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"), "uxf1-actions") == 0)) {
+        const char *prefix = getenv("OPENHTPC_LAB_QA_SCREENSHOT_PREFIX");
+        if (prefix != NULL && prefix[0] == '/') {
+            int width = 0, height = 0;
+            if (SDL_GetRendererOutputSize(renderer, &width, &height) == 0 &&
+                width > 0 && height > 0 && width <= 4096 && height <= 2304) {
+                SDL_Surface *frame = SDL_CreateRGBSurfaceWithFormat(
+                    0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
+                if (frame != NULL) {
+                    if (SDL_RenderReadPixels(renderer, NULL,
+                        SDL_PIXELFORMAT_ARGB8888, frame->pixels,
+                        frame->pitch) == 0) {
+                        char name[1024];
+                        snprintf(name, sizeof(name), "%s-film-detail.png",
+                                 prefix);
+                        int rc = IMG_SavePNG(frame, name);
+                        int facts_count = 0;
+                        for (int i = 0; i < 6; i++)
+                            if (current_menu->detail_fact_textures[i] != NULL)
+                                facts_count++;
+                        fprintf(stderr,
+                            "LAB_QA_DETAIL title=%s facts=%d synopsis=%d\n",
+                            current_menu->detail_title != NULL ?
+                            current_menu->detail_title : "NULL",
+                            facts_count,
+                            current_menu->detail_synopsis_texture != NULL);
+                        fprintf(stderr, "LAB_QA_CAPTURE %s rc=%d %dx%d\n",
+                                name, rc, width, height);
+                    }
+                    SDL_FreeSurface(frame);
+                }
+            }
+        }
+    }
+#endif
+#ifdef OPENHTPC_MODAL_QA
+    /* QA-only screenshot; never compiled into the Release payload. */
+    if (resume_modal_active) {
+        const char *path = getenv("OPENHTPC_MODAL_QA_BMP");
+        if (path != NULL && path[0] == '/' && access(path,F_OK) != 0) {
+            SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(
+                0, geo.screen_width, geo.screen_height, 32, SDL_PIXELFORMAT_ARGB8888);
+            if (surface != NULL) {
+                if (SDL_RenderReadPixels(renderer,NULL,SDL_PIXELFORMAT_ARGB8888,
+                                         surface->pixels,surface->pitch)==0)
+                    SDL_SaveBMP(surface,path);
+                SDL_FreeSurface(surface);
+            }
+        }
+    }
+#endif
+
     // Output to screen
     SDL_RenderPresent(renderer);
     if (!config.vsync) {
-        Uint32 sleep_time = refresh_period - (SDL_GetTicks() - ticks.main);
-        if (sleep_time > 0)
-            SDL_Delay(sleep_time);
+        Uint32 elapsed_ms = SDL_GetTicks() - ticks.main;
+        if (elapsed_ms < refresh_period)
+            SDL_Delay(refresh_period - elapsed_ms);
     }
 }
 
@@ -2919,6 +4308,24 @@ static void execute_command(const char *command)
 {
     if (command == NULL)
         return;
+
+    if (resume_modal_active) {
+        if (!strcmp(command, ":up") || !strcmp(command, ":left")) {
+            resume_modal_selected = (resume_modal_selected + 2) % 3;
+        } else if (!strcmp(command, ":down") || !strcmp(command, ":right")) {
+            resume_modal_selected = (resume_modal_selected + 1) % 3;
+        } else if (!strcmp(command, ":back")) {
+            close_resume_modal();
+        } else if (!strcmp(command, ":select")) {
+            char token[sizeof(resume_modal_token)];
+            int selected = resume_modal_selected;
+            snprintf(token, sizeof(token), "%s", resume_modal_token);
+            close_resume_modal();
+            launch_resume_modal_choice(token, selected);
+        }
+        return;
+    }
+
 
     if (!tracked_guard_command(command))
         return;
@@ -2934,6 +4341,10 @@ static void execute_command(const char *command)
             char *submenu = strtok(NULL, "");
             if (submenu != NULL)
                 load_submenu(submenu);
+        }
+        else if (!strcmp(special_command, ":mediaresumepopup")) {
+            char *token = strtok(NULL, " ");
+            run_resume_modal_action(token);
         }
         else if (!strcmp(special_command, SCMD_FORK)) {
             char *fork_command = strtok(NULL, "");
@@ -3012,7 +4423,9 @@ static void execute_command(const char *command)
             }
         }
         else if (!strcmp(special_command, SCMD_LEFT)) {
-            if (is_media_list() && current_entry != NULL && current_entry->context_selected)
+            if (is_media_wall(current_menu))
+                media_wall_move(-1, 0);
+            else if (is_media_list() && current_entry != NULL && current_entry->context_selected)
                 current_entry->context_selected = false;
             else {
                 if (current_entry != NULL) current_entry->context_selected = false;
@@ -3020,15 +4433,27 @@ static void execute_command(const char *command)
             }
         }
         else if (!strcmp(special_command, SCMD_RIGHT)) {
-            if (is_media_list() && current_entry != NULL && current_entry->context_cmd != NULL && !current_entry->context_selected)
+            if (is_media_wall(current_menu))
+                media_wall_move(1, 0);
+            else if (is_media_list() && current_entry != NULL && current_entry->context_cmd != NULL && !current_entry->context_selected)
                 current_entry->context_selected = true;
             else {
                 if (current_entry != NULL) current_entry->context_selected = false;
                 move_right();
             }
         }
+        else if (!strcmp(special_command, SCMD_UP)) {
+            if (is_media_wall(current_menu)) media_wall_move(0, -1);
+            else move_left();
+        }
+        else if (!strcmp(special_command, SCMD_DOWN)) {
+            if (is_media_wall(current_menu)) media_wall_move(0, 1);
+            else move_right();
+        }
         else if (!strcmp(special_command, SCMD_SELECT)) {
-            if (current_entry != NULL && current_entry->context_selected && current_entry->context_cmd != NULL)
+            if (is_media_wall(current_menu) && current_menu->media_wall.tab_focused)
+                media_wall_activate_tab();
+            else if (current_entry != NULL && current_entry->context_selected && current_entry->context_cmd != NULL)
                 execute_command(current_entry->context_cmd);
             else if (current_entry != NULL)
                 execute_command(current_entry->cmd);
@@ -3157,16 +4582,75 @@ static void disconnect_gamepad(int id, bool disconnect, bool remove)
 }
 
 // A function to poll the connected gamepad for commands
+static bool gamepad_any_mapped_input_pressed(void)
+{
+    for (GamepadControl *binding = gamepad_controls; binding != NULL;
+         binding = binding->next) {
+        for (Gamepad *gamepad = gamepads; gamepad != NULL;
+             gamepad = gamepad->next) {
+            if (gamepad->controller == NULL)
+                continue;
+            if (binding->type == TYPE_BUTTON) {
+                if (SDL_GameControllerGetButton(gamepad->controller,
+                                                binding->index))
+                    return true;
+            } else if (binding->type == TYPE_AXIS_POS ||
+                       binding->type == TYPE_AXIS_NEG) {
+                int axis = SDL_GameControllerGetAxis(gamepad->controller,
+                                                     binding->index);
+                int sign = binding->type == TYPE_AXIS_POS ? 1 : -1;
+                if (sign * axis > GAMEPAD_DEADZONE)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void poll_gamepad()
 {
+    /* The original Flex polls raw SDL controller state even in the background.
+     * The candidate must not: two fullscreen SDL processes may see the same
+     * physical button. Require both Wayland focus and SDL's live focus handle. */
+    if (!media_wall_controller_input_allowed(
+            state.has_focus, SDL_GetKeyboardFocus() == window))
+        return;
     if (!tracked_guard_controller())
         return;
+    if (!media_wall_controller_rearm_after_neutral(
+            &state.controller_requires_neutral,
+            gamepad_any_mapped_input_pressed()))
+        return;
+
+    /* Following an exact-child MPV exit, ignore all controller commands until
+     * B has been physically released at least once.  Reconnects are common:
+     * do not clear the latch when no controller is currently opened.
+     */
+    if (gamepad_return_requires_b_release) {
+        bool observed_controller = false;
+        bool b_is_held = false;
+        for (Gamepad *g = gamepads; g != NULL; g = g->next) {
+            if (g->controller != NULL) {
+                observed_controller = true;
+                if (SDL_GameControllerGetButton(g->controller, SDL_CONTROLLER_BUTTON_B))
+                    b_is_held = true;
+            }
+        }
+        for (GamepadControl *i = gamepad_controls; i != NULL; i = i->next)
+            i->repeat = 0;
+        if (!observed_controller || b_is_held)
+            return;
+        gamepad_return_requires_b_release = false;
+    }
+
 
     int value_multiplier = 1; // Handles positive or negative axis safely for malformed mappings
     bool pressed;
     for (GamepadControl *i = gamepad_controls; i != NULL; i = i->next) {
         pressed = false;
         for (Gamepad *gamepad = gamepads; gamepad != NULL; gamepad = gamepad->next) {
+            if (gamepad->controller == NULL)
+                continue;
 
             // Check if axis value exceeds dead zone
             if (i->type == TYPE_AXIS_POS || i->type == TYPE_AXIS_NEG) {
@@ -3195,16 +4679,33 @@ static void poll_gamepad()
             continue;
         }
 
-        // Execute command if first press or valid repeat
+        /* The default CORE repeat is 25 ms, too fast for a 9-poster row.
+         * Only directional controls in the poster wall use 420/120 ms.
+         * Outside the wall, retain the original CORE timings unchanged. */
+        const bool wall_direction =
+            is_media_wall(current_menu) &&
+            media_wall_is_directional_control(i->label);
+        const Uint32 nav_delay = wall_direction
+            ? media_wall_repeat_delay_frames(refresh_period) : delay_period;
+        const Uint32 nav_interval = wall_direction
+            ? media_wall_repeat_interval_frames(refresh_period) : repeat_period;
+
+        // Execute command immediately on the first press, then repeat slowly.
         if (i->repeat == 1) {
             log_debug("Gamepad %s detected", i->label);
             ticks.last_input = ticks.main;
-            tracked_handle_controller_action(i->cmd, execute_command);
+            const char *wall_cmd = is_media_wall(current_menu)
+                ? media_wall_gamepad_override(i->label) : NULL;
+            tracked_handle_controller_action(wall_cmd != NULL ? wall_cmd : i->cmd,
+                                             execute_command);
         }
-        else if (i->repeat == delay_period) {
+        else if (i->repeat == nav_delay) {
             ticks.last_input = ticks.main;
-            tracked_handle_controller_action(i->cmd, execute_command);
-            i->repeat -= repeat_period;
+            const char *wall_cmd = is_media_wall(current_menu)
+                ? media_wall_gamepad_override(i->label) : NULL;
+            tracked_handle_controller_action(wall_cmd != NULL ? wall_cmd : i->cmd,
+                                             execute_command);
+            i->repeat -= nav_interval;
         }
     }
 }
@@ -3355,6 +4856,7 @@ static void pre_launch()
 
 static void post_launch()
 {
+    gamepad_return_requires_b_release = true;
     SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
     SDL_RaiseWindow(window);
     // Rebaseline the timing after the program is done
@@ -3557,6 +5059,66 @@ int main(int argc, char *argv[])
     log_debug("Begin program loop");
     while (1) {
         ticks.main = SDL_GetTicks();
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+        if (getenv("OPENHTPC_LAB_QA_SCENARIO") != NULL) {
+            lab_qa_loop++;
+            SDL_Keycode injected = 0;
+            bool qa_actions = strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"),
+                                     "uxf1-actions") == 0;
+            bool tab_test = strcmp(getenv("OPENHTPC_LAB_QA_SCENARIO"),
+                                   "tabs") == 0 || qa_actions;
+            if (tab_test) {
+                /* Up: FILMS; Right: DISQUE (skips disabled SERIES).
+                 * A/B: DISQUE and back; Right/A/B: DOSSIERS and back;
+                 * Down: poster focus and A/B: film detail/return. */
+                if (lab_qa_loop == 30) injected = SDLK_UP;
+                if (lab_qa_loop == 45 || lab_qa_loop == 95 ||
+                    lab_qa_loop == 165 ||
+                    (qa_actions && (lab_qa_loop == 189 ||
+                                    lab_qa_loop == 232 ||
+                                    lab_qa_loop == 233)))
+                    injected = SDLK_RIGHT;
+                if (lab_qa_loop == 60 || lab_qa_loop == 110 ||
+                    lab_qa_loop == 185 ||
+                    (qa_actions && (lab_qa_loop == 200 ||
+                                    lab_qa_loop == 219 ||
+                                    lab_qa_loop == 235)))
+                    injected = SDLK_RETURN;
+                if (lab_qa_loop == 80 || lab_qa_loop == 130 ||
+                    (!qa_actions && lab_qa_loop == 205) ||
+                    (qa_actions && (lab_qa_loop == 210 ||
+                                    lab_qa_loop == 229)))
+                    injected = SDLK_BACKSPACE;
+                if (lab_qa_loop == 145) injected = SDLK_DOWN;
+                if (qa_actions && lab_qa_loop == 215)
+                    injected = SDLK_LEFT;
+            } else {
+                if (lab_qa_loop == 35) injected = SDLK_RIGHT;
+                if (lab_qa_loop == 75) injected = SDLK_DOWN;
+                if (lab_qa_loop == 112 || lab_qa_loop == 205)
+                    injected = SDLK_RETURN;
+                if (lab_qa_loop == 125 || lab_qa_loop == 220)
+                    injected = SDLK_BACKSPACE;
+                if (lab_qa_loop >= 140 && lab_qa_loop <= 185 &&
+                    (lab_qa_loop - 140) % 5 == 0)
+                    injected = SDLK_RIGHT;
+            }
+            if (lab_qa_loop == (qa_actions ? 260U :
+                                 (tab_test ? 235U : 245U))) {
+                SDL_Event done = {0};
+                done.type = SDL_QUIT;
+                SDL_PushEvent(&done);
+            }
+            if (injected != 0) {
+                SDL_Event synthetic = {0};
+                synthetic.type = SDL_KEYDOWN;
+                synthetic.key.keysym.sym = injected;
+                SDL_PushEvent(&synthetic);
+                fprintf(stderr, "LAB_QA_INPUT step=%u key=%s\n", lab_qa_loop,
+                    SDL_GetKeyName(injected));
+            }
+        }
+#endif
         while (SDL_PollEvent(&event)) {
             switch(event.type) {
                 case SDL_QUIT:
@@ -3599,6 +5161,12 @@ int main(int argc, char *argv[])
                     if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                         log_debug("Lost keyboard focus");
                         state.has_focus = false;
+                        state.controller_requires_neutral = true;
+                        /* Release held/repeat state before a possible handoff
+                         * to the other fullscreen Flex on the same machine. */
+                        for (GamepadControl *binding = gamepad_controls;
+                             binding != NULL; binding = binding->next)
+                            binding->repeat = 0;
                         if (state.application_launching && tracked_can_restore_on_focus()) {
                             log_debug("Application detected");
                             state.application_launching = false;
@@ -3616,6 +5184,7 @@ int main(int argc, char *argv[])
                     else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
                         log_debug("Gained keyboard focus");
                         state.has_focus = true;
+                        state.controller_requires_neutral = true;
                     }
                     else if (event.window.event == SDL_WINDOWEVENT_LEAVE)
                         log_debug("Lost mouse focus");
@@ -3628,6 +5197,210 @@ int main(int argc, char *argv[])
             }
         }
 
+#ifdef OPENHTPC_CORE_IDENT_QA
+        /* Isolated QA: exercise only :submenu and :back, never apply/launch. */
+        static bool ident_qa_done = false;
+        const char *ident_result = getenv("OPENHTPC_CORE_IDENT_QA_RESULT");
+        const char *ident_page = getenv("OPENHTPC_CORE_IDENT_QA_PAGE");
+        if (!ident_qa_done && ident_result != NULL && ident_result[0] == '/' &&
+            SDL_GetTicks() - ticks.program_start > 500) {
+            ident_qa_done = true;
+            bool detail_ok = false, entry_ok = false, sheet_ok = false;
+            bool focus_ok = false, parent_ok = false;
+            const char *parent_name = current_menu ? current_menu->name : "";
+            char parent_copy[128] = {0}, expected[64] = {0};
+            snprintf(parent_copy, sizeof(parent_copy), "%s", parent_name);
+            if (ident_page != NULL && strlen(ident_page) == 15 &&
+                strncmp(ident_page, "MEDIA_D", 7) == 0) {
+                snprintf(expected, sizeof(expected), "MEDIA_R%s", ident_page + 7);
+                detail_ok = load_menu_by_name(ident_page, true, true) == 0 &&
+                    current_menu != NULL &&
+                    strcmp(current_menu->name, ident_page) == 0;
+                if (detail_ok) {
+                    execute_command(":right");
+                    entry_ok = current_entry != NULL &&
+                        current_entry->cmd != NULL &&
+                        strcmp(current_entry->cmd, ":submenu MEDIA_R") != 0 &&
+                        strstr(current_entry->cmd, ":submenu MEDIA_R") ==
+                            current_entry->cmd &&
+                        strcmp(current_entry->cmd + strlen(":submenu "), expected) == 0;
+                    if (entry_ok) {
+                        execute_command(":select");
+                        sheet_ok = current_menu != NULL &&
+                            strcmp(current_menu->name, expected) == 0;
+                        if (sheet_ok) {
+                            execute_command(":back");
+                            focus_ok = current_menu != NULL &&
+                                strcmp(current_menu->name, ident_page) == 0 &&
+                                current_entry != NULL && current_entry->cmd != NULL &&
+                                strcmp(current_entry->cmd + strlen(":submenu "), expected) == 0;
+                            execute_command(":back");
+                            parent_ok = current_menu != NULL &&
+                                strcmp(current_menu->name, parent_copy) == 0;
+                        }
+                    }
+                }
+            }
+            FILE *out = fopen(ident_result, "w");
+            if (out != NULL) {
+                fprintf(out, "QA_IDENT_DETAIL=%d\nQA_IDENT_ENTRY=%d\n"
+                             "QA_IDENT_SHEET=%d\nQA_IDENT_FOCUS=%d\n"
+                             "QA_IDENT_BACK_TO_PARENT=%d\n",
+                        detail_ok, entry_ok, sheet_ok, focus_ok, parent_ok);
+                fclose(out);
+            }
+            quit(detail_ok && entry_ok && sheet_ok && focus_ok && parent_ok ?
+                 EXIT_SUCCESS : EXIT_FAILURE);
+        }
+#endif
+
+#ifdef OPENHTPC_MODAL_QA
+        /* Executable SDL QA path, product builds never contain it. */
+        static int qa_phase = 0;
+        static Uint32 qa_started_at = 0;
+        const char *qa_result = getenv("OPENHTPC_MODAL_QA_RESULT");
+        if (qa_result != NULL && qa_result[0] == '/') {
+            if (qa_started_at == 0) qa_started_at = SDL_GetTicks();
+            if (SDL_GetTicks() - qa_started_at > 450 && qa_phase == 0) {
+                const char *page = getenv("OPENHTPC_MODAL_QA_PAGE");
+                const char *token = getenv("OPENHTPC_MODAL_QA_TOKEN");
+                if (page == NULL || token == NULL || 
+                    load_menu_by_name(page,true,true) != 0) {
+                    FILE *f = fopen(qa_result,"w");
+                    if (f != NULL) {fputs("QA_PAGE_FAILED\n",f);fclose(f);}
+                    quit(EXIT_FAILURE);
+                }
+                if (current_entry == NULL || current_entry->cmd == NULL ||
+                    strstr(current_entry->cmd, ":mediaresumepopup ") == NULL) {
+                    FILE *f = fopen(qa_result,"w");
+                    if (f != NULL) {fputs("QA_DETAIL_COMMAND_MISSING\n",f);fclose(f);}
+                    quit(EXIT_FAILURE);
+                }
+                /* Real entry selection, including command parsing,
+                 * tracked command gate and optional probe. */
+                execute_command(current_entry->cmd);
+                if (getenv("OPENHTPC_MODAL_QA_FIRSTPLAY") != NULL) {
+                    FILE *f = fopen(qa_result,"w");
+                    if (f != NULL) {
+                        fprintf(f, "QA_FIRSTPLAY_NO_MODAL=%d\n", !resume_modal_active);
+                        fclose(f);
+                    }
+                    qa_phase = 3;
+                } else {
+                    if (!resume_modal_active) {
+                        FILE *f = fopen(qa_result,"w");
+                        if (f != NULL) {fputs("QA_MODAL_NOT_OPEN\n",f);fclose(f);}
+                        quit(EXIT_FAILURE);
+                    }
+                    if (getenv("OPENHTPC_MODAL_QA_HOLD_PREVIEW") != NULL) {
+                        /* QA-only physical demonstration: leave the native
+                         * popup visible for the bounded external runner.
+                         * No synthetic button presses or player launches. */
+                        FILE *hold = fopen(qa_result, "w");
+                        if (hold != NULL) {
+                            fprintf(hold, "QA_NATIVE_MODAL_VISIBLE=%d\\n",
+                                    resume_modal_active);
+                            fclose(hold);
+                        }
+                        qa_phase = 4;
+                    } else {
+                        qa_phase = 1;
+                    }
+                }
+            } else if (qa_phase == 1) {
+                execute_command(":down");
+                bool moved = resume_modal_selected == 1;
+                execute_command(":up");
+                moved = moved && resume_modal_selected == 0;
+                SDL_Keysym keyboard = {0};
+                keyboard.sym = SDLK_DOWN;
+                handle_keypress(&keyboard);
+                moved = moved && resume_modal_selected == 1;
+                keyboard.sym = SDLK_UP;
+                handle_keypress(&keyboard);
+                moved = moved && resume_modal_selected == 0;
+                keyboard.sym = SDLK_ESCAPE;
+                handle_keypress(&keyboard);
+                bool cancelled = !resume_modal_active;
+                run_resume_modal_action(getenv("OPENHTPC_MODAL_QA_TOKEN"));
+                bool reopened = resume_modal_active;
+                FILE *f = fopen(qa_result,"w");
+                if (f != NULL) {
+                    fprintf(f,"QA_MODAL=%d\nQA_DPAD=%d\nQA_B_CANCEL=%d\nQA_REOPEN=%d\n",
+                            reopened,moved,cancelled,reopened);
+                    fclose(f);
+                }
+                qa_phase = 2;
+            } else if (qa_phase == 2 && getenv("OPENHTPC_MODAL_QA_SELECT") != NULL) {
+                bool active_before = resume_modal_active;
+                const char *choice_env = getenv("OPENHTPC_MODAL_QA_CHOICE_INDEX");
+                if (choice_env != NULL && strcmp(choice_env, "1") == 0)
+                    execute_command(":down");
+                else if (choice_env != NULL && strcmp(choice_env, "2") == 0) {
+                    execute_command(":down");
+                    execute_command(":down");
+                }
+                execute_command(":select");
+                bool modal_dismissed = !resume_modal_active;
+                FILE *f = fopen(qa_result,"a");
+                if (f != NULL) {
+                    fprintf(f,"QA_A_SELECT=%d\n",active_before && modal_dismissed);
+                    fclose(f);
+                }
+                qa_phase = 3;
+            } else if (qa_phase == 2 &&
+                       SDL_GetTicks() - qa_started_at > 1100) {
+                close_resume_modal();
+                quit(EXIT_SUCCESS);
+            } else if (qa_phase == 3 &&
+                       SDL_GetTicks() - qa_started_at > 1600) {
+                quit(EXIT_SUCCESS);
+            }
+        }
+#endif
+
+#ifdef OPENHTPC_LAB_QA_CAPTURE
+        const char *qa_scenario = getenv("OPENHTPC_LAB_QA_SCENARIO");
+        bool tabs_qa = qa_scenario != NULL &&
+            strcmp(qa_scenario, "tabs") == 0;
+        bool actions_qa = qa_scenario != NULL &&
+            strcmp(qa_scenario, "uxf1-actions") == 0;
+        bool qa_checkpoint = actions_qa
+            ? (lab_qa_loop == 186 || lab_qa_loop == 190 ||
+               lab_qa_loop == 196 || lab_qa_loop == 202 ||
+               lab_qa_loop == 206 || lab_qa_loop == 211 ||
+               lab_qa_loop == 216 || lab_qa_loop == 221 ||
+               lab_qa_loop == 225 || lab_qa_loop == 230 ||
+               lab_qa_loop == 234 || lab_qa_loop == 236 ||
+               lab_qa_loop == 246)
+            : tabs_qa
+            ? (lab_qa_loop == 29 || lab_qa_loop == 31 ||
+               lab_qa_loop == 46 || lab_qa_loop == 61 ||
+               lab_qa_loop == 81 || lab_qa_loop == 96 ||
+               lab_qa_loop == 111 || lab_qa_loop == 131 ||
+               lab_qa_loop == 146 || lab_qa_loop == 166 ||
+               lab_qa_loop == 186 || lab_qa_loop == 196 ||
+               lab_qa_loop == 206)
+            : (lab_qa_loop == 111 || lab_qa_loop == 113 ||
+               lab_qa_loop == 126 || lab_qa_loop == 198 ||
+               lab_qa_loop == 206 || lab_qa_loop == 221 ||
+               lab_qa_loop == 235);
+        if (qa_scenario != NULL && qa_checkpoint) {
+            fprintf(stderr, "LAB_QA_STATE step=%u menu=%s entry=%s row=%d selected=%zu scroll=%zu tabfocus=%d tab=%d\n",
+                lab_qa_loop, current_menu ? current_menu->name : "NULL",
+                current_entry ? current_entry->title : "NULL",
+                current_menu && is_media_wall(current_menu)
+                    ? (int)current_menu->media_wall.row : -1,
+                current_menu && is_media_wall(current_menu)
+                    ? current_menu->media_wall.selected[current_menu->media_wall.row] : 0,
+                current_menu && is_media_wall(current_menu)
+                    ? current_menu->media_wall.scroll[current_menu->media_wall.row] : 0,
+                current_menu && is_media_wall(current_menu)
+                    ? (int)current_menu->media_wall.tab_focused : -1,
+                current_menu && is_media_wall(current_menu)
+                    ? (int)current_menu->media_wall.tab : -1);
+        }
+#endif
         // Update application state
         if (tracked_is_active()) {
             TrackedLifecycleStatus status = tracked_update(post_launch);

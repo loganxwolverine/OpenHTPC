@@ -12,7 +12,7 @@ TOOL = ROOT / "tools/openhtpc_release_metadata.py"
 SPEC = importlib.util.spec_from_file_location("release_metadata", TOOL)
 MODULE = importlib.util.module_from_spec(SPEC); assert SPEC.loader; SPEC.loader.exec_module(MODULE)
 BUILD_ID = "amd-codec-release-metadata-consistency-dev5"
-CURRENT_BUILD_ID = "public-release-1.3.2-rc3"
+CURRENT_BUILD_ID = "public-release-1.3.2-rc4"
 
 
 def fixture(root: pathlib.Path, *, top="1.1.2-dev5", payload="1.1.2-dev5",
@@ -70,9 +70,9 @@ class ReleaseMetadataConsistency(unittest.TestCase):
 
     def test_current_source_tree_is_consistent(self):
         values = MODULE.validate_tree(ROOT, CURRENT_BUILD_ID)
-        self.assertEqual(values["top_version"], "1.3.2-rc3")
-        self.assertEqual(values["product"], "OPENHTPC 1.3.2 Release Candidate 3")
-        self.assertEqual(values["build_date"], "2026-10-22")
+        self.assertEqual(values["top_version"], "1.3.2-rc4")
+        self.assertEqual(values["product"], "OPENHTPC 1.3.2 Release Candidate 4")
+        self.assertEqual(values["build_date"], "2026-11-10")
 
     def test_rc_product_identity_is_guarded(self):
         root = self.temporary()
@@ -134,14 +134,14 @@ class ReleaseMetadataConsistency(unittest.TestCase):
         version = MODULE.canonical_version(ROOT)
         MODULE.validate_distribution_readme((ROOT / "README.md").read_text(encoding="utf-8"), version)
 
-    def test_current_rc3_release_notes_present_and_unpublished(self):
-        note = ROOT / "RELEASE-NOTES-OPENHTPC-1.3.2-RC3-FR-EN.md"
+    def test_current_rc4_release_notes_present_as_prerelease(self):
+        note = ROOT / "RELEASE-NOTES-OPENHTPC-1.3.2-RC4-FR-EN.md"
         content = note.read_text(encoding="utf-8")
-        self.assertTrue(content.startswith("# OPENHTPC 1.3.2 RC3 — Patina"))
+        self.assertTrue(content.startswith("# OPENHTPC 1.3.2 RC4 — Patina"))
         self.assertIn("## Français", content)
         self.assertIn("## English", content)
-        self.assertIn("NON PUBLIÉ", content)
-        self.assertIn("NOT PUBLISHED", content)
+        self.assertIn("Version : `v1.3.2-rc4`", content)
+        self.assertIn("Prerelease", content)
 
     def test_stale_distribution_readme_identity_is_rejected(self):
         stale = "# OPENHTPC 1.1.2 AMD Base Validation Candidate\nVersion: `1.1.2-dev1`\n"

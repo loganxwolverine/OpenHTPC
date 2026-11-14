@@ -147,6 +147,21 @@ configure_file("${PROJECT_SOURCE_DIR}/config/launcher_config.h.in" "${PROJECT_BI
 #Build source files
 add_subdirectory("src")
 
+include(CTest)
+if (BUILD_TESTING)
+  add_executable(media-wall-model-tests
+    tests/test_media_wall.c
+    src/media_wall.c
+  )
+  target_include_directories(media-wall-model-tests PRIVATE src)
+  add_test(NAME media-wall-model COMMAND media-wall-model-tests)
+  add_test(NAME media-wall-fixture-contract
+    COMMAND ${CMAKE_COMMAND}
+      -DFIXTURE=${PROJECT_SOURCE_DIR}/tests/fixtures/media-wall.ini
+      -P ${PROJECT_SOURCE_DIR}/tests/check_fixture.cmake
+  )
+endif ()
+
 # Installation - Linux
 if (UNIX)
   set(INSTALL_DIR_BIN "${CMAKE_INSTALL_PREFIX}/bin")

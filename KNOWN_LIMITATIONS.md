@@ -1,3 +1,20 @@
+# RC4 Patina — known limitations (2026-11-14)
+
+- Diagnostic bundles created by the optional Validator remain local by default; uploading requires OPENHTPC_VALIDATOR_UPLOAD_OPT_IN=1 and an explicitly configured OPENHTPC_VALIDATOR_UPLOAD_SHARE.
+- Poster wall is alphabetical. A separate Recently Added view and side filters
+  for DVD-like / 1080p / UHD sources are outside RC4.
+- TMDB credits are returned only after an authorized metadata refresh. Existing
+  details snapshots without `credits` may display unknown cast/director until
+  refreshed; no unattended API refresh or paid inference is enabled.
+- Interactive DVD/Blu-ray menus are not qualified in RC4.
+- Controller navigation within the Add Media Source form was previously
+  reported as problematic and is not claimed as fixed.
+- Poster-derived blurred film-card backdrops may vary in visual suitability.
+- The salon SD/Magnificence and resume qualification is real but does not
+  certify all GPUs, Dolby Vision pipelines, controllers or media containers.
+- Release screenshot artwork can contain third-party movie posters; the owner requested their separate illustration in the RC4 release;
+  all third-party artwork rights remain with their owners.
+
 # Known limitations — OPENHTPC 1.2.0
 
 - Fedora 44 KDE Plasma on Wayland is the currently qualified platform.

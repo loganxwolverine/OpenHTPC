@@ -441,10 +441,28 @@ class TelemetryCollector:
         'vo-passes',
     )
 
-    def __init__(self, socket_path: pathlib.Path | str):
+    def __init__(self, socket_path: pathlib.Path | str, resume_context=None):
         self.path = str(socket_path)
+        self.resume_bridge = None
+        if isinstance(resume_context,dict):
+            try:
+                import resume_mpv_bridge_lab
+                self.resume_bridge = resume_mpv_bridge_lab.SessionBridge(
+                    resume_context["home"],resume_context["media"],
+                    previous=resume_context.get("previous"),
+                    choice=resume_context.get("choice","Lire depuis le début"))
+                self.PROPERTIES = (
+                    *type(self).PROPERTIES,"time-pos","duration","pause","seeking")
+            except (ImportError,OSError,ValueError,TypeError,KeyError):
+                self.resume_bridge = None
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.lifecycle_thread = (
+            threading.Thread(target=self._lifecycle_events,daemon=True)
+            if self.resume_bridge is not None else None
+        )
+        self.lifecycle_done = threading.Event()
+        self.resume_lock = threading.RLock()
         self.latest: dict = {}
         self.sample_count = 0
         self.max_frame_drops = 0
@@ -455,7 +473,62 @@ class TelemetryCollector:
         self.avsync_max: float | None = None
 
     def start(self):
+        if self.lifecycle_thread is not None:
+            self.lifecycle_thread.start()
         self.thread.start()
+
+    def _lifecycle_events(self):
+        """Drain exact-child MPV lifecycle events on a dedicated IPC client."""
+        deadline=time.monotonic()+3.0
+        sock=None
+        try:
+            while not self.stop_event.is_set() and time.monotonic()<deadline:
+                if os.path.exists(self.path):
+                    break
+                self.stop_event.wait(0.05)
+            if self.stop_event.is_set() or not os.path.exists(self.path):
+                return
+            sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+            sock.settimeout(0.25)
+            sock.connect(self.path)
+            import struct
+            pid,uid,gid=struct.unpack("3i",sock.getsockopt(
+                socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+            if uid!=os.geteuid():
+                return
+            try:
+                exe=pathlib.Path("/proc")/str(pid)/"exe"
+                if exe.resolve().name!="mpv":
+                    return
+            except OSError:
+                return
+            buf=b""
+            while not self.stop_event.is_set():
+                try: chunk=sock.recv(8192)
+                except socket.timeout: continue
+                except OSError: break
+                if not chunk:break
+                buf+=chunk
+                if len(buf)>65536:
+                    break
+                while b"\n" in buf:
+                    line,buf=buf.split(b"\n",1)
+                    if not line:
+                        continue
+                    try:msg=json.loads(line)
+                    except (ValueError,UnicodeError):continue
+                    if msg.get("event") in ("end-file","seek","playback-restart"):
+                        with self.resume_lock:
+                            self.resume_bridge.event(msg,at_clock=time.monotonic())
+                        if msg.get("event")=="end-file":
+                            return
+        except (OSError,ValueError):
+            return
+        finally:
+            if sock is not None:
+                try:sock.close()
+                except OSError:pass
+            self.lifecycle_done.set()
 
     def _run(self):
         deadline = time.time() + 3.0
@@ -483,6 +556,7 @@ class TelemetryCollector:
                 if sample:
                     self.sample_count += 1
                     self.latest = sample
+                    self._record_resume_sample(sample)
                     fd = sample.get('frame-drop-count')
                     if isinstance(fd, int) and fd > self.max_frame_drops:
                         self.max_frame_drops = fd
@@ -506,6 +580,19 @@ class TelemetryCollector:
             try: sock.close()
             except Exception: pass
 
+    def _record_resume_sample(self,sample,*,clock=None):
+        if self.resume_bridge is None or not isinstance(sample,dict):
+            return
+        seeking=sample.get("seeking")
+        paused=sample.get("pause")
+        with self.resume_lock:
+            self.resume_bridge.snapshot(
+                clock=time.monotonic() if clock is None else clock,
+                position=sample.get("time-pos"),
+                duration=sample.get("duration"),
+                paused=paused if type(paused) is bool else True,
+                seeking=seeking if type(seeking) is bool else False)
+
     def _query(self, sock) -> dict | None:
         try:
             payload = ''.join(
@@ -524,6 +611,10 @@ class TelemetryCollector:
                     line, buf = buf.split(b'\n', 1)
                     if line:
                         msg = json.loads(line.decode('utf-8'))
+                        if self.resume_bridge is not None and msg.get('event') in (
+                                'end-file','seek','playback-restart'):
+                            with self.resume_lock:
+                                self.resume_bridge.event(msg,at_clock=time.monotonic())
                         req_id = msg.get('request_id')
                         if req_id is not None and 1 <= req_id <= len(self.PROPERTIES):
                             results[self.PROPERTIES[req_id - 1]] = msg.get('data')
@@ -532,8 +623,12 @@ class TelemetryCollector:
             return None
 
     def stop(self):
+        if self.lifecycle_thread is not None and not self.lifecycle_done.is_set():
+            self.lifecycle_done.wait(0.65)
         self.stop_event.set()
         self.thread.join(0.5)
+        if self.lifecycle_thread is not None:
+            self.lifecycle_thread.join(0.5)
 
     def result(self) -> dict | None:
         if self.sample_count == 0:
@@ -679,7 +774,7 @@ def _pin_resolved_bitstream_sink(command, decision, diag):
     return cmd
 
 
-def run_playback(home, command, *, media=None, rate=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, **kwargs):
+def run_playback(home, command, *, media=None, rate=None, runner=subprocess.run, dispatch_id=None, audio_prep=None, decision=None, resume_context=None, **kwargs):
     with matching(home, media, rate=rate, dispatch_id=dispatch_id) as tx:
         switched = bool(tx and tx.record.get('switch_requested') and tx.record.get('switch_verified') and tx.record.get('status') == 'APPLIED')
         prep_diag = {}
@@ -727,7 +822,7 @@ def run_playback(home, command, *, media=None, rate=None, runner=subprocess.run,
         elif isinstance(mpv_cmd, str) and "--input-ipc-server=" not in mpv_cmd:
             mpv_cmd = f"{mpv_cmd} {ipc_arg}"
 
-        collector = TelemetryCollector(sock_path)
+        collector = TelemetryCollector(sock_path,resume_context=resume_context)
         collector.start()
         teardown_forced = False
         try:
@@ -742,6 +837,16 @@ def run_playback(home, command, *, media=None, rate=None, runner=subprocess.run,
                 except OSError: pass
 
         telemetry = collector.result()
+        if collector.resume_bridge is not None:
+            try:
+                outcome=collector.resume_bridge.finish(
+                    getattr(result,"returncode",None))
+            except (OSError,ValueError):
+                outcome="RESUME_PERSISTENCE_FAILED"
+            try:
+                setattr(result,"openhtpc_resume_outcome",outcome)
+            except Exception:
+                pass
         if tx:
             try:
                 tx.note(

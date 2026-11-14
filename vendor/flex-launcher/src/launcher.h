@@ -1,5 +1,7 @@
 #include <sys/types.h>
+#include <SDL_ttf.h>
 #include "lifecycle.h"
+#include "media_wall.h"
 
 // Color masking bit logic
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
@@ -52,6 +54,8 @@
 #define SCMD_EXIT ":exit"
 #define SCMD_LEFT ":left"
 #define SCMD_RIGHT ":right"
+#define SCMD_UP ":up"
+#define SCMD_DOWN ":down"
 #define SCMD_HOME ":home"
 #define SCMD_BACK ":back"
 #define SCMD_QUIT ":quit"
@@ -117,7 +121,8 @@ typedef enum {
 
 typedef enum {
     LAYOUT_DEFAULT = 0,
-    LAYOUT_MOVIE_DETAIL = 1
+    LAYOUT_MOVIE_DETAIL = 1,
+    LAYOUT_MEDIA_WALL = 2
 } MenuLayout;
 
 // Program states
@@ -125,6 +130,7 @@ typedef struct {
     bool application_launching;
     bool application_running;
     bool has_focus;
+    bool controller_requires_neutral;
     bool slideshow_transition;
     bool slideshow_background_rendering;
     bool slideshow_background_ready;
@@ -163,6 +169,7 @@ typedef struct entry {
     SDL_Texture    *context_texture;
     SDL_Rect       context_rect;
     bool           context_selected;
+    unsigned long  texture_use;
     struct entry   *next;
     struct entry   *previous;
 } Entry;
@@ -192,12 +199,41 @@ typedef struct menu {
     SDL_Texture  *detail_original_title_texture;
     SDL_Rect     detail_original_title_rect;
     char         *detail_metadata;
+    char         *detail_source_colorimetry; /* CORE Fact6, source only */
+    char         *detail_facts[5];         /* CORE Fact1..Fact5, not inferred */
+    SDL_Texture  *detail_fact_textures[6]; /* Fact1..Fact5 and Fact6 */
+    SDL_Rect      detail_fact_rects[6];
     SDL_Texture  *detail_metadata_texture;
     SDL_Rect     detail_metadata_rect;
     char         *detail_synopsis;
     SDL_Texture  *detail_synopsis_texture;
     SDL_Rect     detail_synopsis_rect;
     char         *synopsis_chunks[32];
+    MediaWallModel media_wall;
+    Entry        **media_wall_entries;
+    bool          media_wall_initialized;
+    TTF_Font      *media_wall_font;
+    int            media_wall_font_size;
+    TTF_Font      *media_wall_meta_font;
+    SDL_Texture   *media_wall_recent_label;
+    SDL_Rect       media_wall_recent_label_rect;
+    SDL_Texture   *media_wall_all_label;
+    SDL_Rect       media_wall_all_label_rect;
+    SDL_Texture   *media_wall_footer_title;
+    SDL_Rect       media_wall_footer_title_rect;
+    SDL_Texture   *media_wall_footer_meta;
+    SDL_Rect       media_wall_footer_meta_rect;
+    SDL_Texture   *media_wall_badge_text[4];
+    SDL_Rect       media_wall_badge_rect[4];
+    SDL_Rect       media_wall_badge_text_rect[4];
+    MediaWallSourceFormat media_wall_badge_source_format;
+    SDL_Texture   *media_wall_footer_help;
+    SDL_Rect       media_wall_footer_help_rect;
+    /* Screen-space header elements, never mixed with CORE film metadata. */
+    SDL_Texture   *media_wall_header[9];
+    SDL_Rect       media_wall_header_rect[9];
+    int            media_wall_clock_key;
+    Uint32         media_wall_focus_started;
 } Menu;
 
 typedef struct gamepad {

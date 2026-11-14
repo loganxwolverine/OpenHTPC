@@ -893,10 +893,162 @@ def stage_json(path: pathlib.Path, value: dict[str, Any], mode: int) -> str:
         raise
 
 
+def _capability_pair_guard_paths(home: pathlib.Path) -> None:
+    """Reject pre-existing symlink escapes before touching locks, stage files or journals."""
+    home = pathlib.Path(home)
+    if not home.is_absolute():
+        raise ValueError("CAPABILITY_PAIR_HOME_NOT_ABSOLUTE")
+    config = home / ".config"
+    project = config / "openhtpc"
+    runtime = project / "runtime"
+    for directory in (*reversed(home.parents), home, config, project, runtime):
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise ValueError("CAPABILITY_PAIR_PARENT_UNSAFE")
+    for path in (runtime / "capabilities.json", runtime / "capabilities.lock",
+                 project / "profile.json", runtime / ".capability-pair-transaction",
+                 runtime / ".capability-pair-completed"):
+        if path.is_symlink():
+            raise ValueError("CAPABILITY_PAIR_PATH_SYMLINK")
+    for path in (runtime / "capabilities.json", runtime / "capabilities.lock",
+                 project / "profile.json"):
+        if path.exists() and not path.is_file():
+            raise ValueError("CAPABILITY_PAIR_TARGET_UNSAFE")
+
+
+def _capability_pair_journal(home: pathlib.Path) -> pathlib.Path:
+    return home / ".config/openhtpc/runtime/.capability-pair-transaction"
+
+
+def _capability_pair_sync_dir(path: pathlib.Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try: os.fsync(fd)
+    finally: os.close(fd)
+
+
+def _capability_pair_cleanup_completed(home: pathlib.Path) -> None:
+    """A committed journal is atomically renamed before cleanup; never undo it."""
+    completed = _capability_pair_journal(home).with_name(".capability-pair-completed")
+    if not completed.exists() and not completed.is_symlink(): return
+    if completed.is_symlink() or not completed.is_dir():
+        raise ValueError("CAPABILITY_PAIR_COMPLETED_UNSAFE")
+    # Do not follow or remove unexpected children, including symlinks.
+    names = {p.name for p in completed.iterdir()}
+    if names - {"before.json"}:
+        raise ValueError("CAPABILITY_PAIR_COMPLETED_UNSAFE")
+    meta = completed / "before.json"
+    if meta.is_symlink() or (meta.exists() and not meta.is_file()):
+        raise ValueError("CAPABILITY_PAIR_COMPLETED_UNSAFE")
+    if meta.exists():
+        meta.unlink()
+        _capability_pair_sync_dir(completed)
+    completed.rmdir()
+    _capability_pair_sync_dir(completed.parent)
+
+
+def _capability_pair_recover(home: pathlib.Path) -> None:
+    """Undo a torn pair before running a new probe; never silently ignore it."""
+    _capability_pair_guard_paths(home)
+    _capability_pair_cleanup_completed(home)
+    journal = _capability_pair_journal(home)
+    if not journal.exists() and not journal.is_symlink(): return
+    if journal.is_symlink() or not journal.is_dir():
+        raise ValueError("CAPABILITY_PAIR_JOURNAL_UNSAFE")
+    profile_path = home / ".config/openhtpc/profile.json"
+    snapshot = snapshot_path(home)
+    import base64
+    meta = journal / "before.json"
+    if meta.is_symlink() or not meta.is_file():
+        raise ValueError("CAPABILITY_PAIR_JOURNAL_INCOMPLETE")
+    record = json.loads(meta.read_text(encoding="utf-8"))
+    if record.get("schema") != 1 or record.get("state") != "READY" or not isinstance(record.get("items"), list) or len(record["items"]) != 2:
+        raise ValueError("CAPABILITY_PAIR_JOURNAL_INVALID")
+    for entry, destination in zip(record["items"], (snapshot, profile_path)):
+        if not isinstance(entry, dict) or type(entry.get("exists")) is not bool:
+            raise ValueError("CAPABILITY_PAIR_JOURNAL_INVALID")
+        if entry["exists"]:
+            if (not isinstance(entry.get("data"), str)
+                    or not isinstance(entry.get("sha256"), str)
+                    or type(entry.get("mode")) is not int
+                    or not 0 <= entry["mode"] <= 0o777):
+                raise ValueError("CAPABILITY_PAIR_JOURNAL_INVALID")
+            raw = base64.b64decode(entry["data"], validate=True)
+            if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) > 4*1024*1024:
+                raise ValueError("CAPABILITY_PAIR_JOURNAL_CORRUPT")
+            json.loads(raw)
+    # Every validation completes before the first destination changes.
+    for entry, destination in zip(record["items"], (snapshot, profile_path)):
+        if destination.is_symlink(): raise ValueError("CAPABILITY_PAIR_TARGET_UNSAFE")
+        if entry["exists"]:
+            raw = base64.b64decode(entry["data"], validate=True)
+            fd, name = tempfile.mkstemp(prefix=".capability-recover-", dir=destination.parent)
+            try:
+                with os.fdopen(fd,"wb") as output:
+                    output.write(raw); output.flush(); os.fsync(output.fileno())
+                os.chmod(name, int(entry["mode"]) & 0o777)
+                os.replace(name,destination)
+                _capability_pair_sync_dir(destination.parent)
+            finally:
+                if os.path.exists(name):os.unlink(name)
+        elif destination.exists():
+            destination.unlink(); _capability_pair_sync_dir(destination.parent)
+    meta.unlink(); _capability_pair_sync_dir(journal)
+    journal.rmdir(); _capability_pair_sync_dir(journal.parent)
+
+
+def _capability_pair_begin(home: pathlib.Path) -> None:
+    """Durable preimages of both files, before either os.replace."""
+    import base64
+    _capability_pair_guard_paths(home)
+    journal = _capability_pair_journal(home)
+    items = []
+    for destination in (snapshot_path(home), home / ".config/openhtpc/profile.json"):
+        if destination.is_symlink():raise ValueError("CAPABILITY_PAIR_TARGET_UNSAFE")
+        exists = destination.exists()
+        raw = destination.read_bytes() if exists else b""
+        if len(raw) > 4*1024*1024:raise ValueError("CAPABILITY_PAIR_TARGET_TOO_LARGE")
+        items.append({"exists":exists,"data":base64.b64encode(raw).decode("ascii"),"sha256":hashlib.sha256(raw).hexdigest(),"mode":destination.stat().st_mode & 0o777 if exists else 0o600})
+    # Build the durable READY record under an unadvertised staging name.
+    # Only a complete, fsynced journal may become the active transaction.
+    staging = pathlib.Path(tempfile.mkdtemp(prefix=".capability-pair-preparing-", dir=journal.parent))
+    fd, name = tempfile.mkstemp(prefix=".capability-journal-", dir=staging)
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as output:
+            json.dump({"schema":1,"state":"READY","items":items},output)
+            output.flush();os.fsync(output.fileno())
+        os.chmod(name,0o600)
+        os.replace(name,staging/"before.json")
+        _capability_pair_sync_dir(staging)
+        if journal.exists() or journal.is_symlink():
+            raise ValueError("CAPABILITY_PAIR_JOURNAL_ALREADY_ACTIVE")
+        os.replace(staging,journal)
+        _capability_pair_sync_dir(journal.parent)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+        # An interrupted PREPARING directory is inert, never a rollback marker.
+        # Do not auto-delete unknown directory entries or symlinks.
+
+
+def _capability_pair_commit(home: pathlib.Path) -> None:
+    _capability_pair_guard_paths(home)
+    journal = _capability_pair_journal(home)
+    for destination in (snapshot_path(home), home / ".config/openhtpc/profile.json"):
+        _capability_pair_sync_dir(destination.parent)
+    # Atomic rename is the durable COMMITTED marker: after both destination fsyncs.
+    # A crash after this point must never roll back a fully committed pair.
+    completed = journal.with_name(".capability-pair-completed")
+    if completed.exists() or completed.is_symlink():
+        raise ValueError("CAPABILITY_PAIR_COMPLETED_UNSAFE")
+    os.replace(journal, completed)
+    _capability_pair_sync_dir(completed.parent)
+    _capability_pair_cleanup_completed(home)
+
+
 def refresh(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_runner, sys_root: pathlib.Path = pathlib.Path("/sys"), proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict[str, Any]:
+    _capability_pair_guard_paths(home)
     target=snapshot_path(home);target.parent.mkdir(parents=True,exist_ok=True);lock=target.with_suffix(".lock")
-    with lock.open("w") as stream:
+    with os.fdopen(os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), "a+") as stream:
         fcntl.flock(stream,fcntl.LOCK_EX)
+        _capability_pair_recover(home)
         value=generate(home,install,runner,sys_root,proc_root)
         profile_path = home / ".config/openhtpc/profile.json"
         profile = None
@@ -921,9 +1073,11 @@ def refresh(home: pathlib.Path, install: pathlib.Path, runner: Runner = default_
         try:
             if profile is not None:
                 profile_temporary = stage_json(profile_path, profile, profile_path.stat().st_mode & 0o777)
+            _capability_pair_begin(home)
             os.replace(snapshot_temporary, target); snapshot_temporary = ""
             if profile_temporary:
                 os.replace(profile_temporary, profile_path); profile_temporary = ""
+            _capability_pair_commit(home)
         finally:
             for temporary in (snapshot_temporary, profile_temporary):
                 if temporary and os.path.exists(temporary): os.unlink(temporary)
